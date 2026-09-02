@@ -7,7 +7,7 @@ echo  SETUP DE MAQUINA NOVA - SENTINEL
 echo ============================================
 echo.
 
-echo [1/4] VS CODE - Settings Sync
+echo [1/5] VS CODE - Settings Sync
 echo   Traz extensoes, settings.json, keybindings e a config da extensao Claude Code.
 echo   Passos:
 echo    - Abra o VS Code
@@ -17,7 +17,7 @@ echo   (Se ja estiver ligado, o comando aparece como "Turn Off" - nao precisa fa
 echo.
 pause
 
-echo [2/4] CLAUDE (extensao Claude Code)
+echo [2/5] CLAUDE (extensao Claude Code)
 echo   Login com a mesma conta Claude. Os Connectors (Notion, Figma, Canva, etc.)
 echo   ficam presos a conta, entao ja aparecem conectados automaticamente - nao
 echo   precisa recriar integracao nem reconectar a pagina no Notion.
@@ -25,13 +25,13 @@ echo   Obs: na primeira conexao pode dar timeout/demorar - so espere e tente de 
 echo.
 pause
 
-echo [3/4] NOTION
+echo [3/5] NOTION
 echo   Nada a configurar aqui - e so nuvem. Login com sua conta (app ou navegador).
 start "" "https://www.notion.so/login"
 echo.
 pause
 
-echo [4/4] BRAVE - Brave Sync
+echo [4/5] BRAVE - Brave Sync
 echo   Traz favoritos, extensoes, senhas e historico do navegador.
 echo   Passos:
 echo    - Menu do Brave (icone com 3 linhas) - Sync
@@ -39,6 +39,22 @@ echo    - "Ja tenho uma frase de sync" - cole o codigo/frase gerado na maquina o
 echo   (Se esta e a maquina original e ainda nao tem frase de sync, va em
 echo    Sync - Iniciar sincronizacao - Este e o primeiro dispositivo, e guarde a frase)
 start "" "brave://sync-setup"
+echo.
+pause
+
+echo [5/5] VERIFICACAO AUTOMATICA (Claude)
+echo   O Claude vai checar se a integracao com o GitHub nesta maquina
+echo   esta batendo com a sua conta (gh CLI, git config, credenciais
+echo   salvas no Windows) e avisar se achar algo estranho.
+echo.
+where claude >nul 2>nul
+if errorlevel 1 (
+    echo   [AVISO] Comando "claude" nao encontrado no PATH.
+    echo   Abra o VS Code, garanta que a extensao Claude Code terminou
+    echo   de instalar, e rode esta checagem manualmente depois.
+) else (
+    claude -p "Verifique a integracao com o GitHub nesta maquina: gh auth status, git config (user.name/user.email), e credenciais salvas no Windows Credential Manager relacionadas a git/github/vscode. Minha conta GitHub e https://github.com/LucasNiello e meu email e terminiello.lucas@gmail.com. Confirme se tudo bate com essa conta ou aponte qualquer inconsistencia (ex: outra conta cacheada, outro git.exe no PATH, etc). Responda em portugues, de forma objetiva."
+)
 echo.
 
 echo ============================================
