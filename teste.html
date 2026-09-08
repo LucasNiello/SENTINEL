@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel — Interface conversacional agêntica</title>
+<meta name="description" content="Sentinel transforma intenções em linguagem natural em operações seguras sobre sistemas de gestão.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="#inicio"><img src="logo.svg" alt="Sentinel"></a>
+  <nav>
+    <a href="#como-funciona">Como funciona</a>
+    <a href="#seguranca">Segurança</a>
+    <a href="#arquitetura">Arquitetura</a>
+    <a href="#prototipo">Protótipo</a>
+  </nav>
+  <a class="header-cta" href="#prototipo">Experimentar <span>→</span></a>
+</header>
+
+<main>
+<section class="hero" id="inicio">
+  <div class="hero-copy">
+    <div class="eyebrow"><span class="pulse"></span> Interface conversacional agêntica</div>
+    <h1>Você diz <em>o que precisa.</em><br>O Sentinel resolve o como.</h1>
+    <p>Uma nova camada de interação para sistemas de gestão: linguagem natural, automação e controle humano em cada decisão relevante.</p>
+    <div class="hero-actions">
+      <a class="btn primary" href="#prototipo">Conhecer o protótipo</a>
+      <a class="btn ghost" href="#como-funciona">Ver como funciona <span>↓</span></a>
+    </div>
+    <div class="trust-row">
+      <span>✓ Human-in-the-loop</span><span>✓ RBAC</span><span>✓ Auditoria</span><span>✓ Laravel + MySQL</span>
+    </div>
+  </div>
+  <div class="hero-demo">
+    <div class="glow"></div>
+    <div class="browser">
+      <div class="browser-top"><span></span><span></span><span></span><small>sentinel.local / assistente</small></div>
+      <div class="mini-app">
+        <aside>
+          <div class="mini-logo"><b>⬡</b> Sentinel</div>
+          <div class="side-item active">⌕ <span>Assistente</span></div>
+          <div class="side-item">▦ <span>Dados</span></div>
+          <div class="side-item">◷ <span>Auditoria</span></div>
+          <div class="side-item">⚙ <span>Configurações</span></div>
+        </aside>
+        <div class="chat">
+          <div class="chat-head"><div><b>Assistente Sentinel</b><small>Conectado ao sistema</small></div><span class="online">● online</span></div>
+          <div class="bubble user">Quais funcionários ainda não foram pagos até hoje?</div>
+          <div class="bubble bot">Encontrei <b>4 funcionários</b> com pagamentos pendentes.</div>
+          <div class="result-card">
+            <div class="result-head"><b>Pagamentos pendentes</b><span>4 registros</span></div>
+            <div class="table-row head"><span>Nome</span><span>Valor</span><span>Status</span></div>
+            <div class="table-row"><span>Ana Silva Costa</span><span>R$ 2.400,00</span><i>Pendente</i></div>
+            <div class="table-row"><span>Bruno Souza Santos</span><span>R$ 1.950,00</span><i>Pendente</i></div>
+            <div class="table-row"><span>Carla Souza Dias</span><span>R$ 2.100,00</span><i>Pendente</i></div>
+            <div class="table-row"><span>Diego Lima Rodrigues</span><span>R$ 2.200,00</span><i>Pendente</i></div>
+            <div class="result-actions"><button>Exportar</button><button>Editar tabela</button></div>
+          </div>
+          <div class="composer"><span>Escreva uma solicitação...</span><b>➤</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="stats">
+  <div><strong>01</strong><span>Intenção em linguagem natural</span></div>
+  <div><strong>02</strong><span>Ferramentas permitidas</span></div>
+  <div><strong>03</strong><span>Validação determinística</span></div>
+  <div><strong>04</strong><span>Registro de auditoria</span></div>
+</section>
+
+<section class="section" id="como-funciona">
+  <div class="section-label">O conceito</div>
+  <div class="section-title"><h2>Menos menus.<br><span>Mais intenção.</span></h2><p>O Sentinel reduz a distância entre aquilo que o usuário quer fazer e a navegação necessária para realizar a tarefa.</p></div>
+  <div class="flow">
+    <article><span>01</span><div class="flow-icon">✦</div><h3>Você pergunta</h3><p>O usuário descreve sua intenção em linguagem natural, sem precisar conhecer a estrutura dos menus.</p></article>
+    <div class="flow-arrow">→</div>
+    <article><span>02</span><div class="flow-icon">⌁</div><h3>A IA interpreta</h3><p>O LLM interpreta a intenção e seleciona uma ferramenta previamente registrada pelo backend.</p></article>
+    <div class="flow-arrow">→</div>
+    <article><span>03</span><div class="flow-icon">✓</div><h3>O sistema executa</h3><p>Laravel valida permissões e regras de negócio. A IA não acessa o banco diretamente.</p></article>
+    <div class="flow-arrow">→</div>
+    <article><span>04</span><div class="flow-icon">◉</div><h3>Tudo fica auditado</h3><p>Cada decisão relevante deixa um registro consultável com usuário, ferramenta, parâmetros e resultado.</p></article>
+  </div>
+</section>
+
+<section class="dark-section" id="seguranca">
+  <div class="section-label light">Governança por design</div>
+  <div class="security-grid">
+    <div>
+      <h2>IA com <span>limites claros.</span></h2>
+      <p>O princípio central do projeto é simples: o modelo de linguagem decide qual ferramenta usar, mas quem valida, grava e audita é o backend determinístico.</p>
+      <div class="security-points">
+        <div><b>01</b><span><strong>Whitelist de ferramentas</strong> A IA só enxerga funções explicitamente registradas.</span></div>
+        <div><b>02</b><span><strong>RBAC por ferramenta</strong> Permissões são verificadas antes e durante a execução.</span></div>
+        <div><b>03</b><span><strong>Confirmação humana</strong> Escritas exigem aprovação explícita antes de alterar dados.</span></div>
+        <div><b>04</b><span><strong>Validação determinística</strong> Form Requests e regras do Laravel continuam responsáveis pelos dados.</span></div>
+        <div><b>05</b><span><strong>Auditoria total</strong> Ações executadas, canceladas ou negadas ficam registradas.</span></div>
+      </div>
+    </div>
+    <div class="security-visual">
+      <div class="shield">✓</div>
+      <div class="orbit o1"></div><div class="orbit o2"></div>
+      <span class="node n1">LLM</span><span class="node n2">TOOLS</span><span class="node n3">RBAC</span><span class="node n4">MVC</span>
+      <div class="core">HUMANO<br><small>NO CONTROLE</small></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="arquitetura">
+  <div class="section-label">Arquitetura</div>
+  <div class="section-title"><h2>Quatro camadas.<br><span>Uma responsabilidade clara.</span></h2><p>Da interpretação à execução, cada etapa possui um papel definido.</p></div>
+  <div class="architecture">
+    <div class="arch-card"><span>01</span><b>Camada de intenção</b><small>LLM</small><p>Interpreta a linguagem natural e escolhe a ferramenta adequada.</p></div>
+    <div class="arch-card"><span>02</span><b>Orquestração</b><small>LARAVEL</small><p>Monta contexto, lista ferramentas e gerencia o ciclo de chamadas.</p></div>
+    <div class="arch-card"><span>03</span><b>Ferramentas</b><small>TOOLS + RBAC</small><p>Funções whitelisted que validam permissões e necessidade de confirmação.</p></div>
+    <div class="arch-card"><span>04</span><b>Execução</b><small>MVC + MYSQL</small><p>Services, Form Requests e Eloquent aplicam as regras de negócio.</p></div>
+  </div>
+  <div class="stack"><span>Laravel 12</span><span>Blade</span><span>Tailwind CSS</span><span>JavaScript</span><span>MySQL</span><span>Azure OpenAI / Anthropic</span></div>
+</section>
+
+<section class="section prototype-section" id="prototipo">
+  <div class="section-label">Protótipo interativo</div>
+  <div class="section-title"><h2>O ciclo do Sentinel<br><span>em quatro telas.</span></h2><p>Explore a narrativa principal do protótipo: perguntar, decidir, confirmar e auditar.</p></div>
+  <div class="prototype-shell">
+    <div class="proto-tabs">
+      <button class="proto-tab active" data-screen="consulta">01 · Consulta</button>
+      <button class="proto-tab" data-screen="confirmacao">02 · Confirmação</button>
+      <button class="proto-tab" data-screen="auditoria">03 · Auditoria</button>
+      <button class="proto-tab" data-screen="formulario">04 · Formulário</button>
+    </div>
+    <div class="screen" id="screen">
+      <div class="appbar"><div class="mini-logo"><b>⬡</b> Sentinel <small>PROTÓTIPO</small></div><span>Acme Holding Ltda.⌄</span></div>
+      <div class="screen-body" id="screenBody"></div>
+      <div class="screen-input">✦ <span>Digite uma solicitação ao sistema...</span><b>➤</b></div>
+    </div>
+  </div>
+</section>
+
+<section class="audience">
+  <div class="audience-inner">
+    <div class="section-label light">Para quem</div>
+    <h2>Feito para quem<br><span>não quer aprender menus.</span></h2>
+    <p>O documento do projeto define como público-alvo micro e pequenas empresas brasileiras, aproximadamente de 2 a 20 funcionários, especialmente negócios complexos demais para uma planilha, mas pequenos demais para justificar treinamento em um ERP tradicional.</p>
+    <div class="audience-tags"><span>Micro e pequenas empresas</span><span>Dono-operador</span><span>Gestão sem equipe dedicada</span><span>Interface conversacional</span></div>
+  </div>
+</section>
+
+<section class="closing">
+  <img src="logo.svg" alt="Sentinel">
+  <h2>O sistema entende sua intenção.<br><span>Você continua no controle.</span></h2>
+  <a class="btn primary" href="#prototipo">Explorar Sentinel →</a>
+</section>
+</main>
+
+<footer><span>© 2026 Sentinel · TCC — Técnico em Desenvolvimento de Sistemas</span><span>Interface Conversacional Agêntica sobre Sistema MVC</span></footer>
+<script src="script.js"></script>
+</body>
+</html>
