@@ -19,6 +19,8 @@ return new class extends Migration
             $table->date('data');
             // Isolamento multi-tenant já decidido na arquitetura, mas a tabela de
             // tenants ainda não existe no projeto — coluna sem foreign key por ora.
+            // PENDÊNCIA FASE 1: criar a FK (tenant_id -> tenants.id) quando a
+            // tabela de tenants/empresas existir. Ver CLAUDE.md > Pendências conhecidas.
             $table->unsignedBigInteger('tenant_id');
             $table->timestamps();
         });

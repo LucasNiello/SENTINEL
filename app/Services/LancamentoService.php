@@ -3,10 +3,30 @@
 namespace App\Services;
 
 use App\Models\Lancamento;
+use App\Services\Concerns\ExclusaoSegura;
 use Illuminate\Support\Collection;
 
 class LancamentoService
 {
+    use ExclusaoSegura;
+
+    /**
+     * Contrato: criar_lancamento.
+     *
+     * Lançamento sempre nasce como "pendente" — conciliação é uma ação
+     * separada (marcarConciliado).
+     */
+    public function criar(array $dados): Lancamento
+    {
+        return Lancamento::create([
+            'descricao' => $dados['descricao'],
+            'valor' => $dados['valor'],
+            'data' => $dados['data'],
+            'tenant_id' => $dados['tenant_id'],
+            'status' => 'pendente',
+        ]);
+    }
+
     /**
      * Contrato: buscar_lancamentos.
      */
@@ -76,5 +96,25 @@ class LancamentoService
             'atualizados' => $atualizados,
             'ignorados' => $ignorados,
         ];
+    }
+
+    /**
+     * @return array{bloqueado: bool, motivo?: string}
+     */
+    public function excluir(int $id): array
+    {
+        $lancamento = Lancamento::findOrFail($id);
+
+        return $this->excluirComBloqueio($lancamento, ['notasFiscais']);
+    }
+
+    /**
+     * @return array{restaurado: bool, motivo?: string}
+     */
+    public function restaurarDaLixeira(int $id, bool $reautenticadoComoAdmin): array
+    {
+        $lancamento = Lancamento::onlyTrashed()->findOrFail($id);
+
+        return $this->restaurar($lancamento, $reautenticadoComoAdmin);
     }
 }

@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    /*
+    | Microsoft Foundry (Azure OpenAI) — usado só por AiAgentService.
+    | Rota /openai/v1/chat/completions (versionamento implícito, sem
+    | api-version); deployment vai no campo "model" do corpo.
+    */
+    'azure_foundry' => [
+        'endpoint' => env('AZURE_FOUNDRY_ENDPOINT'),
+        'api_key' => env('AZURE_FOUNDRY_API_KEY'),
+        'deployment' => env('AZURE_FOUNDRY_DEPLOYMENT'),
+    ],
+
 ];
