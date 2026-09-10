@@ -36,7 +36,7 @@ class AiAgentService
         }
 
         try {
-            $resposta = Http::withToken($apiKey)
+            $resposta = Http::withHeaders(['api-key' => $apiKey])
                 ->timeout(30)
                 ->post("{$endpoint}/openai/v1/chat/completions", [
                     'model' => $deployment,
