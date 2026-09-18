@@ -141,8 +141,8 @@ if not "%PHP_MIN_OK%"=="ok" (
         echo $extDir = ^(Join-Path $NewDir 'ext'^) -replace '\\','/'
         echo $content = Get-Content $dst
         echo $content = $content -replace '^^;?\s*extension_dir\s*=.*', ^('extension_dir = "' + $extDir + '"'^)
-        echo # O Composer precisa da extensao zip para extrair pacotes - garante que esta ativa.
-        echo $content = $content -replace '^^;extension=zip\s*$', 'extension=zip'
+        echo # Composer e Laravel precisam destas extensoes ^(zip, openssl, mbstring, curl, PDO MySQL, fileinfo^) - o template do PHP as traz comentadas.
+        echo foreach ^($ext in 'zip','openssl','mbstring','curl','pdo_mysql','mysqli','fileinfo'^) { $content = $content -replace ^('^^;extension=' + $ext + '\s*$'^), ^('extension=' + $ext^) }
         echo Set-Content -Path $dst -Value $content
     )
     powershell -NoProfile -ExecutionPolicy Bypass -File "!PS_PHP_INI!" -NewDir "!PHP_NEW_DIR!"
