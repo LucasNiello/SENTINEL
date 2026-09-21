@@ -232,7 +232,7 @@
             anunciar('tempo esgotado');
         }
 
-        function renderizarConfirmacaoPendente(tool, argumentos) {
+        function renderizarConfirmacaoPendente(tool, argumentos, token) {
             const card = document.createElement('div');
             card.className = 'card-confirmacao';
             card.innerHTML = `
@@ -309,7 +309,7 @@
                             'Content-Type': 'application/json',
                             'X-CSRF-TOKEN': csrfToken,
                         },
-                        body: JSON.stringify({ tool, argumentos }),
+                        body: JSON.stringify({ token }),
                     });
                     const dados = await resp.json().catch(() => ({}));
                     encerrarCard();
@@ -373,7 +373,7 @@
                         adicionarTabela(dados.resultado || []);
                         break;
                     case 'confirmacao_pendente':
-                        renderizarConfirmacaoPendente(dados.tool, dados.argumentos);
+                        renderizarConfirmacaoPendente(dados.tool, dados.argumentos, dados.token);
                         break;
                     case 'erro':
                     default:
