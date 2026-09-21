@@ -24,9 +24,13 @@ class NotaFiscalService
         ]);
     }
 
-    public function buscarPorFiltro(?string $tipo = null): Collection
+    /**
+     * $tenantId restringe a consulta ao tenant informado (null = sem filtro).
+     */
+    public function buscarPorFiltro(?string $tipo = null, ?int $tenantId = null): Collection
     {
         return NotaFiscal::query()
+            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
             ->when($tipo, fn ($query) => $query->where('tipo', $tipo))
             ->get();
     }

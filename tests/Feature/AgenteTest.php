@@ -54,7 +54,7 @@ class AgenteTest extends TestCase
 
     public function test_escrita_so_devolve_confirmacao_pendente_e_nao_grava(): void
     {
-        Http::fake(['*' => Http::response($this->respostaComTool('criar_lancamento', ['descricao' => 'X', 'valor' => 5, 'data' => '2026-09-21', 'tenant_id' => 1]))]);
+        Http::fake(['*' => Http::response($this->respostaComTool('criar_lancamento', ['descricao' => 'X', 'valor' => 5, 'data' => '2026-09-21']))]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'crie um lançamento'])
             ->assertOk()
@@ -83,7 +83,7 @@ class AgenteTest extends TestCase
 
     public function test_confirmar_grava_o_lancamento_como_pendente(): void
     {
-        $token = $this->propor(['descricao' => 'Café', 'valor' => 12.5, 'data' => '2026-09-21', 'tenant_id' => 1]);
+        $token = $this->propor(['descricao' => 'Café', 'valor' => 12.5, 'data' => '2026-09-21']);
         $this->travel(2)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])
@@ -93,9 +93,10 @@ class AgenteTest extends TestCase
         $this->assertDatabaseHas('lancamentos', ['descricao' => 'Café', 'status' => 'pendente', 'tenant_id' => 1]);
     }
 
-    public function test_confirmar_sem_tenant_devolve_erro_tratado(): void
+    public function test_confirmar_com_dados_incompletos_devolve_erro_tratado(): void
     {
-        $token = $this->propor(['descricao' => 'Sem empresa', 'valor' => 1, 'data' => '2026-09-21']);
+        // Sem descrição: o modelo propôs argumentos incompletos. O tenant já não é problema — vem do servidor.
+        $token = $this->propor(['valor' => 1, 'data' => '2026-09-21']);
         $this->travel(2)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])
@@ -114,13 +115,13 @@ class AgenteTest extends TestCase
 
     public function test_confirmar_usa_tool_e_argumentos_da_sessao_e_ignora_o_corpo(): void
     {
-        $token = $this->propor(['descricao' => 'Proposto pelo agente', 'valor' => 10, 'data' => '2026-09-21', 'tenant_id' => 1]);
+        $token = $this->propor(['descricao' => 'Proposto pelo agente', 'valor' => 10, 'data' => '2026-09-21']);
         $this->travel(2)->seconds();
 
         $this->postJson('/agente/confirmar', [
             'token' => $token,
             'tool' => 'criar_lancamento',
-            'argumentos' => ['descricao' => 'Forjado pelo cliente', 'valor' => 99999, 'data' => '2026-09-21', 'tenant_id' => 1],
+            'argumentos' => ['descricao' => 'Forjado pelo cliente', 'valor' => 99999, 'data' => '2026-09-21'],
         ])->assertOk();
 
         $this->assertDatabaseHas('lancamentos', ['descricao' => 'Proposto pelo agente', 'valor' => 10]);
@@ -131,7 +132,7 @@ class AgenteTest extends TestCase
     {
         $corpoForjado = [
             'tool' => 'criar_lancamento',
-            'argumentos' => ['descricao' => 'Sem passar pelo agente', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 1],
+            'argumentos' => ['descricao' => 'Sem passar pelo agente', 'valor' => 1, 'data' => '2026-09-21'],
         ];
 
         $this->postJson('/agente/confirmar', $corpoForjado)
@@ -147,7 +148,7 @@ class AgenteTest extends TestCase
 
     public function test_rnf02_confirmar_antes_de_2s_e_recusado_e_nao_grava(): void
     {
-        $token = $this->propor(['descricao' => 'Cedo demais', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 1]);
+        $token = $this->propor(['descricao' => 'Cedo demais', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(1)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])
@@ -159,7 +160,7 @@ class AgenteTest extends TestCase
 
     public function test_rnf02_token_so_vale_uma_vez(): void
     {
-        $token = $this->propor(['descricao' => 'Uma vez só', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 1]);
+        $token = $this->propor(['descricao' => 'Uma vez só', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(2)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
@@ -173,7 +174,7 @@ class AgenteTest extends TestCase
 
     public function test_rnf02_token_expirado_apos_12s_e_recusado_e_nao_grava(): void
     {
-        $token = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 1]);
+        $token = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(13)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])
@@ -200,7 +201,7 @@ class AgenteTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_2_tools(): void
+    public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
 
@@ -208,6 +209,6 @@ class AgenteTest extends TestCase
 
         Http::assertSent(fn ($req) => $req->hasHeader('api-key', 'k')
             && $req->url() === 'https://foundry.test/openai/v1/chat/completions'
-            && collect($req['tools'])->pluck('function.name')->all() === ['consultar_lancamentos', 'criar_lancamento']);
+            && collect($req['tools'])->pluck('function.name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento']);
     }
 }

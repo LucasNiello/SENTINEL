@@ -1,0 +1,26 @@
+diff --git a/app/Services/AiAgentService.php b/app/Services/AiAgentService.php
+index 8aa65cb..b300101 100644
+--- a/app/Services/AiAgentService.php
++++ b/app/Services/AiAgentService.php
+@@ -257,13 +257,18 @@ class AiAgentService
+                 'mensagem' => $e->getMessage(),
+             ];
+         } catch (Throwable $e) {
++            // LGPD: nem a mensagem da exceção (uma QueryException traz o SQL com os valores, ex. CPF
++            // e salário) nem os argumentos crus vão para o log ou para a auditoria. Registramos só
++            // onde e de que tipo foi a falha; a mensagem ao usuário e à auditoria é a frase genérica da tool.
+             Log::error('AiAgentService: falha ao executar tool', [
+                 'tool' => $tool,
+-                'erro' => $e->getMessage(),
+-                'argumentos' => $argumentos,
++                'excecao' => $e::class,
++                'codigo' => $e->getCode(),
++                'local' => basename($e->getFile()).':'.$e->getLine(),
++                'argumentos' => AuditoriaService::mascararCamposSensiveis($argumentos),
+             ]);
+ 
+-            $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'erro', $e->getMessage(), true);
++            $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'erro', $definicao['mensagem_erro'], true);
+ 
+             return [
+                 'tipo' => 'erro',

@@ -41,7 +41,7 @@ class AgenteController extends Controller
             $resposta['token'] = $token;
         }
 
-        return response()->json($resposta);
+        return response()->json($resposta, ($resposta['tipo'] ?? null) === 'negado' ? 403 : 200);
     }
 
     /**
@@ -71,7 +71,11 @@ class AgenteController extends Controller
             return response()->json(['tipo' => 'erro', 'mensagem' => $e->getMessage()], 422);
         }
 
-        $status = ($resultado['tipo'] ?? null) === 'erro' ? 422 : 200;
+        $status = match ($resultado['tipo'] ?? null) {
+            'erro' => 422,
+            'negado' => 403,
+            default => 200,
+        };
 
         return response()->json($resultado, $status);
     }

@@ -21,9 +21,13 @@ class FornecedorService
         ]);
     }
 
-    public function buscarPorFiltro(?string $nome = null): Collection
+    /**
+     * $tenantId restringe a consulta ao tenant informado (null = sem filtro).
+     */
+    public function buscarPorFiltro(?string $nome = null, ?int $tenantId = null): Collection
     {
         return Fornecedor::query()
+            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
             ->when($nome, fn ($query) => $query->where('nome', 'like', "%{$nome}%"))
             ->get();
     }

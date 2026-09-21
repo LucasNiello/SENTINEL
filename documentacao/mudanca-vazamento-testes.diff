@@ -1,0 +1,107 @@
+diff --git a/tests/Feature/AuditoriaMascaraTest.php b/tests/Feature/AuditoriaMascaraTest.php
+index 1023a82..968fd08 100644
+--- a/tests/Feature/AuditoriaMascaraTest.php
++++ b/tests/Feature/AuditoriaMascaraTest.php
+@@ -5,7 +5,11 @@ namespace Tests\Feature;
+ use App\Models\AuditLog;
+ use App\Models\Funcionario;
+ use App\Services\AuditoriaService;
++use App\Services\FuncionarioService;
++use Exception;
++use Illuminate\Database\QueryException;
+ use Illuminate\Foundation\Testing\RefreshDatabase;
++use Illuminate\Support\Facades\Log;
+ use Tests\Concerns\SimulaAgente;
+ use Tests\TestCase;
+ 
+@@ -131,6 +135,78 @@ class AuditoriaMascaraTest extends TestCase
+         $this->assertSame('[redigido]', $log->parametros['salario']);
+     }
+ 
++    public function test_mascara_e_reaproveitavel_fora_da_auditoria(): void
++    {
++        // Método público/estático: usado também pelo Log::error do AiAgentService.
++        $this->assertSame(
++            ['nome' => 'Ana', 'cpf' => '***.***.333-44', 'salario' => '[redigido]', 'cargo' => 'Analista'],
++            AuditoriaService::mascararCamposSensiveis(['nome' => 'Ana', 'cpf' => '111.222.333-44', 'salario' => 3200.5, 'cargo' => 'Analista']),
++        );
++        $this->assertSame([], AuditoriaService::mascararCamposSensiveis([]));
++    }
++
++    // ---- Falha técnica: a mesma proteção por outra porta (mensagem da exceção e log de arquivo) ----
++
++    public function test_falha_tecnica_de_banco_nao_vaza_cpf_nem_salario_no_audit_nem_no_log_de_arquivo(): void
++    {
++        $lancar = fn (array $d) => new QueryException(
++            'mysql',
++            'insert into funcionarios (nome, cpf, salario) values (?, ?, ?)',
++            [$d['nome'], $d['cpf'], $d['salario']],
++            new Exception('SQLSTATE[HY000]: General error'),
++        );
++
++        // Pré-condição: a exceção REALMENTE carrega o dado em claro — sem isso o teste seria vazio.
++        $mensagemBruta = $lancar($this->funcionario())->getMessage();
++        $this->assertStringContainsString('111.222.333-44', $mensagemBruta);
++        $this->assertStringContainsString('3200.5', $mensagemBruta);
++
++        // Um erro de banco no INSERT, como aconteceria de verdade.
++        $this->app->instance(FuncionarioService::class, new class($lancar) extends FuncionarioService
++        {
++            public function __construct(private \Closure $lancar)
++            {
++            }
++
++            public function criar(array $dados): Funcionario
++            {
++                throw ($this->lancar)($dados);
++            }
++        });
++        Log::spy();
++
++        $token = $this->propor($this->funcionario(), 'criar_funcionario');
++        $frase = 'Não consegui cadastrar o funcionário. Tente novamente.';
++
++        $this->confirmar($token)->assertStatus(422)->assertJsonPath('tipo', 'erro')->assertJsonPath('mensagem', $frase);
++        $this->assertSame(0, Funcionario::count());
++
++        // audit_logs: a mensagem é a frase genérica; nada de SQL, CPF ou salário em nenhuma coluna.
++        $log = AuditLog::query()->sole();
++        $this->assertSame('erro', $log->resultado);
++        $this->assertSame($frase, $log->mensagem);
++        $linha = json_encode($log->getAttributes(), JSON_UNESCAPED_UNICODE);
++        foreach (['111.222.333-44', '3200.5', 'insert into', 'SQL:'] as $termo) {
++            $this->assertStringNotContainsString($termo, $linha);
++        }
++        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
++
++        // Log de arquivo: registrou a falha (o teste não é vazio), com argumentos mascarados e sem a mensagem da exceção.
++        Log::shouldHaveReceived('error')->once()->withArgs(function ($mensagem, $contexto) {
++            $json = json_encode($contexto, JSON_UNESCAPED_UNICODE);
++
++            return $mensagem === 'AiAgentService: falha ao executar tool'
++                && $contexto['tool'] === 'criar_funcionario'
++                && $contexto['excecao'] === QueryException::class
++                && $contexto['argumentos']['cpf'] === '***.***.333-44'
++                && $contexto['argumentos']['salario'] === '[redigido]'
++                && $contexto['argumentos']['nome'] === 'Ana Souza'
++                && ! str_contains($json, '111.222.333-44')
++                && ! str_contains($json, '3200.5')
++                && ! str_contains($json, 'insert into');
++        });
++    }
++
+     public function test_nenhum_valor_bruto_de_cpf_ou_salario_aparece_em_nenhuma_coluna_do_log(): void
+     {
+         $token = $this->propor($this->funcionario(), 'criar_funcionario');
+diff --git a/tests/Feature/AgenteGovernancaTest.php b/tests/Feature/AgenteGovernancaTest.php
+index 396291b..2b5ddcc 100644
+--- a/tests/Feature/AgenteGovernancaTest.php
++++ b/tests/Feature/AgenteGovernancaTest.php
+@@ -76,6 +76,7 @@ class AgenteGovernancaTest extends TestCase
+         $log = AuditLog::query()->sole();
+         $this->assertSame('erro', $log->resultado);
+         $this->assertTrue($log->permitido);
++        $this->assertSame('Não consegui criar o lançamento — verifique se descrição, valor e data foram informados.', $log->mensagem, 'a auditoria guarda a frase genérica, não a exceção técnica');
+         $this->assertSame(0, Lancamento::count());
+     }
+ 

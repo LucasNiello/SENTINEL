@@ -6,13 +6,14 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['user_id', 'tool', 'acao', 'entidade_tipo', 'entidade_id', 'parametros', 'resultado', 'mensagem', 'tenant_id'])]
+#[Fillable(['user_id', 'tool', 'acao', 'entidade_tipo', 'entidade_id', 'parametros', 'resultado', 'mensagem', 'papel', 'permitido', 'tenant_id'])]
 class AuditLog extends Model
 {
     protected function casts(): array
     {
         return [
             'parametros' => 'array',
+            'permitido' => 'boolean',
         ];
     }
 

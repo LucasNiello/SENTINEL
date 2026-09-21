@@ -184,19 +184,30 @@
             historico.appendChild(div);
         }
 
-        function adicionarTabela(linhas) {
+        // As colunas vêm do servidor (catálogo de tools); textContent evita XSS com dados gravados no banco.
+        function adicionarTabela(linhas, colunasServidor) {
             if (!linhas.length) {
-                adicionarMensagem('Nenhum lançamento encontrado.', 'msg--agente');
+                adicionarMensagem('Nenhum registro encontrado.', 'msg--agente');
                 return;
             }
-            const colunas = ['id', 'descricao', 'valor', 'status', 'data'];
+            const colunas = colunasServidor && colunasServidor.length ? colunasServidor : ['id', 'descricao', 'valor', 'status', 'data'];
             const table = document.createElement('table');
             const thead = document.createElement('thead');
-            thead.innerHTML = '<tr>' + colunas.map(c => `<th>${c}</th>`).join('') + '</tr>';
+            const trCabecalho = document.createElement('tr');
+            colunas.forEach(c => {
+                const th = document.createElement('th');
+                th.textContent = c;
+                trCabecalho.appendChild(th);
+            });
+            thead.appendChild(trCabecalho);
             const tbody = document.createElement('tbody');
             linhas.forEach(l => {
                 const tr = document.createElement('tr');
-                tr.innerHTML = colunas.map(c => `<td>${l[c] ?? ''}</td>`).join('');
+                colunas.forEach(c => {
+                    const td = document.createElement('td');
+                    td.textContent = l[c] ?? '';
+                    tr.appendChild(td);
+                });
                 tbody.appendChild(tr);
             });
             table.appendChild(thead);
@@ -236,8 +247,8 @@
             const card = document.createElement('div');
             card.className = 'card-confirmacao';
             card.innerHTML = `
-                <strong>Confirmação necessária:</strong> ${tool}
-                <pre>${JSON.stringify(argumentos, null, 2)}</pre>
+                <strong>Confirmação necessária:</strong> <span class="card-tool"></span>
+                <pre class="card-argumentos"></pre>
                 <div class="acoes">
                     <button type="button" class="btn-confirmar">
                         <span class="btn-confirmar__fill"></span>
@@ -246,6 +257,8 @@
                     <button type="button" class="btn-cancelar">Cancelar</button>
                 </div>
             `;
+            card.querySelector('.card-tool').textContent = tool;
+            card.querySelector('.card-argumentos').textContent = JSON.stringify(argumentos, null, 2);
             historico.appendChild(card);
 
             const btnConfirmar = card.querySelector('.btn-confirmar');
@@ -370,7 +383,7 @@
                         adicionarMensagem(dados.mensagem || '(sem resposta)', 'msg--agente');
                         break;
                     case 'resultado_leitura':
-                        adicionarTabela(dados.resultado || []);
+                        adicionarTabela(dados.resultado || [], dados.colunas);
                         break;
                     case 'confirmacao_pendente':
                         renderizarConfirmacaoPendente(dados.tool, dados.argumentos, dados.token);

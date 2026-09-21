@@ -1,0 +1,150 @@
+diff --git a/tests/Feature/AuditoriaMascaraTest.php b/tests/Feature/AuditoriaMascaraTest.php
+new file mode 100644
+index 0000000..1023a82
+--- /dev/null
++++ b/tests/Feature/AuditoriaMascaraTest.php
+@@ -0,0 +1,144 @@
++<?php
++
++namespace Tests\Feature;
++
++use App\Models\AuditLog;
++use App\Models\Funcionario;
++use App\Services\AuditoriaService;
++use Illuminate\Foundation\Testing\RefreshDatabase;
++use Tests\Concerns\SimulaAgente;
++use Tests\TestCase;
++
++/**
++ * LGPD no log de auditoria: CPF é mascarado e salário é redigido em audit_logs.parametros,
++ * em qualquer resultado; os demais campos passam intactos e a entidade guarda o valor real.
++ */
++class AuditoriaMascaraTest extends TestCase
++{
++    use RefreshDatabase, SimulaAgente;
++
++    protected function setUp(): void
++    {
++        parent::setUp();
++
++        $this->prepararAgente();
++    }
++
++    private function registrar(array $parametros): AuditLog
++    {
++        return app(AuditoriaService::class)->registrar('t', 'criar', 'Funcionario', null, $parametros, 'sucesso', null, 'admin', true)->fresh();
++    }
++
++    // ---- AuditoriaService direto ----
++
++    public function test_cpf_formatado_e_mascarado_e_salario_e_redigido(): void
++    {
++        $log = $this->registrar(['nome' => 'Ana', 'cpf' => '111.222.333-44', 'salario' => 3200.5]);
++
++        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
++        $this->assertSame('[redigido]', $log->parametros['salario']);
++    }
++
++    public function test_demais_campos_passam_intactos(): void
++    {
++        $log = $this->registrar(['nome' => 'Ana', 'cargo' => 'Analista', 'data_admissao' => '2026-01-10', 'tenant_id' => 1, 'cpf' => '111.222.333-44']);
++
++        $this->assertSame('Ana', $log->parametros['nome']);
++        $this->assertSame('Analista', $log->parametros['cargo']);
++        $this->assertSame('2026-01-10', $log->parametros['data_admissao']);
++        $this->assertSame(1, $log->parametros['tenant_id']);
++    }
++
++    public function test_so_mexe_nas_chaves_que_existem_e_nao_inventa_campos(): void
++    {
++        $this->assertSame(['nome' => 'Cliente X', 'email' => 'x@x.com'], $this->registrar(['nome' => 'Cliente X', 'email' => 'x@x.com'])->parametros);
++        $this->assertSame([], $this->registrar([])->parametros);
++    }
++
++    public function test_cpf_sem_pontuacao_sai_no_mesmo_formato_mascarado(): void
++    {
++        $this->assertSame('***.***.333-44', $this->registrar(['cpf' => '11122233344'])->parametros['cpf']);
++    }
++
++    public function test_cpf_nunca_sai_em_claro_mesmo_com_tipo_ou_formato_inesperado(): void
++    {
++        // O modelo pode mandar número, lista ou lixo: nada disso pode ir bruto para o log.
++        $this->assertSame('***.***.333-44', $this->registrar(['cpf' => 11122233344])->parametros['cpf'], 'número');
++        $this->assertSame('[redigido]', $this->registrar(['cpf' => ['111.222.333-44']])->parametros['cpf'], 'lista');
++        $this->assertSame('[redigido]', $this->registrar(['cpf' => '123'])->parametros['cpf'], 'curto demais');
++        $this->assertSame('[redigido]', $this->registrar(['cpf' => 'abc'])->parametros['cpf'], 'sem dígitos');
++        $this->assertSame('[redigido]', $this->registrar(['cpf' => true])->parametros['cpf'], 'booleano');
++    }
++
++    public function test_cpf_e_salario_nulos_continuam_nulos_e_a_mascara_e_idempotente(): void
++    {
++        $log = $this->registrar(['cpf' => null, 'salario' => null]);
++        $this->assertNull($log->parametros['cpf']);
++        $this->assertNull($log->parametros['salario']);
++
++        $this->assertSame('***.***.333-44', $this->registrar(['cpf' => '***.***.333-44'])->parametros['cpf']);
++    }
++
++    public function test_salario_zero_tambem_e_redigido(): void
++    {
++        $this->assertSame('[redigido]', $this->registrar(['salario' => 0])->parametros['salario']);
++    }
++
++    // ---- Pelo fluxo real do agente (todos os resultados passam pelo mesmo ponto) ----
++
++    private function funcionario(): array
++    {
++        return ['nome' => 'Ana Souza', 'cpf' => '111.222.333-44', 'cargo' => 'Analista', 'salario' => 3200.50, 'data_admissao' => '2026-01-10'];
++    }
++
++    public function test_criar_funcionario_grava_log_mascarado_e_o_registro_real_fica_intacto(): void
++    {
++        $token = $this->propor($this->funcionario(), 'criar_funcionario');
++        $this->confirmar($token)->assertOk();
++
++        $funcionario = Funcionario::query()->sole();
++        $this->assertSame('111.222.333-44', $funcionario->cpf, 'o dado real fica na tabela da entidade');
++        $this->assertSame('3200.50', $funcionario->salario);
++
++        $log = AuditLog::query()->sole();
++        $this->assertSame('sucesso', $log->resultado);
++        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
++        $this->assertSame('[redigido]', $log->parametros['salario']);
++        $this->assertSame('Ana Souza', $log->parametros['nome']);
++        $this->assertSame($funcionario->id, $log->entidade_id);
++    }
++
++    public function test_tentativa_negada_tambem_nao_grava_cpf_nem_salario_em_claro(): void
++    {
++        config(['sentinel.papel_atual' => 'operador']); // criar_funcionario exige admin
++
++        $this->comando('criar_funcionario', $this->funcionario())->assertStatus(403);
++
++        $log = AuditLog::query()->sole();
++        $this->assertSame('negado', $log->resultado);
++        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
++        $this->assertSame('[redigido]', $log->parametros['salario']);
++    }
++
++    public function test_recusa_de_validacao_tambem_nao_grava_cpf_nem_salario_em_claro(): void
++    {
++        $token = $this->propor([...$this->funcionario(), 'data_demissao' => '2025-12-31'], 'criar_funcionario'); // demissão antes da admissão
++        $this->confirmar($token)->assertStatus(422);
++
++        $log = AuditLog::query()->sole();
++        $this->assertSame('recusado', $log->resultado);
++        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
++        $this->assertSame('[redigido]', $log->parametros['salario']);
++    }
++
++    public function test_nenhum_valor_bruto_de_cpf_ou_salario_aparece_em_nenhuma_coluna_do_log(): void
++    {
++        $token = $this->propor($this->funcionario(), 'criar_funcionario');
++        $this->confirmar($token)->assertOk();
++
++        $linha = json_encode(AuditLog::query()->sole()->getAttributes(), JSON_UNESCAPED_UNICODE);
++        $this->assertStringNotContainsString('111.222.333-44', $linha);
++        $this->assertStringNotContainsString('111.222', $linha);
++        $this->assertStringNotContainsString('3200', $linha);
++    }
++}
