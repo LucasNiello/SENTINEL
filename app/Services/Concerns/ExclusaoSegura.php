@@ -12,6 +12,12 @@ use Illuminate\Database\Eloquent\Model;
  */
 trait ExclusaoSegura
 {
+    /** RF08: o motivo do bloqueio é exibido ao usuário, então não pode expor o nome técnico da relação. */
+    private const ROTULOS_RELACAO = [
+        'lancamentos' => 'lançamentos vinculados',
+        'notasFiscais' => 'notas fiscais vinculadas',
+    ];
+
     /**
      * @param  string[]  $relacoesQueBloqueiam  Nomes de relações Eloquent cuja
      *                                           existência impede a exclusão.
@@ -21,9 +27,11 @@ trait ExclusaoSegura
     {
         foreach ($relacoesQueBloqueiam as $relacao) {
             if ($registro->{$relacao}()->exists()) {
+                $rotulo = self::ROTULOS_RELACAO[$relacao] ?? "registros em {$relacao}";
+
                 return [
                     'bloqueado' => true,
-                    'motivo' => "Não é possível excluir: existem {$relacao} vinculados a este registro.",
+                    'motivo' => "Não é possível excluir: existem {$rotulo} a este registro.",
                 ];
             }
         }
