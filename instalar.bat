@@ -9,7 +9,7 @@ set DB_HOST_VAL=127.0.0.1
 set DB_PORT_VAL=3306
 set DB_DATABASE_VAL=sentinel
 set DB_USERNAME_VAL=root
-set DB_PASSWORD_VAL=1234
+REM A senha do MySQL NAO entra aqui - cada pessoa preenche DB_PASSWORD no .env manualmente.
 
 REM Preencha com os valores reais do portal do Microsoft Foundry.
 REM A API key NAO entra aqui - continua manual no .env depois.
@@ -314,44 +314,38 @@ call :setenv DB_DATABASE %DB_DATABASE_VAL%
 if errorlevel 1 goto :erro
 call :setenv DB_USERNAME %DB_USERNAME_VAL%
 if errorlevel 1 goto :erro
-call :setenv DB_PASSWORD %DB_PASSWORD_VAL%
-if errorlevel 1 goto :erro
 call :setenv AZURE_FOUNDRY_ENDPOINT %AZURE_ENDPOINT_VAL%
 if errorlevel 1 goto :erro
 call :setenv AZURE_FOUNDRY_DEPLOYMENT %AZURE_DEPLOYMENT_VAL%
 if errorlevel 1 goto :erro
 del "%PS_SETENV%" >nul 2>nul
 
-echo OK: .env atualizado ^(DB_* e AZURE_FOUNDRY_ENDPOINT/DEPLOYMENT^).
-echo Lembrete: AZURE_FOUNDRY_API_KEY continua vazia de proposito - preencha manualmente.
+echo OK: .env atualizado ^(DB_CONNECTION/HOST/PORT/DATABASE/USERNAME e AZURE_FOUNDRY_ENDPOINT/DEPLOYMENT^).
+echo Lembrete: DB_PASSWORD e AZURE_FOUNDRY_API_KEY nao sao gravadas por este script - preencha manualmente no .env.
 
 echo.
-echo [7/9] Verificando/criando o banco de dados '%DB_DATABASE_VAL%'...
-where mysql >nul 2>nul
+echo [7/9] Verificando DB_PASSWORD no .env...
+REM O script nunca grava nem altera a senha do MySQL: ela e responsabilidade de quem instala.
+REM Senha em branco e valida ^(padrao de instalacao nova do Laragon^), entao so avisamos e damos
+REM a chance de preencher antes de seguir.
+findstr /r /b /c:"DB_PASSWORD=." .env >nul
 if errorlevel 1 (
-    echo ERRO: comando "mysql" nao encontrado no PATH.
-    echo Abra o terminal do proprio Laragon ^(ele injeta o PATH do MySQL^) ou adicione a pasta bin do MySQL do Laragon ao PATH do Windows.
-    goto :erro
+    echo AVISO: DB_PASSWORD esta vazia no .env.
+    echo Se o usuario '%DB_USERNAME_VAL%' do seu MySQL tem senha, abra o .env, preencha DB_PASSWORD, salve e so entao continue.
+    echo Se o MySQL realmente esta sem senha ^(Laragon recem-instalado^), pode continuar assim.
+    pause
+) else (
+    echo OK: DB_PASSWORD preenchida.
 )
-mysql -h %DB_HOST_VAL% -P %DB_PORT_VAL% -u %DB_USERNAME_VAL% -p%DB_PASSWORD_VAL% -e "CREATE DATABASE IF NOT EXISTS %DB_DATABASE_VAL% CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>nul
-if not errorlevel 1 goto :banco_ok
-
-echo Senha configurada nao funcionou - tentando com senha em branco ^(padrao de instalacao nova do Laragon^)...
-mysql -h %DB_HOST_VAL% -P %DB_PORT_VAL% -u %DB_USERNAME_VAL% -e "CREATE DATABASE IF NOT EXISTS %DB_DATABASE_VAL% CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; ALTER USER '%DB_USERNAME_VAL%'@'localhost' IDENTIFIED BY '%DB_PASSWORD_VAL%'; FLUSH PRIVILEGES;"
-if errorlevel 1 (
-    echo ERRO: nao foi possivel conectar/criar o banco nem com a senha configurada nem com senha em branco.
-    echo Confira se o servico MySQL do Laragon esta rodando ^(icone na bandeja^) e ajuste DB_PASSWORD_VAL no topo deste script se necessario.
-    goto :erro
-)
-echo OK: senha do root do MySQL definida como '%DB_PASSWORD_VAL%' para as proximas execucoes.
-
-:banco_ok
-echo OK: banco '%DB_DATABASE_VAL%' pronto.
 
 echo.
-echo [8/9] Rodando migrations...
+echo [8/9] Rodando migrations ^(cria o banco '%DB_DATABASE_VAL%' se ainda nao existir^)...
 call php artisan migrate --force
-if errorlevel 1 goto :erro
+if errorlevel 1 (
+    echo ERRO: migrations falharam. Confira se o MySQL do Laragon esta rodando ^(icone na bandeja^)
+    echo e se DB_USERNAME/DB_PASSWORD no .env batem com o usuario do seu MySQL.
+    goto :erro
+)
 echo OK: migrations aplicadas.
 
 echo.
