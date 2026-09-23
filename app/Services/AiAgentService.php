@@ -82,6 +82,7 @@ class AiAgentService
         private NotaFiscalService $notaFiscalService,
         private CategoriaLancamentoService $categoriaLancamentoService,
         private AuditoriaService $auditoria,
+        private ContextoUsuario $contexto,
     ) {
     }
 
@@ -229,7 +230,7 @@ class AiAgentService
             return $this->negar($tool, $definicao, $argumentos);
         }
 
-        $argumentos['tenant_id'] = (int) config('sentinel.tenant_atual');
+        $argumentos['tenant_id'] = $this->contexto->tenantId();
 
         try {
             $resultado = DB::transaction(function () use ($tool, $definicao, $argumentos) {
@@ -655,13 +656,14 @@ class AiAgentService
     }
 
     /**
-     * RBAC placeholder: hierarquia e papel atual vêm de config('sentinel.*').
-     * Papel atual ou mínimo fora da hierarquia nega (falha fechada).
+     * RBAC: a hierarquia vem de config('sentinel.papeis'); o papel atual, do
+     * usuário logado (ContextoUsuario). Papel atual ou mínimo fora da
+     * hierarquia nega (falha fechada).
      */
     private function papelAtualPermite(string $papelMinimo): bool
     {
         $hierarquia = (array) config('sentinel.papeis', []);
-        $atual = array_search(config('sentinel.papel_atual'), $hierarquia, true);
+        $atual = array_search($this->contexto->papel(), $hierarquia, true);
         $minimo = array_search($papelMinimo, $hierarquia, true);
 
         return $atual !== false && $minimo !== false && $atual >= $minimo;
@@ -682,7 +684,7 @@ class AiAgentService
             null,
             $argumentos,
             'negado',
-            'Papel '.config('sentinel.papel_atual').' abaixo do mínimo exigido ('.$definicao['papel_minimo'].').',
+            'Papel '.$this->contexto->papel().' abaixo do mínimo exigido ('.$definicao['papel_minimo'].').',
             false,
         );
 
@@ -710,7 +712,7 @@ class AiAgentService
             parametros: $parametros,
             resultado: $resultado,
             mensagem: $mensagem,
-            papel: (string) config('sentinel.papel_atual'),
+            papel: $this->contexto->papel(),
             permitido: $permitido,
         );
     }

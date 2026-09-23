@@ -25,6 +25,7 @@ class ClienteFornecedorToolsTest extends TestCase
         parent::setUp();
 
         $this->prepararAgente();
+        $this->logarComo('admin', 1); // padrão: admin do tenant 1; cada teste troca quando precisa
     }
 
     /** @return array<string, array{string, string, class-string, string}> [consultar, criar, model, entidade auditada] */
@@ -58,7 +59,7 @@ class ClienteFornecedorToolsTest extends TestCase
     #[DataProvider('entidades')]
     public function test_papel_leitura_consulta_e_a_consulta_e_auditada(string $consultar, string $criar, string $model, string $tipo): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
 
         $this->comando($consultar)->assertOk();
 
@@ -76,7 +77,7 @@ class ClienteFornecedorToolsTest extends TestCase
     #[DataProvider('entidades')]
     public function test_criar_so_grava_apos_confirmar_com_tenant_do_servidor_e_audita(string $consultar, string $criar, string $model, string $tipo): void
     {
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
 
         $token = $this->propor([
             'nome' => 'Casa Nova Ltda', 'documento' => '12.345.678/0001-90', 'email' => 'a@casanova.com.br', 'telefone' => '(19) 3251-0000',
@@ -157,7 +158,7 @@ class ClienteFornecedorToolsTest extends TestCase
     #[DataProvider('entidades')]
     public function test_leitura_nao_cria_e_a_tentativa_negada_e_auditada(string $consultar, string $criar, string $model, string $tipo): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
 
         $this->comando($criar, ['nome' => 'X'])
             ->assertStatus(403)
@@ -175,7 +176,7 @@ class ClienteFornecedorToolsTest extends TestCase
     #[DataProvider('entidades')]
     public function test_operador_pode_criar(string $consultar, string $criar, string $model, string $tipo): void
     {
-        config(['sentinel.papel_atual' => 'operador']);
+        $this->logarComo('operador');
 
         $token = $this->propor(['nome' => 'Feito pelo operador'], $criar);
         $this->confirmar($token)->assertOk();

@@ -26,6 +26,7 @@ class AuditoriaMascaraTest extends TestCase
         parent::setUp();
 
         $this->prepararAgente();
+        $this->logarComo('admin', 1); // padrão: admin do tenant 1; cada teste troca quando precisa
     }
 
     private function registrar(array $parametros): AuditLog
@@ -114,7 +115,7 @@ class AuditoriaMascaraTest extends TestCase
 
     public function test_tentativa_negada_tambem_nao_grava_cpf_nem_salario_em_claro(): void
     {
-        config(['sentinel.papel_atual' => 'operador']); // criar_funcionario exige admin
+        $this->logarComo('operador'); // criar_funcionario exige admin
 
         $this->comando('criar_funcionario', $this->funcionario())->assertStatus(403);
 

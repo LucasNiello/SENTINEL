@@ -11,6 +11,10 @@ use Illuminate\Support\Str;
  */
 class AuditoriaService
 {
+    public function __construct(private ContextoUsuario $contexto)
+    {
+    }
+
     /**
      * @param  string  $resultado  'sucesso' | 'erro' (falha técnica) | 'recusado' (regra de negócio) | 'negado' (RBAC/whitelist)
      */
@@ -32,7 +36,7 @@ class AuditoriaService
         $parametros = self::mascararCamposSensiveis($parametros);
 
         return AuditLog::create([
-            'user_id' => null, // sem autenticação (RF10): quem agiu é o "papel", não um usuário
+            'user_id' => $this->contexto->usuario()->id,
             'tool' => $tool,
             'acao' => $acao,
             'entidade_tipo' => $entidadeTipo,
@@ -42,7 +46,7 @@ class AuditoriaService
             'mensagem' => $mensagem === null ? null : Str::limit($mensagem, 250, ''),
             'papel' => $papel,
             'permitido' => $permitido,
-            'tenant_id' => (int) config('sentinel.tenant_atual'),
+            'tenant_id' => $this->contexto->tenantId(),
         ]);
     }
 

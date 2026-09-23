@@ -34,6 +34,28 @@ class UserFactory extends Factory
     }
 
     /**
+     * Papel de RBAC (leitura | operador | admin). Sem este estado o usuário
+     * fica sem papel e o sistema nega tudo (falha fechada) — não há padrão.
+     */
+    public function papel(string $papel): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'papel' => $papel,
+        ]);
+    }
+
+    /**
+     * Tenant do usuário. Sem este estado o usuário fica sem tenant e não
+     * consegue logar nem agir (falha fechada) — não há padrão.
+     */
+    public function doTenant(int $tenantId): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'tenant_id' => $tenantId,
+        ]);
+    }
+
+    /**
      * Indicate that the model's email address should be unverified.
      */
     public function unverified(): static

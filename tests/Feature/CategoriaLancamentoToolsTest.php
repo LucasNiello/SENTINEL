@@ -23,6 +23,7 @@ class CategoriaLancamentoToolsTest extends TestCase
         parent::setUp();
 
         $this->prepararAgente();
+        $this->logarComo('admin', 1); // padrão: admin do tenant 1; cada teste troca quando precisa
     }
 
     // ---- consultar_categorias_lancamento ----
@@ -49,7 +50,7 @@ class CategoriaLancamentoToolsTest extends TestCase
 
     public function test_papel_leitura_consulta_e_a_consulta_e_auditada(): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
 
         $this->comando('consultar_categorias_lancamento')->assertOk();
 
@@ -65,7 +66,7 @@ class CategoriaLancamentoToolsTest extends TestCase
 
     public function test_criar_so_grava_apos_confirmar_com_tenant_do_servidor_e_audita(): void
     {
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
 
         $token = $this->propor(['nome' => 'Serviços extras', 'tipo' => 'receita', 'tenant_id' => 999], 'criar_categoria_lancamento');
         $this->assertSame(0, CategoriaLancamento::count(), 'propor não grava');
@@ -133,7 +134,7 @@ class CategoriaLancamentoToolsTest extends TestCase
 
     public function test_leitura_nao_cria_categoria_e_a_tentativa_negada_e_auditada(): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
 
         $this->comando('criar_categoria_lancamento', ['nome' => 'X', 'tipo' => 'receita'])
             ->assertStatus(403)
@@ -150,7 +151,7 @@ class CategoriaLancamentoToolsTest extends TestCase
 
     public function test_operador_pode_criar_categoria(): void
     {
-        config(['sentinel.papel_atual' => 'operador']);
+        $this->logarComo('operador');
 
         $token = $this->propor(['nome' => 'Feita pelo operador', 'tipo' => 'despesa'], 'criar_categoria_lancamento');
         $this->confirmar($token)->assertOk();
