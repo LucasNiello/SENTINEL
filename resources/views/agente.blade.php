@@ -148,6 +148,11 @@
 <body>
     <h1>Sentinel — Agente</h1>
 
+    <form method="POST" action="/logout">
+        @csrf
+        <button type="submit">Sair</button>
+    </form>
+
     <div id="historico" aria-live="polite"></div>
 
     <form id="form-comando">
@@ -320,10 +325,15 @@
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
+                            'Accept': 'application/json',
                             'X-CSRF-TOKEN': csrfToken,
                         },
                         body: JSON.stringify({ token }),
                     });
+                    if (resp.status === 401 || resp.status === 419) {
+                        window.location.href = '/login';
+                        return;
+                    }
                     const dados = await resp.json().catch(() => ({}));
                     encerrarCard();
                     if (!resp.ok || dados.tipo === 'erro') {
@@ -372,10 +382,15 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Accept': 'application/json',
                         'X-CSRF-TOKEN': csrfToken,
                     },
                     body: JSON.stringify({ mensagem }),
                 });
+                if (resp.status === 401 || resp.status === 419) {
+                    window.location.href = '/login';
+                    return;
+                }
                 const dados = await resp.json();
 
                 switch (dados.tipo) {

@@ -26,6 +26,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
         parent::setUp();
 
         $this->prepararAgente();
+        $this->logarComo('admin', 1); // padrão: admin do tenant 1; cada teste troca quando precisa
     }
 
     private function funcionarioValido(array $sobrescrever = []): array
@@ -92,7 +93,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
 
     public function test_leitura_consulta_funcionarios_e_a_consulta_e_auditada(): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
 
         $this->comando('consultar_funcionarios')->assertOk();
 
@@ -105,7 +106,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
 
     public function test_criar_funcionario_so_grava_apos_confirmar_com_tenant_do_servidor_e_audita(): void
     {
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
 
         $token = $this->propor($this->funcionarioValido(['data_demissao' => '2026-06-30', 'tenant_id' => 999]), 'criar_funcionario');
         $this->assertSame(0, Funcionario::count(), 'propor não grava');
@@ -155,7 +156,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
     public function test_criar_funcionario_exige_admin_operador_e_leitura_sao_negados_e_auditados(): void
     {
         foreach (['operador', 'leitura'] as $papel) {
-            config(['sentinel.papel_atual' => $papel]);
+            $this->logarComo($papel);
 
             $this->comando('criar_funcionario', $this->funcionarioValido())
                 ->assertStatus(403)
@@ -171,7 +172,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
 
         $this->assertSame(0, Funcionario::count());
 
-        config(['sentinel.papel_atual' => 'admin']);
+        $this->logarComo('admin');
         $token = $this->propor($this->funcionarioValido(), 'criar_funcionario');
         $this->confirmar($token)->assertOk();
         $this->assertSame(1, Funcionario::count());
@@ -206,7 +207,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
 
     public function test_criar_nota_de_saida_com_cliente_do_tenant_grava_apos_confirmar_e_audita(): void
     {
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
         $cliente = Cliente::create(['nome' => 'Cliente do 7', 'tenant_id' => 7]);
         $lancamento = Lancamento::create(['descricao' => 'L', 'valor' => 1, 'data' => '2026-09-01', 'status' => 'pendente', 'tenant_id' => 7]);
 
@@ -307,7 +308,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
     {
         $cliente = Cliente::create(['nome' => 'C', 'tenant_id' => 1]);
 
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
         $this->comando('criar_nota_fiscal', $this->notaSaida($cliente->id))
             ->assertStatus(403)
             ->assertJsonPath('tipo', 'negado')
@@ -315,7 +316,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
         $this->assertSame('negado', AuditLog::query()->sole()->resultado);
         $this->assertSame(0, NotaFiscal::count());
 
-        config(['sentinel.papel_atual' => 'operador']);
+        $this->logarComo('operador');
         $token = $this->propor($this->notaSaida($cliente->id), 'criar_nota_fiscal');
         $this->confirmar($token)->assertOk();
         $this->assertSame(1, NotaFiscal::count());

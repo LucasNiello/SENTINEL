@@ -23,6 +23,7 @@ class AtualizarStatusLancamentoTest extends TestCase
         parent::setUp();
 
         $this->prepararAgente();
+        $this->logarComo('admin', 1); // padrão: admin do tenant 1; cada teste troca quando precisa
     }
 
     private function lancamento(string $status, int $tenant = 1): Lancamento
@@ -167,7 +168,7 @@ class AtualizarStatusLancamentoTest extends TestCase
 
     public function test_leitura_nao_pode_atualizar_status_e_a_tentativa_e_auditada(): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
         $lancamento = $this->lancamento('pendente');
 
         $this->comando('atualizar_status_lancamento', ['id' => $lancamento->id, 'novo_status' => 'conciliado'])
@@ -186,7 +187,7 @@ class AtualizarStatusLancamentoTest extends TestCase
 
     public function test_operador_pode_atualizar_status(): void
     {
-        config(['sentinel.papel_atual' => 'operador']);
+        $this->logarComo('operador');
         $lancamento = $this->lancamento('pendente');
         $token = $this->proporAtualizacao($lancamento->id, 'conciliado');
 
@@ -201,7 +202,7 @@ class AtualizarStatusLancamentoTest extends TestCase
         $lancamento = $this->lancamento('pendente');
         $token = $this->proporAtualizacao($lancamento->id, 'conciliado');
 
-        config(['sentinel.papel_atual' => 'leitura']);
+        auth()->user()->update(['papel' => 'leitura']); // papel rebaixado entre propor e confirmar
 
         $this->confirmar($token)->assertStatus(403);
 

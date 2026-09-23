@@ -25,5 +25,14 @@ class ClienteSeeder extends Seeder
                 'tenant_id' => 1,
             ]);
         }
+
+        // Tenant 2: um cliente próprio, para o isolamento aparecer nos dois sentidos (RF10).
+        Cliente::create([
+            'nome' => 'Mercado Bom Preço (tenant 2)',
+            'documento' => '44.555.666/0001-77',
+            'email' => 'contato@bompreco.com.br',
+            'telefone' => '(19) 3222-0000',
+            'tenant_id' => 2,
+        ]);
     }
 }

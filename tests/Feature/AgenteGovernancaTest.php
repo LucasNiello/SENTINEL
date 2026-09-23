@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\Lancamento;
 use App\Services\AiAgentService;
 use App\Services\AuditoriaService;
+use App\Services\ContextoUsuario;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use RuntimeException;
@@ -26,6 +27,7 @@ class AgenteGovernancaTest extends TestCase
         parent::setUp();
 
         $this->prepararAgente();
+        $this->logarComo('admin', 1); // padrão: admin do tenant 1; cada teste troca quando precisa
     }
 
     // ---- RF06/RF07: auditoria real ----
@@ -48,7 +50,7 @@ class AgenteGovernancaTest extends TestCase
 
     public function test_rf07_escrita_so_e_auditada_quando_executada_e_aponta_a_entidade_criada(): void
     {
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
 
         $token = $this->propor(['descricao' => 'Café', 'valor' => 12.5, 'data' => '2026-09-21']);
         $this->assertSame(0, AuditLog::count(), 'propor não é executar: nada a auditar ainda');
@@ -83,7 +85,7 @@ class AgenteGovernancaTest extends TestCase
     public function test_escrita_e_auditoria_sao_atomicas_se_o_audit_falha_a_escrita_e_desfeita(): void
     {
         // Falha só no registro de 'sucesso'; o registro de 'erro' que vem depois passa.
-        $this->app->instance(AuditoriaService::class, new class extends AuditoriaService
+        $this->app->instance(AuditoriaService::class, new class(app(ContextoUsuario::class)) extends AuditoriaService
         {
             public function registrar(string $tool, string $acao, ?string $entidadeTipo, ?int $entidadeId, array $parametros, string $resultado, ?string $mensagem, string $papel, bool $permitido): AuditLog
             {
@@ -107,7 +109,7 @@ class AgenteGovernancaTest extends TestCase
 
     public function test_rbac_leitura_nao_chega_a_propor_escrita_e_a_tentativa_negada_e_auditada(): void
     {
-        config(['sentinel.papel_atual' => 'leitura']);
+        $this->logarComo('leitura');
 
         $this->comando('criar_lancamento', ['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21'])
             ->assertStatus(403)
@@ -128,7 +130,7 @@ class AgenteGovernancaTest extends TestCase
         $matriz = ['leitura' => [true, false], 'operador' => [true, true], 'admin' => [true, true]];
 
         foreach ($matriz as $papel => [$podeConsultar, $podeCriar]) {
-            config(['sentinel.papel_atual' => $papel]);
+            $this->logarComo($papel);
 
             $consulta = $this->comando('consultar_lancamentos');
             $this->assertSame($podeConsultar ? 200 : 403, $consulta->status(), "consultar como {$papel}");
@@ -142,7 +144,7 @@ class AgenteGovernancaTest extends TestCase
     {
         $token = $this->propor(['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21']);
 
-        config(['sentinel.papel_atual' => 'leitura']); // papel rebaixado entre propor e confirmar
+        auth()->user()->update(['papel' => 'leitura']); // papel rebaixado entre propor e confirmar
 
         $this->confirmar($token)->assertStatus(403)->assertJsonPath('tipo', 'negado');
 
@@ -154,7 +156,7 @@ class AgenteGovernancaTest extends TestCase
 
     public function test_rbac_papel_desconhecido_nega_tudo(): void
     {
-        config(['sentinel.papel_atual' => 'root']);
+        $this->logarComo('root');
 
         $this->comando('consultar_lancamentos')->assertStatus(403)->assertJsonPath('tipo', 'negado');
     }
@@ -163,7 +165,7 @@ class AgenteGovernancaTest extends TestCase
 
     public function test_tenant_enviado_pelo_modelo_e_ignorado(): void
     {
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
 
         $token = (string) $this->comando('criar_lancamento', ['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 999])
             ->assertJsonMissingPath('argumentos.tenant_id')
@@ -177,7 +179,7 @@ class AgenteGovernancaTest extends TestCase
     public function test_executar_tool_sobrescreve_tenant_mesmo_quando_chamada_direto(): void
     {
         // Defesa em profundidade: mesmo que um tenant_id chegue até o executor, o servidor prevalece.
-        config(['sentinel.tenant_atual' => 7]);
+        $this->logarComo('admin', 7);
 
         app(AiAgentService::class)->executarTool('criar_lancamento', [
             'descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 999,

@@ -10,22 +10,15 @@ return [
     'retencao_lixeira_dias' => env('SENTINEL_RETENCAO_LIXEIRA_DIAS', 90),
 
     /*
-    | RBAC PLACEHOLDER — simplificação consciente do protótipo.
-    | Não há autenticação (RF10 fora de escopo): o "papel atual" vem desta
-    | config, não de um usuário logado. Cada tool do AiAgentService declara
-    | um papel mínimo e é negada (403 + registro em audit_logs) se o papel
-    | atual estiver abaixo dele. Hierarquia crescente: leitura < operador < admin.
-    | Papel fora da lista nega tudo (falha fechada).
+    | RBAC — hierarquia de papéis, em ordem crescente: leitura < operador < admin.
+    | O papel atual e o tenant atual vêm do usuário logado (users.papel e
+    | users.tenant_id), lidos pelo App\Services\ContextoUsuario — não há valor
+    | padrão aqui. Cada tool do AiAgentService declara um papel mínimo e é
+    | negada (403 + registro em audit_logs) se o papel do usuário estiver
+    | abaixo dele. Papel fora desta lista nega tudo (falha fechada). O
+    | tenant_id NUNCA vem do modelo de IA: o servidor sobrescreve com o
+    | tenant do usuário ao gravar e filtra as consultas por ele.
     */
     'papeis' => ['leitura', 'operador', 'admin'],
-    'papel_atual' => env('SENTINEL_PAPEL_ATUAL', 'admin'),
-
-    /*
-    | TENANT FIXO — simplificação consciente do protótipo (multi-tenancy real
-    | fica para quando a tabela de tenants existir; ver CLAUDE.md). O
-    | tenant_id NUNCA vem do modelo de IA: o servidor sempre sobrescreve
-    | com este valor ao gravar e filtra as consultas por ele.
-    */
-    'tenant_atual' => (int) env('SENTINEL_TENANT_ATUAL', 1),
 
 ];

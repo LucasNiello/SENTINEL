@@ -21,6 +21,7 @@ class AgenteTest extends TestCase
         parent::setUp();
 
         config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
+        $this->logarComo('admin', 1);
     }
 
     private function respostaComTool(string $tool, array $argumentos): array
