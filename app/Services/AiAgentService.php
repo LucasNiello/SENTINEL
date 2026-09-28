@@ -7,6 +7,7 @@ use App\Http\Requests\CategoriaLancamentoRequest;
 use App\Http\Requests\ClienteRequest;
 use App\Http\Requests\FornecedorRequest;
 use App\Http\Requests\FuncionarioRequest;
+use App\Http\Requests\LancamentoRequest;
 use App\Http\Requests\NotaFiscalRequest;
 use App\Models\Lancamento;
 use Closure;
@@ -35,11 +36,16 @@ class AiAgentService
     private const MENSAGENS_VALIDACAO = [
         'required' => 'Informe :attribute.',
         'string' => ':Attribute deve ser um texto.',
-        'max' => ':Attribute aceita no máximo :max caracteres.',
+        // Regra de tamanho: a frase depende do tipo do campo (texto conta caracteres, número compara valor).
+        'max' => [
+            'string' => ':Attribute aceita no máximo :max caracteres.',
+            'numeric' => ':Attribute deve ser no máximo :max.',
+        ],
         'email' => 'O e-mail informado não é válido.',
         'numeric' => ':Attribute deve ser um número.',
         'min' => ':Attribute deve ser no mínimo :min.',
         'date' => ':Attribute deve ser uma data válida (AAAA-MM-DD).',
+        'date_format' => ':Attribute deve ser uma data válida (AAAA-MM-DD).',
         'exists' => 'Não encontrei :attribute informado.',
         'in' => ':Attribute informado não é válido.',
         'required_if' => 'Informe :attribute.',
@@ -49,10 +55,13 @@ class AiAgentService
         'cliente_id.prohibited_if' => 'Nota fiscal de entrada não leva cliente — informe o fornecedor.',
         'fornecedor_id.prohibited_if' => 'Nota fiscal de saída não leva fornecedor — informe o cliente.',
         'data_demissao.after_or_equal' => 'A data de demissão não pode ser anterior à data de admissão.',
+        'valor.gt' => 'O valor deve ser maior que zero.',
     ];
 
     /** Como cada campo aparece nas frases acima. */
     private const ROTULOS_CAMPOS = [
+        'descricao' => 'a descrição',
+        'data' => 'a data',
         'nome' => 'o nome',
         'documento' => 'o documento',
         'email' => 'o e-mail',
@@ -156,6 +165,11 @@ class AiAgentService
             ];
         }
 
+        // Só o primeiro pedido é atendido; os demais não podem sumir calados.
+        $aviso = is_array($toolCalls) && count($toolCalls) > 1
+            ? 'Havia '.count($toolCalls).' pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.'
+            : null;
+
         $chamada = $toolCalls[0];
         $tool = $chamada['function']['name'] ?? '';
         $argumentos = json_decode($chamada['function']['arguments'] ?? '{}', true);
@@ -168,24 +182,36 @@ class AiAgentService
 
         if ($definicao !== null && $definicao['tipo'] === 'escrita') {
             if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
-                return $this->negar($tool, $definicao, $argumentos);
+                return $this->comAviso($this->negar($tool, $definicao, $argumentos), $aviso);
             }
 
-            return [
+            return $this->comAviso([
                 'tipo' => 'confirmacao_pendente',
                 'tool' => $tool,
                 'argumentos' => $argumentos,
-            ];
+            ], $aviso);
         }
 
         try {
-            return $this->executarTool($tool, $argumentos);
+            return $this->comAviso($this->executarTool($tool, $argumentos), $aviso);
         } catch (InvalidArgumentException $e) {
-            return [
+            return $this->comAviso([
                 'tipo' => 'erro',
                 'mensagem' => $e->getMessage(),
-            ];
+            ], $aviso);
         }
+    }
+
+    /**
+     * Acrescenta o campo "aviso" à resposta quando o modelo pediu mais de uma
+     * tool na mesma mensagem (só a primeira é processada).
+     *
+     * @param  array<string, mixed>  $resposta
+     * @return array<string, mixed>
+     */
+    private function comAviso(array $resposta, ?string $aviso): array
+    {
+        return $aviso === null ? $resposta : [...$resposta, 'aviso' => $aviso];
     }
 
     /**
@@ -278,8 +304,9 @@ class AiAgentService
         }
 
         // Leitura devolve só as colunas declaradas na tool (nada de tenant_id, timestamps, etc.).
+        // A mesma máscara LGPD da auditoria vale para o que a leitura exibe (ex.: CPF no documento de cliente/fornecedor).
         if ($resultado instanceof Collection && $definicao['colunas']) {
-            $resultado = $resultado->map(fn (Model $m) => Arr::only($m->toArray(), $definicao['colunas']))->values()->all();
+            $resultado = $resultado->map(fn (Model $m) => AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $definicao['colunas'])))->values()->all();
         }
 
         return [
@@ -341,7 +368,7 @@ class AiAgentService
                     'data' => ['type' => 'string', 'format' => 'date'],
                 ],
                 obrigatorios: ['descricao', 'valor', 'data'],
-                executar: fn (array $a) => $this->lancamentoService->criar($a),
+                executar: fn (array $a) => $this->lancamentoService->criar($this->validar($a, (new LancamentoRequest)->rules())),
                 mensagemErro: 'Não consegui criar o lançamento — verifique se descrição, valor e data foram informados.',
             ),
             $this->definirTool(

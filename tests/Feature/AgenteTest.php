@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\Lancamento;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -200,6 +202,73 @@ class AgenteTest extends TestCase
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'erro');
 
         Http::assertNothingSent();
+    }
+
+    public function test_data_de_hoje_no_prompt_usa_o_fuso_de_brasilia(): void
+    {
+        // 29/09 02:30 em UTC ainda é 28/09 23:30 em Brasília: o modelo tem que receber o dia 28.
+        $this->travelTo(Carbon::parse('2026-09-29 02:30:00', 'UTC'));
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'que dia é hoje?'])->assertOk();
+
+        Http::assertSent(fn ($req) => str_contains($req['messages'][0]['content'], 'A data de hoje é 2026-09-28'));
+    }
+
+    /** @param  array<int, array{string, array}>  $chamadas  [tool, argumentos] na ordem em que o modelo pediu */
+    private function respostaComVariasTools(array $chamadas): array
+    {
+        return ['choices' => [['message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => array_map(
+            fn (array $c, int $i) => ['id' => "call_{$i}", 'type' => 'function', 'function' => ['name' => $c[0], 'arguments' => json_encode($c[1])]],
+            $chamadas,
+            array_keys($chamadas),
+        )]]]];
+    }
+
+    public function test_varios_pedidos_numa_mensagem_so_o_primeiro_e_feito_e_a_resposta_avisa(): void
+    {
+        $this->lancamento('pendente');
+        Http::fake(['*' => Http::response($this->respostaComVariasTools([
+            ['consultar_lancamentos', []],
+            ['consultar_clientes', []],
+            ['consultar_fornecedores', []],
+        ]))]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'lançamentos, clientes e fornecedores'])
+            ->assertOk()
+            ->assertJsonPath('tipo', 'resultado_leitura')
+            ->assertJsonPath('tool', 'consultar_lancamentos')
+            ->assertJsonPath('aviso', 'Havia 3 pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.');
+
+        $this->assertSame(['consultar_lancamentos'], AuditLog::query()->pluck('tool')->all(), 'só o primeiro pedido foi executado');
+    }
+
+    public function test_escrita_proposta_junto_com_outro_pedido_tambem_leva_o_aviso(): void
+    {
+        Http::fake(['*' => Http::response($this->respostaComVariasTools([
+            ['criar_lancamento', ['descricao' => 'X', 'valor' => 5, 'data' => '2026-09-21']],
+            ['consultar_clientes', []],
+        ]))]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'crie e liste'])
+            ->assertOk()
+            ->assertJsonPath('tipo', 'confirmacao_pendente')
+            ->assertJsonPath('tool', 'criar_lancamento')
+            ->assertJsonStructure(['token'])
+            ->assertJsonPath('aviso', 'Havia 2 pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.');
+
+        $this->assertSame(0, Lancamento::count());
+        $this->assertSame(0, AuditLog::count(), 'o segundo pedido não foi executado');
+    }
+
+    public function test_um_pedido_so_nao_leva_aviso(): void
+    {
+        Http::fake(['*' => Http::response($this->respostaComTool('consultar_lancamentos', []))]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'lançamentos'])
+            ->assertOk()
+            ->assertJsonPath('tipo', 'resultado_leitura')
+            ->assertJsonMissingPath('aviso');
     }
 
     public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
