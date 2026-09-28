@@ -13,6 +13,8 @@ Passos:
    - Itens fechados (✅)
    - Pendências não bloqueadoras (⏳)
    - Bloqueios reais que só o Lucas resolve (🔒)
+   - Divergências para registrar no Notion (base Divergências e Ajustes): uma
+     por item, com título, severidade e esperado × encontrado.
 4. Atualize a seção de débitos conhecidos do CLAUDE.md com o que mudou nesta
    fase (o que foi resolvido, o que é novo).
 5. NÃO edite o Notion diretamente sem eu confirmar — me entregue o texto

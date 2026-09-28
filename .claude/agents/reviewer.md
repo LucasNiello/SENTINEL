@@ -33,6 +33,15 @@ não é exercitada.
    documentados, não silenciosamente esquecidos.
 5. Nenhuma tool nova do AiAgentService ficou sem RBAC, confirmação ou registro
    de auditoria real.
+6. Isolamento por tenant em todo método de service e tool: o tenant vem do
+   `ContextoUsuario` e filtra toda leitura, alteração, exclusão e restauração;
+   registro de outro tenant é tratado como inexistente.
+7. Confirmação conferida no servidor (espera mínima, validade, consumo único),
+   nunca só na interface.
+8. CPF e salário mascarados nas respostas das tools e na auditoria
+   (`audit_logs` e log de arquivo).
+9. Conferir o estado real nos arquivos do repositório, não o relato de quem
+   implementou. Conferir o git (log/diff) fica com quem acionou o reviewer.
 
 # FORMATO DO RELATÓRIO
 Liste os achados por severidade (bloqueador / importante / cosmético), cada um
