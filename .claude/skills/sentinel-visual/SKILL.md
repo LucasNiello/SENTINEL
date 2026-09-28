@@ -6,7 +6,7 @@ description: Padrão visual do Sentinel (paleta, tipografia, logo, borda por ris
 # Padrão visual do Sentinel
 
 Fonte da verdade: página "Direção visual" no Notion (SENTINEL), decisões de 28/09.
-Se algo aqui conflitar com `.claude/agents/frontend-blade.md` ou com código antigo, **esta skill vence**.
+Se algo aqui conflitar com código antigo ou com instruções anteriores, **esta skill vence**.
 
 ## 1. As duas zonas
 
@@ -83,7 +83,7 @@ A borda é o único sinal de risco. Não varie animação por risco.
 - Funciona com mouse, toque e teclado (Espaço/Enter segurados). Soltar antes do fim cancela o preenchimento e mostra "Nada foi gravado".
 - O botão de segurar usa a cor do risco da ação (`aviso` ou `erro`). O **Cancelar** é neutro (contorno `tinta-2`), nunca vermelho, e cancela com um clique.
 - O card mostra em texto o que vai acontecer (ação + dados principais) antes de o usuário segurar.
-- O servidor só aceita a confirmação entre 2 s (espera mínima) e a janela ociosa de 10 s (`DURACAO_IDLE_MS`, validade do token). Quando a janela passa, o card **não some calado**: fica visível com o texto "Confirmação expirada. Nada foi gravado. Peça de novo." e os botões desativados.
+- O servidor só aceita a confirmação entre 2 s (espera mínima) e 12 s (janela ociosa de 10 s da interface, `DURACAO_IDLE_MS`, mais folga; `VALIDADE_MAXIMA_S`). Quando a janela passa, o card **não some calado**: fica visível com o texto "Confirmação expirada. Nada foi gravado. Peça de novo." e os botões desativados.
 
 ## 7. Mensagens e estados
 

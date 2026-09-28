@@ -1,8 +1,11 @@
 ---
-description: Gera migration + model + service + Form Request + seeder + teste básico para uma entidade nova, no padrão exato das 5 entidades já existentes do Sentinel (Cliente, Fornecedor, Funcionario, NotaFiscal, CategoriaLancamento).
+description: Gera migration + model + service + Form Request + seeder + teste básico para uma entidade nova, no padrão exato das 6 entidades já existentes do Sentinel (Lancamento, CategoriaLancamento, Cliente, Fornecedor, Funcionario, NotaFiscal).
 ---
 
 Entidade a criar: $ARGUMENTS
+
+Siga a skill `sentinel-backend` (em especial: `int $tenantId` obrigatório em
+todos os métodos do service que leem, alteram, excluem ou restauram).
 
 Se nenhum nome de entidade foi passado, pergunte antes de continuar.
 
@@ -17,7 +20,8 @@ Passos:
    - Migration
    - Model
    - Service (com o mesmo conjunto de métodos de governança: soft delete com
-     bloqueio por dependência, restaurar, arquivar)
+     bloqueio por dependência, restaurar, arquivar; tenant obrigatório em
+     cada método, conforme a skill `sentinel-backend`)
    - Form Request de validação
    - Seeder de teste
    - Teste básico cobrindo criar/ler e o bloqueio por dependência
