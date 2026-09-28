@@ -1,0 +1,565 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Sentinel Vitrine</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect width='120' height='120' rx='26' fill='%230A0E13'/%3E%3Cg transform='translate(-8 0)' fill='%23A8C8E6'%3E%3Cpolygon points='50,22 60,13 70,22'/%3E%3Crect x='52' y='22' width='16' height='12'/%3E%3Crect x='47' y='34' width='26' height='4'/%3E%3Cpolygon points='52.5,38 67.5,38 73,100 47,100'/%3E%3Crect x='40' y='100' width='40' height='5'/%3E%3Cpolygon points='68,28 96,21 96,35' opacity='.55'/%3E%3C/g%3E%3Crect transform='translate(-8 0)' x='55' y='25.5' width='10' height='5' fill='%23FFFCEF'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    color-scheme: dark;
+    /* vitrine: frio, uma cor só */
+    --noite: #0A0E13;
+    --noite-2: #121821;
+    --texto: #E6ECF2;
+    --texto-2: #8A97A5;
+    --gelo: #A8C8E6;
+    --linha: #223040;
+    /* bancada: sóbria, sobre o creme escolhido pelo Lucas */
+    --creme: #FFFCEF;
+    --creme-2: #F4F0DE;
+    --tinta: #1D232A;
+    --tinta-2: #5B6570;
+    --gelo-escuro: #2E5B85;
+    --borda: #E3DDC6;
+
+    --f-display: "Sora", "Segoe UI", system-ui, sans-serif;
+    --f-corpo: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin: 0;
+    background: var(--noite);
+    color: var(--texto);
+    font-family: var(--f-corpo);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,h2{ font-family: var(--f-display); font-weight:300; letter-spacing:-0.02em; text-wrap:balance; margin:0; }
+  p{ margin:0; }
+  a{ color:inherit; }
+
+  /* ---------- loader ---------- */
+  #loader{
+    position:fixed; inset:0; z-index:50; background:var(--noite);
+    display:grid; place-items:center;
+    transition: opacity .5s ease, visibility .5s;
+  }
+  #loader.saiu{ opacity:0; visibility:hidden; }
+  .loader-miolo{ display:grid; gap:14px; justify-items:center; }
+  .loader-marca{
+    font-family:var(--f-display); font-weight:300; font-size:13px;
+    letter-spacing:.6em; padding-left:.6em; color:var(--texto);
+  }
+  .loader-trilho{ width:180px; height:1px; background:var(--linha); overflow:hidden; }
+  .loader-fio{ height:100%; width:0; background:var(--gelo); }
+  .loader-num{ font-family:var(--f-mono); font-size:11px; color:var(--texto-2); font-variant-numeric:tabular-nums; }
+  .loader-farol{ width:72px; height:72px; }
+
+  /* ---------- palco 3D ---------- */
+  #palco{ position:fixed; inset:0; z-index:0; pointer-events:none; }
+  #palco::after{ content:""; position:absolute; inset:0; background:radial-gradient(ellipse at center, transparent 30%, rgba(10,14,19,.55) 100%); }
+  #palco canvas{ display:block; width:100%; height:100%; opacity:.55; }  /* fundo: não disputa com o texto */
+
+  /* ---------- estrutura ---------- */
+  .topo{
+    position:fixed; top:env(safe-area-inset-top,0px); left:0; right:0; z-index:10;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:18px clamp(16px,5vw,56px);
+    mix-blend-mode:difference;
+  }
+  .marca{ display:inline-flex; align-items:center; gap:10px; font-family:var(--f-display); font-size:14px; letter-spacing:.35em; font-weight:400; color:#fff; text-decoration:none; }
+  .topo a.entrar{ font-size:13px; color:#fff; text-decoration:none; border-bottom:1px solid currentColor; padding-bottom:2px; }
+
+  main{ position:relative; z-index:1; }
+  .secao{
+    min-height:100vh; display:flex; align-items:center;
+    padding-inline:clamp(16px,6vw,96px); padding-block:96px;
+  }
+  .secao[data-lado="esquerda"]{ justify-content:flex-start; }
+  .secao[data-lado="direita"]{ justify-content:flex-end; }
+  .bloco{ max-width:480px; display:grid; gap:22px; }
+
+  .rotulo{
+    font-family:var(--f-mono); font-size:12px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--gelo);
+  }
+  .hero h1{ font-size:clamp(40px,6.4vw,84px); line-height:1.02; }
+  .hero h1 em{ font-style:normal; color:var(--gelo); }
+  .secao h2{ font-size:clamp(30px,4vw,48px); line-height:1.08; }
+  .lead{ color:var(--texto-2); font-size:18px; max-width:44ch; }
+  .acoes{ display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+  .btn{
+    font-family:var(--f-corpo); font-size:15px; font-weight:500;
+    padding:13px 26px; border-radius:2px; border:1px solid var(--gelo);
+    background:var(--gelo); color:var(--noite); text-decoration:none; cursor:pointer;
+    transition: background .2s, color .2s;
+  }
+  .btn:hover{ background:transparent; color:var(--gelo); }
+  .btn:focus-visible, .link:focus-visible, button:focus-visible{ outline:2px solid var(--gelo); outline-offset:3px; }
+  .link{ font-size:15px; color:var(--texto-2); text-decoration:none; }
+  .link:hover{ color:var(--texto); }
+
+  /* ---------- demo: conversa ---------- */
+  .painel{
+    background:rgba(18,24,33,.82); border:1px solid var(--linha);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    padding:18px; display:grid; gap:14px; font-size:14px;
+  }
+  .fala-usuario{ justify-self:end; background:var(--noite-2); border:1px solid var(--linha); padding:9px 13px; max-width:85%; }
+  .fala-agente{ color:var(--texto-2); }
+  .tabela-scroll{ overflow-x:auto; }
+  table{ border-collapse:collapse; width:100%; font-size:13px; }
+  th{ text-align:left; font-weight:500; color:var(--texto-2); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:6px 10px 6px 0; border-bottom:1px solid var(--linha); }
+  td{ padding:8px 10px 8px 0; border-bottom:1px solid var(--linha); white-space:nowrap; }
+  td.num{ font-family:var(--f-mono); font-variant-numeric:tabular-nums; color:var(--texto-2); }
+  .exemplo{ font-family:var(--f-mono); font-size:11px; color:var(--texto-2); }
+
+  /* ---------- demo: segurar pra confirmar ---------- */
+  .card-confirma{ display:grid; gap:14px; }
+  .card-confirma dl{ display:grid; grid-template-columns:auto 1fr; gap:6px 16px; margin:0; font-size:14px; }
+  .card-confirma dt{ color:var(--texto-2); }
+  .card-confirma dd{ margin:0; }
+  .card-confirma dd.num{ font-family:var(--f-mono); font-variant-numeric:tabular-nums; }
+  .botoes{ display:flex; gap:10px; flex-wrap:wrap; }
+  .segurar{
+    position:relative; overflow:hidden; flex:1 1 200px;
+    font-family:var(--f-corpo); font-size:14px; font-weight:500;
+    padding:12px 16px; border:1px solid var(--gelo); background:transparent; color:var(--gelo);
+    border-radius:2px; cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:none;
+  }
+  .segurar .enchimento{ position:absolute; inset:0; width:0; background:var(--gelo); z-index:0; }
+  .segurar span{ position:relative; z-index:1; mix-blend-mode:difference; color:#fff; }
+  .cancelar{
+    flex:0 0 auto; font-family:var(--f-corpo); font-size:14px; padding:12px 16px;
+    border:1px solid var(--linha); background:transparent; color:var(--texto-2); border-radius:2px; cursor:pointer;
+  }
+  .cancelar:hover{ color:var(--texto); border-color:var(--texto-2); }
+  .estado{ font-size:13px; color:var(--texto-2); min-height:1.6em; }
+  .estado.ok{ color:var(--gelo); }
+
+  /* ---------- demo: auditoria ---------- */
+  .log{ font-family:var(--f-mono); font-size:12.5px; display:grid; gap:0; }
+  .log div{ display:grid; grid-template-columns:88px 1fr auto; gap:12px; padding:9px 0; border-bottom:1px solid var(--linha); }
+  .log .hora{ color:var(--texto-2); font-variant-numeric:tabular-nums; }
+  .log .neg{ color:#D9A38F; }
+  .log .ok{ color:var(--gelo); }
+  .nota{ font-size:14px; color:var(--texto-2); }
+
+  /* ---------- bancada ---------- */
+  .bancada{
+    position:relative; z-index:2; background:var(--creme); color:var(--tinta);
+    padding-inline:clamp(16px,6vw,96px); padding-block:120px 72px;
+  }
+  .bancada-grade{ display:grid; grid-template-columns:minmax(0,420px) minmax(0,1fr); gap:clamp(32px,6vw,88px); align-items:center; max-width:1200px; margin-inline:auto; }
+  .bancada .rotulo{ color:var(--gelo-escuro); }
+  .bancada h2{ font-size:clamp(30px,4vw,46px); line-height:1.08; }
+  .bancada .lead{ color:var(--tinta-2); }
+  .bancada .btn{ background:var(--tinta); border-color:var(--tinta); color:var(--creme); }
+  .bancada .btn:hover{ background:transparent; color:var(--tinta); }
+  .bancada .btn:focus-visible{ outline-color:var(--gelo-escuro); }
+
+  .tela{ background:#fff; border:1px solid var(--borda); font-size:14px; color:var(--tinta); }
+  .tela td{ color:var(--tinta); }
+  .tela-topo{ display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--borda); }
+  .tela-topo strong{ font-family:var(--f-display); font-weight:400; letter-spacing:.3em; font-size:12px; }
+  .tela-topo span{ color:var(--tinta-2); font-size:12px; }
+  .tela-corpo{ padding:18px 16px; display:grid; gap:14px; }
+  .campo{ border:1px solid var(--borda); background:var(--creme); padding:10px 12px; color:var(--tinta-2); }
+  .tela th{ color:var(--tinta-2); border-bottom-color:var(--borda); }
+  .tela td{ border-bottom-color:var(--borda); }
+  .tela td.num{ color:var(--tinta-2); }
+  .rodape{ max-width:1200px; margin:72px auto 0; padding-top:20px; border-top:1px solid var(--borda); font-family:var(--f-mono); font-size:11px; color:var(--tinta-2); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+
+  /* ---------- telas estreitas ---------- */
+  @media (max-width: 760px){
+    .secao[data-lado]{ justify-content:flex-start; }
+    .secao{ min-height:auto; padding-block:88px; }
+    .hero{ min-height:88vh; }
+    .bancada-grade{ grid-template-columns:minmax(0,1fr); }
+    .log div{ grid-template-columns:64px 1fr; }
+    .log div > :last-child{ grid-column:2; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    html{ scroll-behavior:auto; }
+    #loader{ display:none; }
+  }
+
+  /* ---------- controles do protótipo ---------- */
+
+  .aviso-movimento{ position:fixed; right:16px; left:auto; width:calc(100% - 32px); bottom:calc(60px + env(safe-area-inset-bottom,0px)); z-index:20; max-width:420px; font-size:13px; background:var(--noite-2); border:1px solid var(--linha); padding:10px 12px; color:var(--texto); }
+  .aviso-movimento button{ margin-top:6px; display:block; font:inherit; color:var(--gelo); background:none; border:0; padding:0; text-decoration:underline; cursor:pointer; }
+
+  /* ---------- tela de login (a porta da vitrine para a bancada) ---------- */
+  .login{ position:fixed; inset:0; z-index:40; background:var(--creme); color:var(--tinta);
+    display:grid; place-items:center; padding-inline:16px; padding-block:24px; overflow-y:auto; }
+  .login[hidden]{ display:none; }
+  .login-caixa{ width:100%; max-width:380px; display:grid; gap:22px; }
+  .login-marca{ font-family:var(--f-display); font-size:14px; letter-spacing:.35em; }
+  .login h2{ font-size:30px; line-height:1.1; }
+  .login form{ display:grid; gap:14px; }
+  .login label{ display:grid; gap:6px; font-size:13px; color:var(--tinta-2); }
+  .login input{ font:inherit; font-size:15px; color:var(--tinta); background:#fff; border:1px solid var(--borda); border-radius:2px; padding:11px 12px; }
+  .login input:focus-visible{ outline:2px solid var(--gelo-escuro); outline-offset:1px; border-color:var(--gelo-escuro); }
+  .login .btn{ background:var(--tinta); border-color:var(--tinta); color:var(--creme); justify-self:stretch; text-align:center; }
+  .login .btn:hover{ background:transparent; color:var(--tinta); }
+  .login .btn:focus-visible{ outline-color:var(--gelo-escuro); }
+  .login-rodape{ display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:var(--tinta-2); }
+  .login-rodape button{ font:inherit; color:var(--gelo-escuro); background:none; border:0; padding:0; cursor:pointer; text-decoration:underline; }
+  .login-aviso{ font-family:var(--f-mono); font-size:11px; color:var(--tinta-2); }
+</style>
+
+<div id="loader" aria-hidden="true">
+  <div class="loader-miolo">
+    <svg class="loader-farol" viewBox="0 0 120 120" aria-hidden="true">
+      <g fill="#A8C8E6"><polygon points="50,22 60,13 70,22"/><rect x="52" y="22" width="16" height="12"/><rect x="47" y="34" width="26" height="4"/><polygon points="52.5,38 67.5,38 73,100 47,100"/><rect x="40" y="100" width="40" height="5"/></g>
+      <rect id="ld-janela" x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/>
+      <polygon id="ld-esq" points="52,28 12,19 12,37" fill="#A8C8E6" opacity=".55"/>
+      <polygon id="ld-dir" points="68,28 108,19 108,37" fill="#A8C8E6" opacity=".55"/>
+    </svg>
+    <div class="loader-marca">SENTINEL</div>
+    <div class="loader-trilho"><div class="loader-fio" id="fio"></div></div>
+    <div class="loader-num" id="num">000</div>
+  </div>
+</div>
+
+<div id="palco"></div>
+
+<header class="topo">
+  <a class="marca" href="#inicio"><svg width="22" height="22" viewBox="21 8 92 100" aria-hidden="true"><g fill="#A8C8E6"><polygon points="50,22 60,13 70,22"/><rect x="52" y="22" width="16" height="12"/><rect x="47" y="34" width="26" height="4"/><polygon points="52.5,38 67.5,38 73,100 47,100"/><rect x="40" y="100" width="40" height="5"/><polygon points="68,28 94,22 94,34" opacity=".55"/></g><rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/></svg>SENTINEL</a>
+  <a class="entrar" href="#entrar" data-abre-login>Entrar</a>
+</header>
+
+<p class="aviso-movimento" id="aviso-movimento" hidden>Seu sistema pede menos animação, então o símbolo fica parado. <button type="button" id="forcar">Ver animação mesmo assim</button></p>
+
+<div class="login" id="entrar" role="dialog" aria-modal="true" aria-labelledby="login-titulo" hidden>
+  <div class="login-caixa">
+    <div class="login-marca">SENTINEL</div>
+    <h2 id="login-titulo">Entrar</h2>
+    <form id="form-login" novalidate>
+      <label for="login-email">E-mail<input id="login-email" type="email" autocomplete="username" value="operador@sentinel.local"></label>
+      <label for="login-senha">Senha<input id="login-senha" type="password" autocomplete="current-password"></label>
+      <button class="btn" type="submit">Entrar</button>
+    </form>
+    <div class="login-rodape"><button type="button" id="fechar-login">Voltar para a vitrine</button><span>Esc também volta</span></div>
+    <p class="login-aviso">Protótipo: a tela de login já é a bancada, sóbria, sem animação.</p>
+  </div>
+</div>
+
+<main>
+  <section class="secao hero" id="inicio" data-lado="esquerda">
+    <div class="bloco">
+      <p class="rotulo">Agente de IA para contabilidade</p>
+      <h1>Peça em português. <em>O Sentinel executa.</em></h1>
+      <p class="lead">Consulta, cadastra e registra no seu sistema contábil a partir de uma conversa. Nenhum dado é gravado sem a sua confirmação.</p>
+      <div class="acoes">
+        <a class="btn" href="#entrar" data-abre-login>Entrar</a>
+        <a class="link" href="#pedir">Ver como funciona ↓</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="secao" id="pedir" data-lado="esquerda">
+    <div class="bloco">
+      <p class="rotulo">Consulta</p>
+      <h2>Você pergunta. Ele busca nos seus dados.</h2>
+      <div class="painel" role="group" aria-label="Exemplo de conversa">
+        <div class="fala-usuario">quais fornecedores cadastramos em setembro?</div>
+        <div class="fala-agente">Encontrei 3 fornecedores cadastrados em setembro:</div>
+        <div class="tabela-scroll">
+          <table>
+            <thead><tr><th>Fornecedor</th><th>CNPJ</th><th>Cadastro</th></tr></thead>
+            <tbody>
+              <tr><td>Papelaria Central Ltda</td><td class="num">12.345.678/0001-90</td><td class="num">03/09</td></tr>
+              <tr><td>Gráfica Rio Claro ME</td><td class="num">08.456.123/0001-77</td><td class="num">11/09</td></tr>
+              <tr><td>Limpa Bem Serviços</td><td class="num">45.987.321/0001-12</td><td class="num">19/09</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="exemplo">dados de exemplo</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="secao" id="confirmar" data-lado="direita">
+    <div class="bloco">
+      <p class="rotulo">Confirmação humana</p>
+      <h2>Nada é gravado sem você.</h2>
+      <p class="lead">Antes de qualquer cadastro, o Sentinel mostra o que vai fazer. Para gravar, segure o botão. Para desistir, um clique basta.</p>
+      <div class="painel card-confirma">
+        <dl>
+          <dt>Ação</dt><dd>Cadastrar cliente</dd>
+          <dt>Nome</dt><dd>Mercado Bom Preço</dd>
+          <dt>CNPJ</dt><dd class="num">23.456.789/0001-10</dd>
+        </dl>
+        <div class="botoes">
+          <button class="segurar" id="segurar" type="button"><div class="enchimento" id="enchimento"></div><span>Segure para confirmar</span></button>
+          <button class="cancelar" id="cancelar" type="button">Cancelar</button>
+        </div>
+        <p class="estado" id="estado" aria-live="polite">Experimente: segure o botão por um segundo.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="secao" id="auditoria" data-lado="esquerda">
+    <div class="bloco">
+      <p class="rotulo">Auditoria</p>
+      <h2>Cada ação fica registrada.</h2>
+      <div class="painel log" role="group" aria-label="Exemplo de registro de auditoria">
+        <div><span class="hora">24/09 14:02</span><span>operador · criar_cliente</span><span class="ok">confirmado</span></div>
+        <div><span class="hora">24/09 14:05</span><span>leitura · criar_cliente</span><span class="neg">negado: papel</span></div>
+        <div><span class="hora">24/09 14:07</span><span>admin · consultar_funcionario<br>CPF ***.456.789-**</span><span class="ok">executado</span></div>
+      </div>
+      <p class="nota">Quem fez, o que pediu e o resultado, inclusive o que foi negado. CPF e salário aparecem mascarados até dentro da auditoria (LGPD).</p>
+    </div>
+  </section>
+</main>
+
+<section class="bancada" id="bancada">
+  <div class="bancada-grade">
+    <div class="bloco">
+      <p class="rotulo">Depois do login</p>
+      <h2>Por dentro, só o trabalho.</h2>
+      <p class="lead">Fundo claro, uma cor, nada piscando. A vitrine impressiona uma vez; a bancada é feita para um dia inteiro de uso.</p>
+      <div class="acoes"><a class="btn" href="#entrar" data-abre-login>Entrar no Sentinel</a></div>
+    </div>
+    <div class="tela" aria-label="Prévia da tela do agente">
+      <div class="tela-topo"><strong>SENTINEL</strong><span>operador@sentinel.local · Sair</span></div>
+      <div class="tela-corpo">
+        <div class="campo">liste os clientes</div>
+        <div class="tabela-scroll">
+          <table>
+            <thead><tr><th>Cliente</th><th>CNPJ</th><th>Cidade</th></tr></thead>
+            <tbody>
+              <tr><td>Padaria Estrela</td><td class="num">34.567.890/0001-21</td><td>Limeira</td></tr>
+              <tr><td>Auto Peças Irmãos</td><td class="num">56.789.012/0001-43</td><td>Americana</td></tr>
+              <tr><td>Clínica Vida Plena</td><td class="num">67.890.123/0001-54</td><td>Piracicaba</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rodape"><span>Protótipo de direção visual · Tarefa B · Fase 3</span><span>Fundo da bancada: #FFFCEF</span></div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  var reduz = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- farol 2D do loader: a luz gira na lanterna (vista de frente) ---------- */
+  var ldEsq = document.getElementById('ld-esq'), ldDir = document.getElementById('ld-dir'), ldJan = document.getElementById('ld-janela');
+  function girarFarol2d(a){
+    var c = Math.cos(a), sd = Math.max(0, c), se = Math.max(0, -c);
+    ldDir.setAttribute('transform', 'translate(68 28) scale(' + sd.toFixed(3) + ' 1) translate(-68 -28)');
+    ldEsq.setAttribute('transform', 'translate(52 28) scale(' + se.toFixed(3) + ' 1) translate(-52 -28)');
+    ldJan.setAttribute('opacity', (0.45 + 0.55 * Math.max(0, Math.sin(a))).toFixed(3));
+  }
+
+  /* ---------- loader: some sozinho em ~1,3 s ---------- */
+  var loader = document.getElementById('loader');
+  var fio = document.getElementById('fio');
+  var num = document.getElementById('num');
+  if (reduz) { loader.classList.add('saiu'); }
+  else {
+    var t0 = performance.now(), dur = 1300;
+    (function passo(t){
+      var p = Math.min(1, (t - t0) / dur);
+      var e = 1 - Math.pow(1 - p, 3);
+      fio.style.width = (e * 100) + '%';
+      girarFarol2d((t - t0) / 1000 * 4.8);
+      num.textContent = String(Math.round(e * 100)).padStart(3, '0');
+      if (p < 1) requestAnimationFrame(passo);
+      else setTimeout(function(){ loader.classList.add('saiu'); }, 180);
+    })(t0);
+  }
+
+  /* ---------- segurar para confirmar ---------- */
+  var btn = document.getElementById('segurar');
+  var ench = document.getElementById('enchimento');
+  var estado = document.getElementById('estado');
+  var cancelar = document.getElementById('cancelar');
+  var TEMPO = 1000, inicio = null, raf = null, feito = false;
+  function progresso(t){
+    var p = Math.min(1, (t - inicio) / TEMPO);
+    ench.style.width = (p * 100) + '%';
+    if (p >= 1) {
+      feito = true; inicio = null;
+      estado.textContent = 'Confirmado. Cliente gravado e registrado na auditoria.';
+      estado.className = 'estado ok';
+      return;
+    }
+    raf = requestAnimationFrame(progresso);
+  }
+  function comecar(e){
+    if (e) e.preventDefault();
+    if (feito || inicio !== null) return;
+    inicio = performance.now();
+    estado.textContent = 'Segurando…'; estado.className = 'estado';
+    raf = requestAnimationFrame(progresso);
+  }
+  function soltar(){
+    if (inicio === null || feito) return;
+    cancelAnimationFrame(raf); inicio = null;
+    ench.style.transition = 'width .25s ease'; ench.style.width = '0';
+    setTimeout(function(){ ench.style.transition = ''; }, 260);
+    estado.textContent = 'Soltou antes do fim. Nada foi gravado.';
+  }
+  btn.addEventListener('pointerdown', comecar);
+  btn.addEventListener('pointerup', soltar);
+  btn.addEventListener('pointerleave', soltar);
+  btn.addEventListener('pointercancel', soltar);
+  btn.addEventListener('keydown', function(e){ if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) comecar(e); });
+  btn.addEventListener('keyup', function(e){ if (e.key === ' ' || e.key === 'Enter') soltar(); });
+  cancelar.addEventListener('click', function(){
+    cancelAnimationFrame(raf); inicio = null; feito = false;
+    ench.style.width = '0';
+    estado.textContent = 'Cancelado. Nada foi gravado.'; estado.className = 'estado';
+  });
+
+  /* ---------- login: vitrine -> bancada ---------- */
+  var telaLogin = document.getElementById('entrar');
+  var origemFoco = null;
+  function abrirLogin(e){
+    if (e) e.preventDefault();
+    origemFoco = document.activeElement;
+    telaLogin.hidden = false;
+    document.body.style.overflow = 'hidden';
+    setTimeout(function(){ document.getElementById('login-senha').focus(); }, 30);
+  }
+  function fecharLogin(){
+    telaLogin.hidden = true;
+    document.body.style.overflow = '';
+    if (origemFoco && origemFoco.focus) origemFoco.focus();
+  }
+  document.querySelectorAll('[data-abre-login]').forEach(function(a){ a.addEventListener('click', abrirLogin); });
+  document.getElementById('fechar-login').addEventListener('click', fecharLogin);
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !telaLogin.hidden) fecharLogin(); });
+  document.getElementById('form-login').addEventListener('submit', function(e){
+    e.preventDefault();
+    fecharLogin();
+    document.getElementById('bancada').scrollIntoView({ behavior: reduz ? 'auto' : 'smooth' });
+  });
+
+  /* ---------- palco 3D ---------- */
+  var palco = document.getElementById('palco');
+  var renderer;
+  try {
+    if (!window.THREE) throw new Error('sem three');
+    renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  } catch (err) { document.documentElement.classList.add('sem-webgl'); return; }
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  palco.appendChild(renderer.domElement);
+
+  var cena = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+  camera.position.z = 7;
+  var grupoCamera = new THREE.Group(); grupoCamera.add(camera); cena.add(grupoCamera);
+
+  // gradiente de 3 tons para o sombreamento chapado (toon), igual ao estudo do farol
+  var c = document.createElement('canvas'); c.width = 3; c.height = 1;
+  var g = c.getContext('2d');
+  ['#1b2a3b','#5f86ad','#a8c8e6'].forEach(function(cor, i){ g.fillStyle = cor; g.fillRect(i,0,1,1); });
+  var degraus = new THREE.CanvasTexture(c);
+  degraus.magFilter = THREE.NearestFilter; degraus.minFilter = THREE.NearestFilter; degraus.generateMipmaps = false;
+  var matCorpo = new THREE.MeshToonMaterial({ color:'#b8cde2', gradientMap:degraus });
+
+  // ---------- símbolo 3D: farol. A torre fica firme; a lanterna gira levando os fachos ----------
+  var simbolo3d = new THREE.Group();
+  var farol = new THREE.Group();
+  var perfil = [
+    new THREE.Vector2(0.0, 0.0), new THREE.Vector2(1.25, 0.0), new THREE.Vector2(1.25, 0.18),
+    new THREE.Vector2(1.0, 0.18), new THREE.Vector2(0.62, 3.2), new THREE.Vector2(0.0, 3.2)
+  ];
+  farol.add(new THREE.Mesh(new THREE.LatheGeometry(perfil, 48), matCorpo));
+  var galeria = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.14, 48), matCorpo);
+  galeria.position.y = 3.27; farol.add(galeria);
+  var lanternaBase = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.62, 32), matCorpo);
+  lanternaBase.position.y = 3.65; farol.add(lanternaBase);
+  var cupula = new THREE.Mesh(new THREE.ConeGeometry(0.62, 0.55, 32), matCorpo);
+  cupula.position.y = 4.24; farol.add(cupula);
+
+  var lanterna = new THREE.Group(); lanterna.position.y = 3.65;
+  var janela = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.06), new THREE.MeshBasicMaterial({ color:'#FFFCEF' }));
+  janela.position.z = 0.49; lanterna.add(janela);
+  var janela2 = janela.clone(); janela2.position.z = -0.49; lanterna.add(janela2);
+  var matFacho = new THREE.MeshBasicMaterial({ color:'#FFFCEF', transparent:true, opacity:.07, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.FrontSide });
+  function facho(sentido){
+    var geo = new THREE.ConeGeometry(1.1, 9, 32, 1, true);
+    geo.translate(0, -4.5, 0);             // ponta na lanterna
+    var m = new THREE.Mesh(geo, matFacho);
+    m.rotation.x = sentido * Math.PI / 2;  // deita o cone ao longo de z
+    return m;
+  }
+  lanterna.add(facho(1));
+  farol.add(lanterna);
+  farol.position.y = -2.15;                 // centraliza a altura (~4,5) no palco
+  farol.rotation.y = -0.35;                 // leve 3/4, pra torre não ficar chapada
+  simbolo3d.add(farol);
+  cena.add(simbolo3d);
+
+  var luz = new THREE.DirectionalLight('#ffffff', 1); luz.position.set(3, 5, 6); cena.add(luz);
+  cena.add(new THREE.AmbientLight('#ffffff', .3));
+
+  // poucas partículas, bem discretas
+  var N = 260, pos = new Float32Array(N * 3);
+  for (var i = 0; i < N; i++) {
+    pos[i*3]   = (Math.random() - .5) * 14;
+    pos[i*3+1] = (Math.random() - .5) * 9;
+    pos[i*3+2] = (Math.random() - .5) * 8 - 1;
+  }
+  var geoP = new THREE.BufferGeometry(); geoP.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  var particulas = new THREE.Points(geoP, new THREE.PointsMaterial({ color:'#8A97A5', size:.018, sizeAttenuation:true, transparent:true, opacity:.7 }));
+  cena.add(particulas);
+
+  function ajustar(){
+    var w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    var esc = w < 760 ? .42 : .6;
+    simbolo3d.scale.setScalar(esc);
+  }
+  window.addEventListener('resize', ajustar); ajustar();
+
+  var aviso = document.getElementById('aviso-movimento');
+  if (reduz) aviso.hidden = false;
+  document.getElementById('forcar').addEventListener('click', function(){ reduz = false; aviso.hidden = true; });
+
+  var mouse = { x:0, y:0 };
+  window.addEventListener('pointermove', function(e){
+    mouse.x = e.clientX / window.innerWidth - .5;
+    mouse.y = e.clientY / window.innerHeight - .5;
+  });
+
+  var relogio = new THREE.Clock(), anterior = 0, visivel = true;
+  document.addEventListener('visibilitychange', function(){ visivel = !document.hidden; });
+
+  // o scroll é quem manda no giro: desceu, gira pra um lado; subiu, volta.
+  // meia volta a cada tela rolada, com inércia suave.
+  var angulo = 0;
+  function quadro(){
+    requestAnimationFrame(quadro);
+    if (!visivel) return;
+    var t = relogio.getElapsedTime(), dt = Math.min(.05, t - anterior); anterior = t;
+    var rolagem = window.scrollY / window.innerHeight;
+
+    if (!reduz) {
+      var alvo = rolagem * Math.PI * 1.5;       // 3/4 de volta por tela rolada
+      angulo += (alvo - angulo) * Math.min(1, dt * 4);
+      lanterna.rotation.y = angulo;              // 3D: descer = a luz gira pra direita; subir = volta
+      var respira = Math.sin(t * .8) * .04;      // flutuação leve, pra não parecer congelado
+      simbolo3d.position.y = respira;
+      particulas.position.y = rolagem * .5;
+      grupoCamera.position.x += (mouse.x * .25 - grupoCamera.position.x) * Math.min(1, dt * 2);
+      grupoCamera.position.y += (-mouse.y * .18 - grupoCamera.position.y) * Math.min(1, dt * 2);
+    }
+    renderer.render(cena, camera);
+  }
+  quadro();
+})();
+</script>
+
+</body></html>

@@ -1,0 +1,300 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Sentinel Farol</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    color-scheme: dark;
+    --noite:#0A0E13; --noite-2:#121821; --linha:#223040;
+    --texto:#E6ECF2; --texto-2:#8A97A5; --gelo:#A8C8E6;
+    --creme:#FFFCEF; --tinta:#1D232A; --tinta-2:#5B6570; --aco:#2E5B85; --borda:#E3DDC6;
+    --f-display:"Sora","Segoe UI",system-ui,sans-serif;
+    --f-corpo:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  }
+  body{ margin:0; background:var(--noite); color:var(--texto); font-family:var(--f-corpo); font-size:16px; line-height:1.6; }
+  h1,h2{ font-family:var(--f-display); font-weight:300; letter-spacing:-.02em; margin:0; text-wrap:balance; }
+  p{ margin:0; }
+  .faixa{ padding-inline:clamp(16px,6vw,80px); padding-block:64px; }
+  .faixa.clara{ background:var(--creme); color:var(--tinta); }
+  .miolo{ max-width:1100px; margin-inline:auto; display:grid; gap:28px; }
+  .rotulo{ font-family:var(--f-mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--gelo); }
+  .clara .rotulo{ color:var(--aco); }
+  .nota{ color:var(--texto-2); max-width:62ch; }
+  .clara .nota{ color:var(--tinta-2); }
+  h1{ font-size:clamp(34px,5vw,56px); line-height:1.05; }
+  h2{ font-size:clamp(24px,3vw,32px); line-height:1.15; }
+
+  .grade{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px; }
+  .quadro{ border:1px solid var(--linha); padding:24px; display:grid; gap:14px; align-content:start; }
+  .clara .quadro{ border-color:var(--borda); background:#fff; }
+  .quadro.escuro{ background:var(--noite); border-color:var(--linha); color:var(--texto); }
+  .quadro .legenda{ font-family:var(--f-mono); font-size:11px; color:var(--texto-2); }
+  .clara .quadro:not(.escuro) .legenda{ color:var(--tinta-2); }
+
+  .assinatura{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+  .palavra{ font-family:var(--f-display); font-weight:400; letter-spacing:.42em; font-size:22px; }
+  .icones{ display:flex; align-items:flex-end; gap:22px; flex-wrap:wrap; }
+  .icones figure{ margin:0; display:grid; gap:6px; justify-items:center; }
+  .icones figcaption{ font-family:var(--f-mono); font-size:11px; color:var(--texto-2); }
+  .clara .icones figcaption{ color:var(--tinta-2); }
+  .app{ border-radius:22%; display:grid; place-items:center; }
+  .app.e{ background:var(--noite); border:1px solid var(--linha); }
+  .app.c{ background:var(--creme); border:1px solid var(--borda); }
+
+  .palco3d{ position:relative; height:min(70vh,560px); border:1px solid var(--linha); overflow:hidden; background:radial-gradient(ellipse at 50% 40%, #121a24 0%, var(--noite) 70%); }
+  .palco3d canvas{ display:block; width:100%; height:100%; }
+  .controles{ display:flex; gap:16px; align-items:center; flex-wrap:wrap; font-size:14px; color:var(--texto-2); }
+  .controles input[type=range]{ width:min(360px,100%); accent-color:var(--gelo); }
+  .controles button{ font:inherit; font-size:13px; padding:8px 14px; background:transparent; color:var(--gelo); border:1px solid var(--gelo); border-radius:2px; cursor:pointer; }
+  .controles button[aria-pressed="true"]{ background:var(--gelo); color:var(--noite); }
+  button:focus-visible, input:focus-visible{ outline:2px solid var(--gelo); outline-offset:3px; }
+
+  .loader-demo{ display:grid; justify-items:center; gap:14px; padding-block:18px; }
+  .trilho{ width:160px; height:1px; background:var(--linha); overflow:hidden; }
+  .fio{ height:100%; width:0; background:var(--gelo); }
+
+  .lista{ margin:0; padding-left:18px; display:grid; gap:6px; color:var(--texto-2); }
+  .clara .lista{ color:var(--tinta-2); }
+  @media (prefers-reduced-motion: reduce){ .fio{ width:100% !important; } }
+</style>
+
+<!-- desenho do farol, reutilizado por <use> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="farol-corpo" viewBox="0 0 120 120">
+      <polygon points="50,22 60,13 70,22"/>
+      <rect x="52" y="22" width="16" height="12"/>
+      <rect x="47" y="34" width="26" height="4"/>
+      <polygon points="52.5,38 67.5,38 73,100 47,100"/>
+      <rect x="40" y="100" width="40" height="5"/>
+    </symbol>
+  </defs>
+</svg>
+
+<section class="faixa">
+  <div class="miolo">
+    <p class="rotulo">Estudo de logo · farol</p>
+    <h1>O farol avisa do perigo antes do erro.</h1>
+    <p class="nota">Redesenho em vetor a partir do conceito 2 do ChatGPT, com duas correções: o corpo ganhou base reta (antes afinava em ponta e lia como gravata) e a luz virou uma janela acesa na lanterna. Nesta página: a versão estática, os ícones pequenos, a animação 2D e a animação 3D.</p>
+  </div>
+</section>
+
+<section class="faixa">
+  <div class="miolo">
+    <p class="rotulo">1 · Estática</p>
+    <div class="grade">
+      <div class="quadro">
+        <div class="assinatura">
+          <svg width="96" height="96" viewBox="14 0 120 120" aria-label="Símbolo do Sentinel">
+            <g fill="#A8C8E6"><use href="#farol-corpo"/></g>
+            <rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/>
+                        <polygon points="68,28 108,19 108,37" fill="#A8C8E6" opacity=".55"/>
+          </svg>
+          <span class="palavra">SENTINEL</span>
+        </div>
+        <p class="legenda">fundo #0A0E13 · corpo #A8C8E6 · luz #FFFCEF</p>
+      </div>
+      <div class="quadro" style="background:var(--creme); border-color:var(--borda); color:var(--tinta)">
+        <div class="assinatura">
+          <svg width="96" height="96" viewBox="14 0 120 120" aria-label="Símbolo do Sentinel, versão clara">
+            <g fill="#1D232A"><use href="#farol-corpo"/></g>
+            <rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/>
+                        <polygon points="68,28 108,19 108,37" fill="#2E5B85" opacity=".75"/>
+          </svg>
+          <span class="palavra">SENTINEL</span>
+        </div>
+        <p class="legenda" style="color:var(--tinta-2)">fundo #FFFCEF · corpo #1D232A · facho #2E5B85</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="faixa">
+  <div class="miolo">
+    <p class="rotulo">2 · Ícones (aba do navegador, app, cabeçalho)</p>
+    <p class="nota">Abaixo de 32 px os fachos somem: o ícone pequeno usa só a torre com a janela acesa. A partir de 32 px os fachos voltam, curtos.</p>
+    <div class="icones">
+      <figure><div class="app e" style="width:16px;height:16px"><svg width="14" height="14" viewBox="30 10 60 100"><g fill="#A8C8E6"><use href="#farol-corpo" x="0" y="0" width="120" height="120"/></g><rect x="55" y="25.5" width="10" height="5" fill="#0A0E13"/></svg></div><figcaption>16 px</figcaption></figure>
+      <figure><div class="app e" style="width:32px;height:32px"><svg width="28" height="28" viewBox="21 8 92 100"><g fill="#A8C8E6"><use href="#farol-corpo" width="120" height="120"/></g><rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/><polygon points="68,28 94,22 94,34" fill="#A8C8E6" opacity=".55"/></svg></div><figcaption>32 px</figcaption></figure>
+      <figure><div class="app e" style="width:64px;height:64px"><svg width="54" height="54" viewBox="22 6 100 104"><g fill="#A8C8E6"><use href="#farol-corpo" width="120" height="120"/></g><rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/><polygon points="68,28 104,20 104,36" fill="#A8C8E6" opacity=".55"/></svg></div><figcaption>64 px</figcaption></figure>
+      <figure><div class="app c" style="width:16px;height:16px"><svg width="14" height="14" viewBox="30 10 60 100"><g fill="#1D232A"><use href="#farol-corpo" width="120" height="120"/></g><rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/></svg></div><figcaption>16 px</figcaption></figure>
+      <figure><div class="app c" style="width:32px;height:32px"><svg width="28" height="28" viewBox="21 8 92 100"><g fill="#1D232A"><use href="#farol-corpo" width="120" height="120"/></g><rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/><polygon points="68,28 94,22 94,34" fill="#2E5B85" opacity=".75"/></svg></div><figcaption>32 px</figcaption></figure>
+      <figure><div class="app c" style="width:64px;height:64px"><svg width="54" height="54" viewBox="22 6 100 104"><g fill="#1D232A"><use href="#farol-corpo" width="120" height="120"/></g><rect x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/><polygon points="68,28 104,20 104,36" fill="#2E5B85" opacity=".75"/></svg></div><figcaption>64 px</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section class="faixa">
+  <div class="miolo">
+    <p class="rotulo">3 · Animação 2D: a luz gira na lanterna</p>
+    <p class="nota">Um farol de verdade não mexe a torre: quem gira é a luz. Visto de frente, o facho cresce de um lado, some atrás, e a janela brilha quando ele passa de frente. Serve para o loader e para o topo da vitrine.</p>
+    <div class="grade">
+      <div class="quadro">
+        <div class="loader-demo">
+          <svg width="140" height="140" viewBox="0 0 120 120" aria-label="Loader: farol com a luz girando">
+            <g fill="#A8C8E6"><use href="#farol-corpo"/></g>
+            <rect id="l-janela" x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/>
+            <polygon id="l-esq" points="52,28 12,19 12,37" fill="#A8C8E6" opacity=".55"/>
+            <polygon id="l-dir" points="68,28 108,19 108,37" fill="#A8C8E6" opacity=".55"/>
+          </svg>
+          <div class="trilho"><div class="fio" id="fio"></div></div>
+        </div>
+        <p class="legenda">loader: a luz dá voltas enquanto carrega</p>
+      </div>
+      <div class="quadro">
+        <div class="loader-demo">
+          <svg width="140" height="140" viewBox="0 0 120 120" aria-label="Farol controlado pelo controle deslizante">
+            <g fill="#A8C8E6"><use href="#farol-corpo"/></g>
+            <rect id="s-janela" x="55" y="25.5" width="10" height="5" fill="#FFFCEF"/>
+            <polygon id="s-esq" points="52,28 12,19 12,37" fill="#A8C8E6" opacity=".55"/>
+            <polygon id="s-dir" points="68,28 108,19 108,37" fill="#A8C8E6" opacity=".55"/>
+          </svg>
+        </div>
+        <div class="controles"><label for="rola2d">Simular a rolagem</label><input id="rola2d" type="range" min="0" max="100" value="0"></div>
+        <p class="legenda">descer = a luz gira para a direita · subir = volta</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="faixa">
+  <div class="miolo">
+    <p class="rotulo">4 · Animação 3D: o fundo da vitrine</p>
+    <p class="nota">A torre fica firme e a lanterna gira no próprio eixo, levando o facho de luz. Arraste o controle para simular a rolagem da página (descer gira para a direita, subir volta), ou deixe no automático.</p>
+    <div class="palco3d" id="palco3d"></div>
+    <div class="controles">
+      <label for="rola3d">Simular a rolagem</label><input id="rola3d" type="range" min="0" max="100" value="0">
+      <button type="button" id="auto" aria-pressed="false">Automático</button>
+    </div>
+  </div>
+</section>
+
+<section class="faixa clara">
+  <div class="miolo">
+    <p class="rotulo">Por que o farol</p>
+    <ul class="lista">
+      <li>O farol não só guia: ele <strong>avisa do perigo</strong> antes do navio bater. É o que o Sentinel faz ao mostrar a ação e pedir confirmação antes de gravar.</li>
+      <li>A animação é natural: a luz girando é o comportamento real de um farol, então o movimento tem significado e não é enfeite.</li>
+      <li>Funciona pequeno: a torre com a janela acesa se mantém legível a 16 px.</li>
+      <li>Decidido: a lanterna gira, facho único à direita, forma atual mantida.</li>
+    </ul>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  var reduz = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- 2D: simula a luz girando (vista de frente) ----------
+  function farol2d(pref){
+    var esq = document.getElementById(pref + '-esq'), dir = document.getElementById(pref + '-dir'), jan = document.getElementById(pref + '-janela');
+    return function(angulo){
+      var c = Math.cos(angulo), s = Math.sin(angulo);
+      var sd = Math.max(0, c), se = Math.max(0, -c);
+      dir.setAttribute('transform', 'translate(68 28) scale(' + sd.toFixed(3) + ' 1) translate(-68 -28)');
+      esq.setAttribute('transform', 'translate(52 28) scale(' + se.toFixed(3) + ' 1) translate(-52 -28)');
+      var frente = Math.max(0, s);
+      jan.setAttribute('opacity', (0.45 + 0.55 * frente).toFixed(3));
+    };
+  }
+  var loader = farol2d('l'), manual = farol2d('s');
+  var rola2d = document.getElementById('rola2d');
+  var ang2d = 0;
+  manual(0.0001);
+
+  var fio = document.getElementById('fio');
+  var t0 = performance.now();
+  (function loop(t){
+    var seg = (t - t0) / 1000;
+    if (!reduz) loader(seg * 2.2); else loader(0.0001);
+    fio.style.width = ((seg % 3) / 3 * 100) + '%';
+    var alvo2d = rola2d.value / 100 * Math.PI * 4;
+    ang2d += (alvo2d - ang2d) * 0.12;
+    manual(ang2d + 0.0001);
+    requestAnimationFrame(loop);
+  })(t0);
+
+  // ---------- 3D ----------
+  var palco = document.getElementById('palco3d');
+  if (!window.THREE) { palco.textContent = 'Não foi possível carregar o 3D.'; return; }
+  var renderer;
+  try { renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true }); }
+  catch (e) { palco.textContent = 'Este navegador não liberou o WebGL.'; return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  palco.appendChild(renderer.domElement);
+
+  var cena = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+  camera.position.set(0, 2.4, 14);
+  camera.lookAt(0, 2.1, 0);
+
+  var c = document.createElement('canvas'); c.width = 3; c.height = 1;
+  var g = c.getContext('2d');
+  ['#1b2a3b','#5f86ad','#a8c8e6'].forEach(function(cor,i){ g.fillStyle = cor; g.fillRect(i,0,1,1); });
+  var degraus = new THREE.CanvasTexture(c);
+  degraus.magFilter = THREE.NearestFilter; degraus.minFilter = THREE.NearestFilter; degraus.generateMipmaps = false;
+  var matCorpo = new THREE.MeshToonMaterial({ color:'#b8cde2', gradientMap:degraus });
+
+  var farol = new THREE.Group();
+  // torre: perfil girado (base reta, afina pra cima)
+  var perfil = [
+    new THREE.Vector2(0.0, 0.0), new THREE.Vector2(1.25, 0.0), new THREE.Vector2(1.25, 0.18),
+    new THREE.Vector2(1.0, 0.18), new THREE.Vector2(0.62, 3.2), new THREE.Vector2(0.0, 3.2)
+  ];
+  farol.add(new THREE.Mesh(new THREE.LatheGeometry(perfil, 48), matCorpo));
+  var galeria = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.14, 48), matCorpo);
+  galeria.position.y = 3.27; farol.add(galeria);
+  var lanternaBase = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.62, 32), matCorpo);
+  lanternaBase.position.y = 3.65; farol.add(lanternaBase);
+  var cupula = new THREE.Mesh(new THREE.ConeGeometry(0.62, 0.55, 32), matCorpo);
+  cupula.position.y = 4.24; farol.add(cupula);
+
+  // lanterna que gira: janela acesa + dois fachos
+  var lanterna = new THREE.Group(); lanterna.position.y = 3.65;
+  var janela = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.06), new THREE.MeshBasicMaterial({ color:'#FFFCEF' }));
+  janela.position.z = 0.49; lanterna.add(janela);
+  var janela2 = janela.clone(); janela2.position.z = -0.49; lanterna.add(janela2);
+  var matFacho = new THREE.MeshBasicMaterial({ color:'#FFFCEF', transparent:true, opacity:.08, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.FrontSide });
+  function facho(sentido){
+    var geo = new THREE.ConeGeometry(0.75, 5, 32, 1, true);
+    geo.translate(0, -2.5, 0);            // ponta na origem
+    var m = new THREE.Mesh(geo, matFacho);
+    m.rotation.x = sentido * Math.PI / 2; // deita o cone ao longo de z
+    return m;
+  }
+  lanterna.add(facho(1));
+  farol.add(lanterna);
+
+  cena.add(farol);
+  var luz = new THREE.DirectionalLight('#ffffff', 1); luz.position.set(3, 5, 6); cena.add(luz);
+  cena.add(new THREE.AmbientLight('#ffffff', .3));
+
+  function ajustar(){
+    var w = palco.clientWidth, h = palco.clientHeight;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', ajustar); ajustar();
+
+  var rola3d = document.getElementById('rola3d');
+  var btnAuto = document.getElementById('auto');
+  var automatico = false;
+  btnAuto.addEventListener('click', function(){ automatico = !automatico; btnAuto.setAttribute('aria-pressed', String(automatico)); });
+
+  var ang = 0, relogio = new THREE.Clock(), anterior = 0;
+  (function quadro(){
+    requestAnimationFrame(quadro);
+    var t = relogio.getElapsedTime(), dt = Math.min(.05, t - anterior); anterior = t;
+    var alvo = automatico ? ang + dt * 1.4 : rola3d.value / 100 * Math.PI * 4;
+    ang += (alvo - ang) * Math.min(1, dt * 5);
+    lanterna.rotation.y = ang;
+    farol.rotation.y = -0.35 + Math.sin(t * .2) * .05;
+    renderer.render(cena, camera);
+  })();
+})();
+
+</script>
+
+</body></html>

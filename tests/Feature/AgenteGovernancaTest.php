@@ -7,6 +7,7 @@ use App\Models\Lancamento;
 use App\Services\AiAgentService;
 use App\Services\AuditoriaService;
 use App\Services\ContextoUsuario;
+use App\Services\LancamentoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use RuntimeException;
@@ -71,7 +72,17 @@ class AgenteGovernancaTest extends TestCase
 
     public function test_falha_de_execucao_e_auditada_como_erro(): void
     {
-        $token = $this->propor(['valor' => 1, 'data' => '2026-09-21']); // sem descrição
+        // Falha técnica de verdade (ex.: banco fora do ar). Dado inválido não serve de gatilho:
+        // desde que criar_lancamento passa por validar(), ele é 'recusado', não 'erro'.
+        $this->app->instance(LancamentoService::class, new class extends LancamentoService
+        {
+            public function criar(array $dados): Lancamento
+            {
+                throw new RuntimeException('conexão com o banco perdida');
+            }
+        });
+
+        $token = $this->propor(['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21']);
 
         $this->confirmar($token)->assertStatus(422);
 

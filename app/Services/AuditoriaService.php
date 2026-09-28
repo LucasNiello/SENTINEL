@@ -64,8 +64,26 @@ class AuditoriaService
         return collect($parametros)->map(fn ($valor, $campo) => match ($campo) {
             'cpf' => self::mascararCpf($valor),
             'salario' => $valor === null ? null : '[redigido]',
+            'documento' => self::mascararDocumento($valor),
             default => $valor,
         })->all();
+    }
+
+    /**
+     * "documento" é CPF ou CNPJ. Com 11 dígitos é CPF (pessoa física): mesma máscara do campo cpf.
+     * CNPJ (14 dígitos) e outros formatos passam intactos; não-escalar vira '[redigido]'.
+     */
+    private static function mascararDocumento(mixed $valor): mixed
+    {
+        if ($valor === null) {
+            return null;
+        }
+
+        if (! is_scalar($valor)) {
+            return '[redigido]';
+        }
+
+        return strlen(preg_replace('/\D/', '', (string) $valor)) === 11 ? self::mascararCpf($valor) : $valor;
     }
 
     /**

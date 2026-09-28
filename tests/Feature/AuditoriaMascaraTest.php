@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
+use App\Models\Cliente;
 use App\Models\Funcionario;
 use App\Services\AuditoriaService;
 use App\Services\FuncionarioService;
@@ -87,6 +88,30 @@ class AuditoriaMascaraTest extends TestCase
     public function test_salario_zero_tambem_e_redigido(): void
     {
         $this->assertSame('[redigido]', $this->registrar(['salario' => 0])->parametros['salario']);
+    }
+
+    public function test_documento_com_cpf_e_mascarado_e_cnpj_passa_intacto(): void
+    {
+        $this->assertSame('***.***.789-00', $this->registrar(['documento' => '123.456.789-00'])->parametros['documento'], 'CPF formatado');
+        $this->assertSame('***.***.789-00', $this->registrar(['documento' => '12345678900'])->parametros['documento'], 'CPF sem pontuação');
+        $this->assertSame('12.345.678/0001-90', $this->registrar(['documento' => '12.345.678/0001-90'])->parametros['documento'], 'CNPJ fica visível');
+        $this->assertNull($this->registrar(['documento' => null])->parametros['documento']);
+        $this->assertSame('[redigido]', $this->registrar(['documento' => ['123.456.789-00']])->parametros['documento'], 'não-escalar nunca sai bruto');
+
+        // O mesmo método alimenta o Log::error do AiAgentService.
+        $this->assertSame(['documento' => '***.***.789-00'], AuditoriaService::mascararCamposSensiveis(['documento' => '123.456.789-00']));
+    }
+
+    public function test_criar_cliente_com_cpf_no_documento_grava_log_mascarado_e_o_registro_real_fica_intacto(): void
+    {
+        $token = $this->propor(['nome' => 'João da Silva', 'documento' => '123.456.789-00'], 'criar_cliente');
+        $this->confirmar($token)->assertOk();
+
+        $this->assertSame('123.456.789-00', Cliente::query()->sole()->documento, 'o dado real fica na tabela da entidade');
+
+        $log = AuditLog::query()->sole();
+        $this->assertSame('***.***.789-00', $log->parametros['documento']);
+        $this->assertStringNotContainsString('123.456', json_encode($log->getAttributes(), JSON_UNESCAPED_UNICODE));
     }
 
     // ---- Pelo fluxo real do agente (todos os resultados passam pelo mesmo ponto) ----
