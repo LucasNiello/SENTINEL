@@ -7,6 +7,7 @@ use App\Models\Lancamento;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 /**
@@ -341,6 +342,33 @@ class AgenteTest extends TestCase
             ->assertJsonPath('mensagem', 'Muitos pedidos em pouco tempo. Aguarde um minuto.');
 
         Http::assertSentCount(10);
+    }
+
+    // ---- Tarefa B: classe de risco no card (skill sentinel-visual, seção 5) ----
+
+    public static function toolsDeEscrita(): array
+    {
+        return [
+            'criar_lancamento' => ['criar_lancamento'],
+            'atualizar_status_lancamento' => ['atualizar_status_lancamento'],
+            'criar_cliente' => ['criar_cliente'],
+            'criar_fornecedor' => ['criar_fornecedor'],
+            'criar_funcionario' => ['criar_funcionario'],
+            'criar_nota_fiscal' => ['criar_nota_fiscal'],
+            'criar_categoria_lancamento' => ['criar_categoria_lancamento'],
+        ];
+    }
+
+    #[DataProvider('toolsDeEscrita')]
+    public function test_confirmacao_pendente_traz_o_risco_escrita_da_tool(string $tool): void
+    {
+        Http::fake(['*' => Http::response($this->respostaComTool($tool, []))]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'faça'])
+            ->assertOk()
+            ->assertJsonPath('tipo', 'confirmacao_pendente')
+            ->assertJsonPath('tool', $tool)
+            ->assertJsonPath('risco', 'escrita');
     }
 
     public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
