@@ -430,11 +430,15 @@ try {
     Step 'Migrations e seed inicial'
     $null=Run $php @('artisan','config:clear','--no-ansi'); $null=Run $php @('artisan','migrate','--force','--no-interaction','--no-ansi')
     if ($state.seedPending -and $state.seedDatabase -eq "$($cfg.DB_HOST):$($cfg.DB_PORT)/$($cfg.DB_DATABASE)") {
-        $seed=Bridge 'seed'; if (!$seed.ok) { throw "Seed inicial falhou e foi revertido em transacao: $($seed.message). Verifique database/seeders." }
+        $seed=Bridge 'seed'; if (!$seed.ok) { throw 'Seed inicial falhou e foi revertido em transacao. Verifique database/seeders.' }
+        # Contains first-use credentials: console only, never Run/Log/Save-State.
+        if ($seed.access) { Write-Host $seed.access }
         $state.seedPending=$false; Save-State; Ok 'Seed inicial (transacao unica)'
     }
     $null=Run $php @('artisan','migrate:status','--no-ansi')
     if (!(Bridge 'laravel-db').ok) { throw 'Laravel nao conseguiu consultar MySQL/tabelas de infraestrutura.' }; Ok 'Migrations e consulta real pelo Laravel'
+    $access=Bridge 'access'; if (!$access.ok) { throw 'Nao foi possivel preparar o acesso local. Execute php artisan sentinel:preparar-acesso para revisar a conta existente.' }
+    if ($access.access) { Write-Host $access.access }
     Step 'Front-end'
     if (Test-Path package.json) {
         $npmHash=Fingerprint @('package.json','package-lock.json'); $deps=Run $npm @('ls','--depth=0','--json') -AllowFailure
@@ -463,7 +467,7 @@ try {
     } else { Ok 'Testes ja aprovados para estes arquivos' }
     Step 'Iniciando SENTINEL'
     if (!(Own-Server $port)) {
-        $launch=@{FilePath=$php; WorkingDirectory=$root; ArgumentList="`"$root\artisan`" serve --host=127.0.0.1 --port=$port --tries=1"; WindowStyle='Normal'; PassThru=$true}
+        $launch=@{FilePath=$php; WorkingDirectory=$root; ArgumentList="`"$root\artisan`" serve --host=127.0.0.1 --port=$port --tries=1"; WindowStyle='Hidden'; PassThru=$true}
         if ($env:SENTINEL_NONINTERACTIVE) {
             $launch.WindowStyle='Hidden'
             $launch.RedirectStandardOutput=Join-Path $local 'server-output.log'
@@ -535,16 +539,21 @@ try {
         $db->select('SELECT 1'); foreach (['sessions','cache','cache_locks','jobs','job_batches','failed_jobs'] as $table) { $db->table($table)->limit(1)->get(); }; result(['ok'=>true]);
     }
     if ($action==='seed') {
-        appBoot(); Illuminate\Support\Facades\DB::transaction(function() {
+        appBoot(); $output=new Symfony\Component\Console\Output\BufferedOutput();
+        Illuminate\Support\Facades\DB::transaction(function() use ($output) {
             // Covers a crash after COMMIT but before the local success marker was saved.
             // Never repeat non-idempotent seeders over existing application records.
             foreach (['users','lancamentos','categorias_lancamento','clientes','fornecedores','funcionarios','notas_fiscais'] as $table) {
                 if (Illuminate\Support\Facades\DB::table($table)->exists()) { return; }
             }
-            $output=new Symfony\Component\Console\Output\BufferedOutput();
             $code=Illuminate\Support\Facades\Artisan::call('db:seed',['--force'=>true,'--no-interaction'=>true],$output);
             if ($code!==0) { throw new RuntimeException('Seeder failed'); }
-        }); result(['ok'=>true]);
+        }); result(['ok'=>true,'access'=>$output->fetch()]);
+    }
+    if ($action==='access') {
+        appBoot(); $output=new Symfony\Component\Console\Output\BufferedOutput();
+        $code=Illuminate\Support\Facades\Artisan::call('sentinel:preparar-acesso',['--no-interaction'=>true],$output);
+        result(['ok'=>$code===0,'access'=>$code===0?$output->fetch():null]);
     }
     if (!preg_match('/^[a-zA-Z0-9_.:-]+$/',$input['host'])||!ctype_digit((string)$input['port'])) { throw new RuntimeException('Invalid host/port'); }
     $pdo=new PDO('mysql:host='.$input['host'].';port='.$input['port'].';charset=utf8mb4',$input['user'],$input['password'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_TIMEOUT=>3]);

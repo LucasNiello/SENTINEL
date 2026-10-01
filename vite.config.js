@@ -6,11 +6,12 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
     plugins: [
         laravel({
-            input: ['resources/css/app.css', 'resources/js/app.js'],
+            input: ['resources/css/app.css', 'resources/js/app.js', 'resources/css/landing.css', 'resources/js/landing.js'],
             refresh: true,
             fonts: [
                 bunny('Instrument Sans', {
                     weights: [400, 500, 600],
+                    optimizedFallbacks: false,
                 }),
             ],
         }),
@@ -19,6 +20,17 @@ export default defineConfig({
     server: {
         watch: {
             ignored: ['**/storage/framework/views/**'],
+        },
+    },
+    build: {
+        rolldownOptions: {
+            output: {
+                codeSplitting: {
+                    groups: [
+                        { name: 'three-core', test: /three[\\/]build[\\/]three\.core\.js$/ },
+                    ],
+                },
+            },
         },
     },
 });
