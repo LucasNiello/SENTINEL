@@ -106,7 +106,7 @@
             gap: 0.75rem;
             margin-top: 0.75rem;
         }
-        .card--expirado .card-expirado-texto { margin-top: 0.75rem; }
+        .card-expirado-texto { margin-top: 0.75rem; }
 
         /* Confirmar (segurar) e Cancelar (clique): mesmo formato e peso; Cancelar é neutro (seção 6). */
         .btn-confirmar,
@@ -225,6 +225,8 @@
 
         const DURACAO_HOLD_MS = 2000;
         const DURACAO_IDLE_MS = 10000;
+        // Segurar só começa se ainda couber o hold (2 s) + margem antes do fim da janela: o servidor aceita até 12 s.
+        const MINIMO_PARA_SEGURAR_MS = 2500;
         const RISCOS = ['leitura', 'escrita', 'exclusao'];
 
         function anunciar(texto) {
@@ -342,24 +344,48 @@
             let inicioHold = 0;
             let rafId = null;
             let idleTimer = null;
+            let quaseEsgotadoTimer = null;
+            let avisoTempo = null;
             const criadoEm = performance.now();
 
-            // Janela ociosa contada desde o card. Segurar pausa o timer (M2); soltar sem completar retoma com o que resta.
+            function restanteMs() {
+                return DURACAO_IDLE_MS - (performance.now() - criadoEm);
+            }
+
+            function pararTimers() {
+                clearTimeout(idleTimer);
+                clearTimeout(quaseEsgotadoTimer);
+            }
+
+            // Janela ociosa contada desde o card. Segurar pausa os timers (M2); soltar sem completar retoma com o que resta.
             function agendarExpiracao() {
-                const restante = DURACAO_IDLE_MS - (performance.now() - criadoEm);
+                const restante = restanteMs();
                 idleTimer = setTimeout(expirarCard, Math.max(0, restante));
+                quaseEsgotadoTimer = setTimeout(bloquearPorTempo, Math.max(0, restante - MINIMO_PARA_SEGURAR_MS));
             }
             agendarExpiracao();
 
             function encerrarCard() {
-                clearTimeout(idleTimer);
+                pararTimers();
                 if (rafId) cancelAnimationFrame(rafId);
                 card.remove();
             }
 
+            // Menos de 2,5 s na janela: um hold novo terminaria fora do prazo do servidor. Desativa o Confirmar.
+            function bloquearPorTempo() {
+                if (segurando || btnConfirmar.disabled) return;
+                btnConfirmar.disabled = true;
+                avisoTempo = document.createElement('div');
+                avisoTempo.className = 'msg msg--aviso card-expirado-texto';
+                avisoTempo.textContent = 'Tempo quase esgotado. Peça de novo.';
+                card.appendChild(avisoTempo);
+                anunciar('tempo quase esgotado, peça de novo');
+            }
+
             // Expirou: o card não some calado — fica visível, marcado, com os botões desativados.
             function expirarCard() {
-                clearTimeout(idleTimer);
+                pararTimers();
+                if (avisoTempo) avisoTempo.remove();
                 segurando = false;
                 if (rafId) cancelAnimationFrame(rafId);
                 fill.style.width = '0%';
@@ -377,7 +403,11 @@
 
             function iniciarHold() {
                 if (segurando || btnConfirmar.disabled) return;
-                clearTimeout(idleTimer);
+                if (restanteMs() < MINIMO_PARA_SEGURAR_MS) {
+                    bloquearPorTempo();
+                    return;
+                }
+                pararTimers();
                 segurando = true;
                 inicioHold = performance.now();
                 btnConfirmar.classList.add('segurando');
@@ -412,7 +442,7 @@
             }
 
             async function confirmarAcao() {
-                clearTimeout(idleTimer);
+                pararTimers();
                 try {
                     const resp = await fetch('/agente/confirmar', {
                         method: 'POST',

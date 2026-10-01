@@ -155,24 +155,49 @@ class AiAgentService
             ];
         }
 
-        $mensagemResposta = $resposta->json('choices.0.message') ?? [];
-        $toolCalls = $mensagemResposta['tool_calls'] ?? [];
+        // N1: o corpo da Azure é dado externo. Fora do formato esperado (message que não é objeto, choices
+        // vazio, HTML com 200, name/arguments que não são texto...) vira erro amigável, nunca 500.
+        $mensagemResposta = $resposta->json('choices.0.message');
+
+        // message precisa ser objeto: uma lista com itens (ex.: ["oi"]) também está fora do formato.
+        if (is_array($mensagemResposta) && $mensagemResposta !== [] && array_is_list($mensagemResposta)) {
+            $mensagemResposta = null;
+        }
+
+        $toolCalls = is_array($mensagemResposta) ? ($mensagemResposta['tool_calls'] ?? []) : null;
+
+        if (! is_array($mensagemResposta) || ! is_array($toolCalls)) {
+            return $this->respostaForaDoFormato($resposta->status());
+        }
 
         if (empty($toolCalls)) {
+            $conteudo = $mensagemResposta['content'] ?? null;
+
+            if ($conteudo !== null && ! is_string($conteudo)) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
+
             return [
                 'tipo' => 'texto',
-                'mensagem' => $mensagemResposta['content'] ?? '',
+                'mensagem' => $conteudo ?? '',
             ];
         }
 
+        $chamada = $toolCalls[0] ?? null;
+        $funcao = is_array($chamada) ? ($chamada['function'] ?? null) : null;
+        $tool = is_array($funcao) ? ($funcao['name'] ?? null) : null;
+        $argumentosJson = is_array($funcao) ? ($funcao['arguments'] ?? '{}') : null;
+
+        if (! is_string($tool) || ! is_string($argumentosJson)) {
+            return $this->respostaForaDoFormato($resposta->status());
+        }
+
         // Só o primeiro pedido é atendido; os demais não podem sumir calados.
-        $aviso = is_array($toolCalls) && count($toolCalls) > 1
+        $aviso = count($toolCalls) > 1
             ? 'Havia '.count($toolCalls).' pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.'
             : null;
 
-        $chamada = $toolCalls[0];
-        $tool = $chamada['function']['name'] ?? '';
-        $argumentos = json_decode($chamada['function']['arguments'] ?? '{}', true);
+        $argumentos = json_decode($argumentosJson, true);
         $argumentos = is_array($argumentos) ? $argumentos : [];
 
         // O tenant nunca vem do modelo: o servidor injeta o tenant atual na execução.
@@ -213,6 +238,22 @@ class AiAgentService
     private function comAviso(array $resposta, ?string $aviso): array
     {
         return $aviso === null ? $resposta : [...$resposta, 'aviso' => $aviso];
+    }
+
+    /**
+     * N1: resposta 2xx da Chat Completions API fora do formato esperado. O log leva só o status
+     * (o corpo pode trazer dados do usuário); o usuário recebe uma frase amigável.
+     *
+     * @return array{tipo: string, mensagem: string}
+     */
+    private function respostaForaDoFormato(int $status): array
+    {
+        Log::warning('AiAgentService: resposta da Chat Completions API fora do formato esperado', ['status' => $status]);
+
+        return [
+            'tipo' => 'erro',
+            'mensagem' => 'O agente de IA respondeu de um jeito inesperado. Tente novamente.',
+        ];
     }
 
     /**

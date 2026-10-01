@@ -7,6 +7,8 @@ use App\Models\Lancamento;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Mockery;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -112,9 +114,21 @@ class AgenteTest extends TestCase
 
     public function test_confirmar_tool_fora_da_whitelist_e_recusada_sem_estourar_500(): void
     {
-        $this->postJson('/agente/confirmar', ['tool' => 'apagar_tudo', 'argumentos' => []])
+        // M6: token real; só a entrada da sessão é adulterada para uma tool fora do catálogo.
+        $token = $this->propor(['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21']);
+        $this->travel(2)->seconds();
+        $entrada = session("confirmacoes.{$token}");
+        $this->withSession(['confirmacoes' => [$token => ['tool' => 'apagar_tudo'] + $entrada]]);
+
+        $this->postJson('/agente/confirmar', ['token' => $token])
             ->assertStatus(422)
             ->assertJsonPath('tipo', 'erro');
+
+        $this->assertSame(0, Lancamento::count(), 'nada foi gravado');
+        $log = AuditLog::query()->latest('id')->first();
+        $this->assertSame('apagar_tudo', $log->tool);
+        $this->assertSame('negado', $log->resultado);
+        $this->assertFalse($log->permitido);
     }
 
     public function test_confirmar_usa_tool_e_argumentos_da_sessao_e_ignora_o_corpo(): void
@@ -342,6 +356,55 @@ class AgenteTest extends TestCase
             ->assertJsonPath('mensagem', 'Muitos pedidos em pouco tempo. Aguarde um minuto.');
 
         Http::assertSentCount(10);
+    }
+
+    // ---- N1: corpo da Azure fora do formato esperado ----
+
+    public static function respostasForaDoFormato(): array
+    {
+        $comFuncao = static fn (mixed $funcao) => ['choices' => [['message' => ['tool_calls' => [['type' => 'function', 'function' => $funcao]]]]]];
+
+        return [
+            'message como string' => [['choices' => [['message' => 'oi']]]],
+            'message como lista' => [['choices' => [['message' => ['oi']]]]],
+            'choices vazio' => [['choices' => []]],
+            'sem choices' => [['id' => 'x']],
+            'HTML com 200' => ['<html><body>Gateway</body></html>'],
+            'content que não é texto' => [['choices' => [['message' => ['content' => ['oi']]]]]],
+            'tool_calls que não é lista' => [['choices' => [['message' => ['tool_calls' => 'x']]]]],
+            'function que não é objeto' => [$comFuncao('x')],
+            'name que não é texto' => [$comFuncao(['name' => 123, 'arguments' => '{}'])],
+            'arguments que não é texto' => [$comFuncao(['name' => 'consultar_lancamentos', 'arguments' => ['status' => 'pendente']])],
+        ];
+    }
+
+    #[DataProvider('respostasForaDoFormato')]
+    public function test_n1_resposta_da_azure_fora_do_formato_vira_erro_amigavel_e_warning(array|string $corpo): void
+    {
+        Log::spy();
+        Http::fake(['*' => Http::response($corpo)]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])
+            ->assertOk()
+            ->assertJsonPath('tipo', 'erro')
+            ->assertJsonPath('mensagem', 'O agente de IA respondeu de um jeito inesperado. Tente novamente.');
+
+        // LGPD: o log leva só o status, nunca o corpo (que pode trazer argumentos com CPF ou salário).
+        Log::shouldHaveReceived('warning')->once()->with(Mockery::any(), ['status' => 200]);
+        $this->assertSame(0, AuditLog::count(), 'nenhuma tool foi executada');
+    }
+
+    public function test_n1_content_nulo_sem_tool_calls_continua_texto_vazio(): void
+    {
+        Log::spy();
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => null]]]])]);
+
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])
+            ->assertOk()
+            ->assertJsonPath('tipo', 'texto')
+            ->assertJsonPath('mensagem', '');
+
+        Log::shouldNotHaveReceived('warning');
     }
 
     // ---- Tarefa B: classe de risco no card (skill sentinel-visual, seção 5) ----

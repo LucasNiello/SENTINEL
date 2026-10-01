@@ -4,11 +4,12 @@ namespace App\Services;
 
 use App\Models\Funcionario;
 use App\Services\Concerns\ExclusaoSegura;
+use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Collection;
 
 class FuncionarioService
 {
-    use ExclusaoSegura;
+    use ExclusaoSegura, FiltroPorNome;
 
     public function criar(array $dados): Funcionario
     {
@@ -30,7 +31,7 @@ class FuncionarioService
     {
         return Funcionario::query()
             ->where('tenant_id', $tenantId)
-            ->when($nome, fn ($query) => $query->where('nome', 'like', "%{$nome}%"))
+            ->when($nome, fn ($query) => $this->nomeContem($query, $nome))
             ->get();
     }
 

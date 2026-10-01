@@ -4,11 +4,12 @@ namespace App\Services;
 
 use App\Models\Fornecedor;
 use App\Services\Concerns\ExclusaoSegura;
+use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Collection;
 
 class FornecedorService
 {
-    use ExclusaoSegura;
+    use ExclusaoSegura, FiltroPorNome;
 
     public function criar(array $dados): Fornecedor
     {
@@ -28,7 +29,7 @@ class FornecedorService
     {
         return Fornecedor::query()
             ->where('tenant_id', $tenantId)
-            ->when($nome, fn ($query) => $query->where('nome', 'like', "%{$nome}%"))
+            ->when($nome, fn ($query) => $this->nomeContem($query, $nome))
             ->get();
     }
 
