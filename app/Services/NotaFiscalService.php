@@ -25,12 +25,12 @@ class NotaFiscalService
     }
 
     /**
-     * $tenantId restringe a consulta ao tenant informado (null = sem filtro).
+     * $tenantId restringe a consulta ao tenant informado (obrigatório).
      */
-    public function buscarPorFiltro(?string $tipo = null, ?int $tenantId = null): Collection
+    public function buscarPorFiltro(?string $tipo, int $tenantId): Collection
     {
         return NotaFiscal::query()
-            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->where('tenant_id', $tenantId)
             ->when($tipo, fn ($query) => $query->where('tipo', $tipo))
             ->get();
     }
@@ -41,9 +41,9 @@ class NotaFiscalService
      *
      * @return array{bloqueado: bool, motivo?: string}
      */
-    public function excluir(int $id): array
+    public function excluir(int $id, int $tenantId): array
     {
-        $notaFiscal = NotaFiscal::findOrFail($id);
+        $notaFiscal = NotaFiscal::where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->excluirComBloqueio($notaFiscal, []);
     }
@@ -51,9 +51,9 @@ class NotaFiscalService
     /**
      * @return array{restaurado: bool, motivo?: string}
      */
-    public function restaurarDaLixeira(int $id, bool $reautenticadoComoAdmin): array
+    public function restaurarDaLixeira(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
     {
-        $notaFiscal = NotaFiscal::onlyTrashed()->findOrFail($id);
+        $notaFiscal = NotaFiscal::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($notaFiscal, $reautenticadoComoAdmin);
     }

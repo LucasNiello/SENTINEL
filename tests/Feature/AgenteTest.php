@@ -271,6 +271,78 @@ class AgenteTest extends TestCase
             ->assertJsonMissingPath('aviso');
     }
 
+    // ---- Lote 2: entrada validada (N2/B4), consumo atômico (M1) e limite de taxa (RNF10) ----
+
+    public function test_m1_confirmacao_simultanea_com_o_mesmo_token_grava_uma_vez_so(): void
+    {
+        $token = $this->propor(['descricao' => 'Corrida', 'valor' => 1, 'data' => '2026-09-21']);
+        $this->travel(2)->seconds();
+        $entrada = session("confirmacoes.{$token}");
+
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
+
+        // Intercalação: a segunda requisição leu a sessão antes de a primeira consumir o token.
+        $this->withSession(['confirmacoes' => [$token => $entrada]])
+            ->postJson('/agente/confirmar', ['token' => $token])
+            ->assertStatus(409)
+            ->assertJsonPath('tipo', 'erro')
+            ->assertJsonPath('mensagem', 'Esta confirmação já foi usada.');
+
+        $this->assertSame(1, Lancamento::count());
+    }
+
+    public function test_token_em_array_ou_fora_do_formato_uuid_da_422_e_nao_500(): void
+    {
+        foreach ([['token' => ['x']], ['token' => 'nao-e-uuid'], ['token' => 'a.b'], ['token' => 123]] as $corpo) {
+            $this->postJson('/agente/confirmar', $corpo)
+                ->assertStatus(422)
+                ->assertJsonPath('tipo', 'erro')
+                ->assertJsonPath('mensagem', 'Confirmação inválida ou já utilizada.');
+        }
+
+        $this->assertSame(0, Lancamento::count());
+    }
+
+    public function test_mensagem_em_array_da_422_e_nao_chama_o_foundry(): void
+    {
+        Http::fake();
+
+        $this->postJson('/agente/comando', ['mensagem' => ['oi']])
+            ->assertStatus(422)
+            ->assertJsonPath('tipo', 'erro')
+            ->assertJsonPath('mensagem', 'O pedido deve ser um texto.');
+
+        Http::assertNothingSent();
+    }
+
+    public function test_mensagem_acima_de_1000_caracteres_da_422_e_nao_chama_o_foundry(): void
+    {
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
+
+        $this->postJson('/agente/comando', ['mensagem' => str_repeat('a', 1001)])
+            ->assertStatus(422)
+            ->assertJsonPath('mensagem', 'O pedido aceita no máximo 1000 caracteres.');
+        Http::assertNothingSent();
+
+        $this->postJson('/agente/comando', ['mensagem' => str_repeat('a', 1000)])->assertOk();
+    }
+
+    public function test_rnf10_a_11a_chamada_no_mesmo_minuto_recebe_429(): void
+    {
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
+
+        for ($i = 1; $i <= 10; $i++) {
+            $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk();
+        }
+
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])
+            ->assertStatus(429)
+            ->assertJsonPath('tipo', 'erro')
+            ->assertJsonPath('mensagem', 'Muitos pedidos em pouco tempo. Aguarde um minuto.');
+
+        Http::assertSentCount(10);
+    }
+
     public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);

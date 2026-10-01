@@ -30,12 +30,12 @@ class LancamentoService
     /**
      * Contrato: buscar_lancamentos.
      *
-     * $tenantId restringe a consulta ao tenant informado (null = sem filtro).
+     * $tenantId restringe a consulta ao tenant informado (obrigatório).
      */
-    public function buscarPorFiltro(?string $status = null, ?string $dataInicio = null, ?string $dataFim = null, ?int $tenantId = null): Collection
+    public function buscarPorFiltro(?string $status, ?string $dataInicio, ?string $dataFim, int $tenantId): Collection
     {
         return Lancamento::query()
-            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->where('tenant_id', $tenantId)
             ->when($status, fn ($query) => $query->where('status', $status))
             ->when($dataInicio, fn ($query) => $query->whereDate('data', '>=', $dataInicio))
             ->when($dataFim, fn ($query) => $query->whereDate('data', '<=', $dataFim))
@@ -49,13 +49,13 @@ class LancamentoService
      * IDs inexistentes ou que não atendem ao pré-requisito são reportados
      * em "ignorados" (erro parcial), nunca alterados silenciosamente.
      *
-     * $tenantId restringe a alteração ao tenant informado (null = sem filtro);
+     * $tenantId restringe a alteração ao tenant informado (obrigatório);
      * lançamento de outro tenant cai em "ignorados", como se não existisse.
      *
      * @param  int[]  $ids
      * @return array{atualizados: int[], ignorados: int[]}
      */
-    public function marcarConciliado(array $ids, ?int $tenantId = null): array
+    public function marcarConciliado(array $ids, int $tenantId): array
     {
         return $this->alterarStatus($ids, de: 'pendente', para: 'conciliado', tenantId: $tenantId);
     }
@@ -69,7 +69,7 @@ class LancamentoService
      * @param  int[]  $ids
      * @return array{atualizados: int[], ignorados: int[]}
      */
-    public function desmarcarConciliado(array $ids, ?int $tenantId = null): array
+    public function desmarcarConciliado(array $ids, int $tenantId): array
     {
         return $this->alterarStatus($ids, de: 'conciliado', para: 'pendente', tenantId: $tenantId);
     }
@@ -83,7 +83,7 @@ class LancamentoService
      *
      * @return array{atualizado: bool, lancamento?: Lancamento, motivo?: string}
      */
-    public function atualizarStatus(int $id, string $novoStatus, ?int $tenantId = null): array
+    public function atualizarStatus(int $id, string $novoStatus, int $tenantId): array
     {
         $resultado = match ($novoStatus) {
             'conciliado' => $this->marcarConciliado([$id], $tenantId),
@@ -96,7 +96,7 @@ class LancamentoService
         }
 
         $lancamento = Lancamento::query()
-            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->where('tenant_id', $tenantId)
             ->find($id);
 
         if ($resultado['atualizados'] !== []) {
@@ -116,11 +116,11 @@ class LancamentoService
      * @param  int[]  $ids
      * @return array{atualizados: int[], ignorados: int[]}
      */
-    private function alterarStatus(array $ids, string $de, string $para, ?int $tenantId = null): array
+    private function alterarStatus(array $ids, string $de, string $para, int $tenantId): array
     {
         $lancamentos = Lancamento::query()
             ->whereIn('id', $ids)
-            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->where('tenant_id', $tenantId)
             ->get()
             ->keyBy('id');
 
@@ -149,9 +149,9 @@ class LancamentoService
     /**
      * @return array{bloqueado: bool, motivo?: string}
      */
-    public function excluir(int $id): array
+    public function excluir(int $id, int $tenantId): array
     {
-        $lancamento = Lancamento::findOrFail($id);
+        $lancamento = Lancamento::where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->excluirComBloqueio($lancamento, ['notasFiscais']);
     }
@@ -159,9 +159,9 @@ class LancamentoService
     /**
      * @return array{restaurado: bool, motivo?: string}
      */
-    public function restaurarDaLixeira(int $id, bool $reautenticadoComoAdmin): array
+    public function restaurarDaLixeira(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
     {
-        $lancamento = Lancamento::onlyTrashed()->findOrFail($id);
+        $lancamento = Lancamento::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($lancamento, $reautenticadoComoAdmin);
     }

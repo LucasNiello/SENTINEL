@@ -24,12 +24,12 @@ class FuncionarioService
     }
 
     /**
-     * $tenantId restringe a consulta ao tenant informado (null = sem filtro).
+     * $tenantId restringe a consulta ao tenant informado (obrigatório).
      */
-    public function buscarPorFiltro(?string $nome = null, ?int $tenantId = null): Collection
+    public function buscarPorFiltro(?string $nome, int $tenantId): Collection
     {
         return Funcionario::query()
-            ->when($tenantId !== null, fn ($query) => $query->where('tenant_id', $tenantId))
+            ->where('tenant_id', $tenantId)
             ->when($nome, fn ($query) => $query->where('nome', 'like', "%{$nome}%"))
             ->get();
     }
@@ -37,9 +37,9 @@ class FuncionarioService
     /**
      * @return array{bloqueado: bool, motivo?: string}
      */
-    public function excluir(int $id): array
+    public function excluir(int $id, int $tenantId): array
     {
-        $funcionario = Funcionario::findOrFail($id);
+        $funcionario = Funcionario::where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->excluirComBloqueio($funcionario, ['lancamentos']);
     }
@@ -47,9 +47,9 @@ class FuncionarioService
     /**
      * @return array{restaurado: bool, motivo?: string}
      */
-    public function restaurarDaLixeira(int $id, bool $reautenticadoComoAdmin): array
+    public function restaurarDaLixeira(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
     {
-        $funcionario = Funcionario::onlyTrashed()->findOrFail($id);
+        $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($funcionario, $reautenticadoComoAdmin);
     }
