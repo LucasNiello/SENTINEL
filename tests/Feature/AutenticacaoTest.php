@@ -84,6 +84,18 @@ class AutenticacaoTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_email_em_array_no_login_nao_gera_500(): void
+    {
+        $this->post('/login', ['email' => ['a@sentinel.local'], 'password' => 'x'])
+            ->assertRedirect()
+            ->assertSessionHasErrors('email');
+
+        $this->postJson('/login', ['email' => ['a@sentinel.local'], 'password' => 'x'])
+            ->assertStatus(422);
+
+        $this->assertGuest();
+    }
+
     public function test_usuario_sem_papel_valido_ou_sem_tenant_nao_entra_mesmo_com_a_senha_certa(): void
     {
         $casos = [

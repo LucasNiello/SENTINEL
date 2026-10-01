@@ -21,6 +21,6 @@ Route::middleware('auth')->group(function () {
         return view('agente');
     });
 
-    Route::post('/agente/comando', [AgenteController::class, 'processar']);
+    Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
     Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
 });

@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Services\AiAgentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
@@ -27,7 +29,18 @@ class AgenteController extends Controller
      */
     public function processar(Request $request)
     {
-        $resposta = $this->aiAgentService->processar((string) $request->input('mensagem', ''));
+        // Array ou tipo errado vira 422 com frase amigável, nunca 500 (B4); o teto limita o custo por chamada (RNF10).
+        $validador = Validator::make($request->all(), ['mensagem' => 'required|string|max:1000'], [
+            'mensagem.required' => 'Escreva o seu pedido.',
+            'mensagem.string' => 'O pedido deve ser um texto.',
+            'mensagem.max' => 'O pedido aceita no máximo 1000 caracteres.',
+        ]);
+
+        if ($validador->fails()) {
+            return response()->json(['tipo' => 'erro', 'mensagem' => $validador->errors()->first()], 422);
+        }
+
+        $resposta = $this->aiAgentService->processar($validador->validated()['mensagem']);
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             $token = (string) Str::uuid();
@@ -52,11 +65,25 @@ class AgenteController extends Controller
      */
     public function confirmar(Request $request)
     {
-        $token = (string) $request->input('token', '');
+        // Só UUID: um token com ponto navegaria dentro da sessão (N2); array não vira 500 (B4).
+        $validador = Validator::make($request->all(), ['token' => 'required|string|uuid']);
+
+        if ($validador->fails()) {
+            return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
+        }
+
+        $token = $validador->validated()['token'];
         $pendente = $request->session()->pull("confirmacoes.{$token}"); // uso único
 
         if (! $pendente) {
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
+        }
+
+        // M1: duas requisições simultâneas leem a mesma sessão e as duas "puxam" o token.
+        // O add é atômico no store (chave única no driver database), então só a primeira passa.
+        // A marca dura pelo menos a validade do token, para não "expirar" antes da janela.
+        if (! Cache::add("agente:token_usado:{$token}", true, max(60, self::VALIDADE_MAXIMA_S))) {
+            return response()->json(['tipo' => 'erro', 'mensagem' => 'Esta confirmação já foi usada.'], 409);
         }
 
         $decorrido = now()->timestamp - $pendente['emitido_em'];
