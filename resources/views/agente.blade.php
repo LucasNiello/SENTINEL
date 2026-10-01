@@ -6,24 +6,51 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ config('app.name', 'Sentinel') }} — Agente</title>
     <style>
+        /* Tokens da skill sentinel-visual (seção 2). Única fonte de cor da tela: nenhum hex fora do :root. */
         :root {
-            --risco-neutro: #6b7280;
-            --risco-ambar: #f59e0b;
-            --risco-verde: #16a34a;
-            --risco-vermelho: #dc2626;
+            /* base */
+            --color-noite: #0A0E13;     /* fundo da vitrine */
+            --color-gelo: #A8C8E6;      /* destaque sobre fundo escuro */
+            --color-creme: #FFFCEF;     /* fundo da bancada */
+            --color-tinta: #1D232A;     /* texto sobre creme */
+            --color-tinta-2: #5B6570;   /* texto secundário sobre creme; borda de risco neutro */
+            --color-aco: #2E5B85;       /* destaque sobre creme: links, foco, rótulos */
+            --color-borda: #E3DDC6;     /* divisórias e contornos de campo sobre creme */
+
+            /* estados (bancada) */
+            --color-sucesso: #2F6B4F;  --color-sucesso-faixa: #E4EFE6;
+            --color-aviso: #8A5A12;    --color-aviso-faixa: #F6EBD0;
+            --color-erro: #A3412E;     --color-erro-faixa: #F5E0D9;
+
+            /* estados (vitrine, sobre noite) */
+            --color-sucesso-escuro: #8FC4A4;
+            --color-aviso-escuro: #E0B870;
+            --color-erro-escuro: #D9A38F;
+
+            /* tipografia (seção 3): sem webfont carregada, a tela usa o fallback */
+            --fonte-titulo: 'Sora', "Segoe UI", system-ui, sans-serif;
+            --fonte-corpo: 'IBM Plex Sans', "Segoe UI", system-ui, sans-serif;
+            --fonte-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+
+            /* foco visível (seção 9): destaque da bancada */
+            --foco: var(--color-aco);
         }
 
         * { box-sizing: border-box; }
 
         body {
-            font-family: system-ui, sans-serif;
+            font-family: var(--fonte-corpo);
+            font-size: 16px;
             max-width: 640px;
             margin: 2rem auto;
             padding: 0 1rem;
-            color: #1a1a1a;
+            background: var(--color-creme);
+            color: var(--color-tinta);
         }
 
-        h1 { font-size: 1.25rem; }
+        h1 { font-family: var(--fonte-titulo); font-weight: 400; font-size: 1.25rem; }
+
+        :focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
 
         #historico {
             display: flex;
@@ -33,34 +60,45 @@
         }
 
         .msg { padding: 0.6rem 0.8rem; border-radius: 6px; }
-        .msg--usuario { background: #eef2ff; align-self: flex-end; }
-        .msg--agente { background: #f3f4f6; }
-        .msg--erro { background: #fee2e2; color: var(--risco-vermelho); }
+        .msg--usuario { background: var(--color-borda); align-self: flex-end; }
+        .msg--agente { border: 1px solid var(--color-borda); }
+        .msg--erro { background: var(--color-erro-faixa); color: var(--color-erro); }
+        .msg--aviso { background: var(--color-aviso-faixa); color: var(--color-aviso); }
 
-        table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
-        th, td { border: 1px solid #d1d5db; padding: 0.4rem 0.6rem; text-align: left; }
-        th { background: #f9fafb; }
+        table { border-collapse: collapse; width: 100%; font-size: 15px; }
+        th, td { border: 1px solid var(--color-borda); padding: 0.4rem 0.6rem; text-align: left; }
+        th { background: var(--color-borda); }
 
         form#form-comando { display: flex; gap: 0.5rem; }
-        #campo-mensagem { flex: 1; padding: 0.6rem; font-size: 1rem; }
-        #campo-mensagem, button { border: 1px solid #d1d5db; border-radius: 6px; }
-        button { cursor: pointer; background: #fff; }
-        button:disabled { cursor: not-allowed; opacity: 0.6; }
+        #campo-mensagem { flex: 1; padding: 0.6rem; font-size: 1rem; background: var(--color-creme); color: var(--color-tinta); }
+        #campo-mensagem { border: 1px solid var(--color-borda); border-radius: 6px; }
+        button { cursor: pointer; font: inherit; background: var(--color-creme); color: var(--color-tinta); border: 1px solid var(--color-tinta-2); border-radius: 6px; }
+        button:disabled, input:disabled { cursor: not-allowed; opacity: 0.6; }
 
-        /* Card de confirmação */
+        /* Carregamento (seção 7): texto de estado + barra fina de 1px, sem animação. */
+        .carregando { margin: 0 0 1rem; color: var(--color-tinta-2); }
+        .carregando__barra { height: 1px; margin-top: 0.25rem; background: var(--color-aco); }
+
+        /* Card de confirmação: borda de 2px na cor do risco da tool (seção 5). */
         .card-confirmacao {
-            border: 1px solid var(--risco-ambar);
-            background: #fffbeb;
+            --cor-risco: var(--color-aviso);
+            --cor-risco-faixa: var(--color-aviso-faixa);
+            border: 2px solid var(--cor-risco);
+            background: var(--color-creme);
             border-radius: 8px;
             padding: 1rem;
             margin-bottom: 1rem;
         }
+        .card--risco-leitura { --cor-risco: var(--color-tinta-2); --cor-risco-faixa: var(--color-borda); }
+        .card--risco-escrita { --cor-risco: var(--color-aviso); --cor-risco-faixa: var(--color-aviso-faixa); }
+        .card--risco-exclusao { --cor-risco: var(--color-erro); --cor-risco-faixa: var(--color-erro-faixa); }
         .card-confirmacao pre {
-            background: #fff;
-            border: 1px solid #e5e7eb;
+            background: var(--color-creme);
+            border: 1px solid var(--color-borda);
             padding: 0.5rem;
             border-radius: 4px;
-            font-size: 0.85rem;
+            font-family: var(--fonte-mono);
+            font-size: 15px;
             overflow-x: auto;
         }
         .card-confirmacao .acoes {
@@ -68,24 +106,32 @@
             gap: 0.75rem;
             margin-top: 0.75rem;
         }
+        .card-expirado-texto { margin-top: 0.75rem; }
 
-        .btn-confirmar {
-            position: relative;
+        /* Confirmar (segurar) e Cancelar (clique): mesmo formato e peso; Cancelar é neutro (seção 6). */
+        .btn-confirmar,
+        .btn-cancelar {
             min-height: 44px;
             min-width: 140px;
             padding: 0.5rem 1rem;
             font-size: 16px;
             font-weight: 600;
+            background: var(--color-creme);
+            border-width: 2px;
+            border-style: solid;
+        }
+        .btn-confirmar {
+            position: relative;
             overflow: hidden;
-            background: #fff;
-            border: 2px solid var(--risco-verde);
-            color: var(--risco-verde);
+            border-color: var(--cor-risco);
+            color: var(--cor-risco);
         }
         .btn-confirmar__fill {
             position: absolute;
             inset: 0;
             width: 0%;
-            background: var(--risco-verde);
+            background: var(--cor-risco-faixa);
+            border-bottom: 4px solid var(--cor-risco);
             z-index: 0;
         }
         .btn-confirmar__label {
@@ -98,16 +144,12 @@
             line-height: 1.1;
             pointer-events: none;
         }
-        .btn-confirmar.segurando .btn-confirmar__label { color: #fff; mix-blend-mode: difference; }
-        .btn-confirmar__label .pequeno { font-size: 11px; font-weight: 400; }
-        .btn-confirmar__label .grande { font-size: 18px; }
+        .btn-confirmar__label .pequeno { font-family: var(--fonte-mono); font-size: 12px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; }
+        .btn-confirmar__label .grande { font-family: var(--fonte-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
 
         .btn-cancelar {
-            min-height: 44px;
-            padding: 0.5rem 1rem;
-            font-size: 16px;
-            border: 2px solid var(--risco-vermelho);
-            color: var(--risco-vermelho);
+            border-color: var(--color-tinta-2);
+            color: var(--color-tinta);
         }
 
         /* Popup de resultado */
@@ -117,10 +159,10 @@
             display: none;
             align-items: center;
             justify-content: center;
-            background: rgba(0, 0, 0, 0.15);
+            background: color-mix(in srgb, var(--color-tinta) 15%, transparent);
         }
         #popup {
-            background: #fff;
+            background: var(--color-creme);
             border-radius: 10px;
             padding: 1.5rem 2rem;
             display: flex;
@@ -130,12 +172,11 @@
             font-weight: 600;
             opacity: 0;
             transition: opacity 1.5s ease;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
         }
         #popup.visivel { opacity: 1; }
-        #popup.verde { color: var(--risco-verde); border: 2px solid var(--risco-verde); }
-        #popup.vermelho { color: var(--risco-vermelho); border: 2px solid var(--risco-vermelho); }
-        #popup.ambar { color: var(--risco-ambar); border: 2px solid var(--risco-ambar); }
+        #popup.sucesso { color: var(--color-sucesso); border: 2px solid var(--color-sucesso); }
+        #popup.erro { color: var(--color-erro); border: 2px solid var(--color-erro); }
+        #popup.neutro { color: var(--color-tinta); border: 2px solid var(--color-tinta-2); }
 
         .sr-only {
             position: absolute;
@@ -155,9 +196,14 @@
 
     <div id="historico" aria-live="polite"></div>
 
+    <div id="carregando" class="carregando" hidden>
+        <span>Consultando…</span>
+        <div class="carregando__barra"></div>
+    </div>
+
     <form id="form-comando">
         <input type="text" id="campo-mensagem" placeholder="Pergunte algo sobre os lançamentos..." required>
-        <button type="submit">Enviar</button>
+        <button type="submit" id="botao-enviar">Enviar</button>
     </form>
 
     <div id="status-anuncio" class="sr-only" aria-live="assertive"></div>
@@ -171,12 +217,17 @@
         const historico = document.getElementById('historico');
         const form = document.getElementById('form-comando');
         const campoMensagem = document.getElementById('campo-mensagem');
+        const botaoEnviar = document.getElementById('botao-enviar');
+        const indicadorCarregando = document.getElementById('carregando');
         const statusAnuncio = document.getElementById('status-anuncio');
         const overlayPopup = document.getElementById('overlay-popup');
         const popup = document.getElementById('popup');
 
         const DURACAO_HOLD_MS = 2000;
         const DURACAO_IDLE_MS = 10000;
+        // Segurar só começa se ainda couber o hold (2 s) + margem antes do fim da janela: o servidor aceita até 12 s.
+        const MINIMO_PARA_SEGURAR_MS = 2500;
+        const RISCOS = ['leitura', 'escrita', 'exclusao'];
 
         function anunciar(texto) {
             statusAnuncio.textContent = texto;
@@ -187,6 +238,20 @@
             div.className = 'msg ' + classe;
             div.textContent = texto;
             historico.appendChild(div);
+        }
+
+        // Campo "aviso" do JSON (ex.: só o primeiro de vários pedidos foi atendido). Texto + cor, nunca só a cor.
+        function adicionarAviso(texto) {
+            adicionarMensagem('Aviso: ' + texto, 'msg--aviso');
+        }
+
+        // Enquanto espera o agente: campo e botão desativados, aria-busy e o texto "Consultando…".
+        function definirCarregando(ativo) {
+            campoMensagem.disabled = ativo;
+            botaoEnviar.disabled = ativo;
+            form.setAttribute('aria-busy', ativo ? 'true' : 'false');
+            indicadorCarregando.hidden = !ativo;
+            if (ativo) anunciar('consultando');
         }
 
         // As colunas vêm do servidor (catálogo de tools); textContent evita XSS com dados gravados no banco.
@@ -220,9 +285,10 @@
             historico.appendChild(table);
         }
 
-        function mostrarPopup(estado, textoEl) {
+        // textContent: a mensagem pode vir do servidor, nunca vira HTML.
+        function mostrarPopup(estado, texto) {
             popup.className = estado;
-            popup.innerHTML = textoEl;
+            popup.textContent = texto;
             overlayPopup.style.display = 'flex';
             requestAnimationFrame(() => popup.classList.add('visivel'));
             setTimeout(() => {
@@ -232,25 +298,22 @@
         }
 
         function popupConfirmado() {
-            mostrarPopup('verde', '✔ Confirmado');
+            mostrarPopup('sucesso', '✔ Confirmado');
             anunciar('confirmado');
         }
         function popupCancelado() {
-            mostrarPopup('vermelho', '✕ Cancelado');
+            mostrarPopup('neutro', '✕ Cancelado');
             anunciar('cancelado');
         }
         function popupErro(mensagem) {
-            mostrarPopup('vermelho', '✕ ' + (mensagem || 'Erro ao confirmar — tente novamente'));
+            mostrarPopup('erro', '✕ ' + (mensagem || 'Erro ao confirmar — tente novamente'));
             anunciar(mensagem || 'erro ao confirmar');
         }
-        function popupTimeout() {
-            mostrarPopup('ambar', '⏱ Tempo esgotado — nada foi confirmado');
-            anunciar('tempo esgotado');
-        }
 
-        function renderizarConfirmacaoPendente(tool, argumentos, token) {
+        function renderizarConfirmacaoPendente(tool, argumentos, token, risco) {
             const card = document.createElement('div');
-            card.className = 'card-confirmacao';
+            // Risco desconhecido cai no mais severo (exclusao), nunca no mais brando.
+            card.className = 'card-confirmacao card--risco-' + (RISCOS.includes(risco) ? risco : 'exclusao');
             card.innerHTML = `
                 <strong>Confirmação necessária:</strong> <span class="card-tool"></span>
                 <pre class="card-argumentos"></pre>
@@ -271,22 +334,80 @@
             const label = card.querySelector('.btn-confirmar__label');
             const btnCancelar = card.querySelector('.btn-cancelar');
 
+            const pequeno = document.createElement('span');
+            pequeno.className = 'pequeno';
+            pequeno.textContent = 'confirmando';
+            const grande = document.createElement('span');
+            grande.className = 'grande';
+
             let segurando = false;
             let inicioHold = 0;
             let rafId = null;
-            let idleTimer = setTimeout(() => {
-                encerrarCard();
-                popupTimeout();
-            }, DURACAO_IDLE_MS);
+            let idleTimer = null;
+            let quaseEsgotadoTimer = null;
+            let avisoTempo = null;
+            const criadoEm = performance.now();
+
+            function restanteMs() {
+                return DURACAO_IDLE_MS - (performance.now() - criadoEm);
+            }
+
+            function pararTimers() {
+                clearTimeout(idleTimer);
+                clearTimeout(quaseEsgotadoTimer);
+            }
+
+            // Janela ociosa contada desde o card. Segurar pausa os timers (M2); soltar sem completar retoma com o que resta.
+            function agendarExpiracao() {
+                const restante = restanteMs();
+                idleTimer = setTimeout(expirarCard, Math.max(0, restante));
+                quaseEsgotadoTimer = setTimeout(bloquearPorTempo, Math.max(0, restante - MINIMO_PARA_SEGURAR_MS));
+            }
+            agendarExpiracao();
 
             function encerrarCard() {
-                clearTimeout(idleTimer);
+                pararTimers();
                 if (rafId) cancelAnimationFrame(rafId);
                 card.remove();
             }
 
+            // Menos de 2,5 s na janela: um hold novo terminaria fora do prazo do servidor. Desativa o Confirmar.
+            function bloquearPorTempo() {
+                if (segurando || btnConfirmar.disabled) return;
+                btnConfirmar.disabled = true;
+                avisoTempo = document.createElement('div');
+                avisoTempo.className = 'msg msg--aviso card-expirado-texto';
+                avisoTempo.textContent = 'Tempo quase esgotado. Peça de novo.';
+                card.appendChild(avisoTempo);
+                anunciar('tempo quase esgotado, peça de novo');
+            }
+
+            // Expirou: o card não some calado — fica visível, marcado, com os botões desativados.
+            function expirarCard() {
+                pararTimers();
+                if (avisoTempo) avisoTempo.remove();
+                segurando = false;
+                if (rafId) cancelAnimationFrame(rafId);
+                fill.style.width = '0%';
+                label.textContent = 'Confirmar';
+                btnConfirmar.classList.remove('segurando');
+                btnConfirmar.disabled = true;
+                btnCancelar.disabled = true;
+                card.classList.add('card--expirado');
+                const texto = document.createElement('div');
+                texto.className = 'msg msg--aviso card-expirado-texto';
+                texto.textContent = 'Confirmação expirada. Nada foi gravado. Peça de novo.';
+                card.appendChild(texto);
+                anunciar('confirmação expirada, nada foi gravado');
+            }
+
             function iniciarHold() {
-                if (segurando) return;
+                if (segurando || btnConfirmar.disabled) return;
+                if (restanteMs() < MINIMO_PARA_SEGURAR_MS) {
+                    bloquearPorTempo();
+                    return;
+                }
+                pararTimers();
                 segurando = true;
                 inicioHold = performance.now();
                 btnConfirmar.classList.add('segurando');
@@ -299,7 +420,8 @@
                 const decorrido = performance.now() - inicioHold;
                 const pct = Math.min(100, (decorrido / DURACAO_HOLD_MS) * 100);
                 fill.style.width = pct + '%';
-                label.innerHTML = `<span class="pequeno">confirmando</span><span class="grande">${Math.floor(pct)}%</span>`;
+                grande.textContent = Math.floor(pct) + '%';
+                if (grande.parentNode !== label) label.replaceChildren(pequeno, grande);
 
                 if (pct >= 100) {
                     segurando = false;
@@ -316,10 +438,11 @@
                 fill.style.width = '0%';
                 label.textContent = 'Confirmar';
                 btnConfirmar.classList.remove('segurando');
+                agendarExpiracao();
             }
 
             async function confirmarAcao() {
-                clearTimeout(idleTimer);
+                pararTimers();
                 try {
                     const resp = await fetch('/agente/confirmar', {
                         method: 'POST',
@@ -376,6 +499,7 @@
 
             adicionarMensagem(mensagem, 'msg--usuario');
             campoMensagem.value = '';
+            definirCarregando(true);
 
             try {
                 const resp = await fetch('/agente/comando', {
@@ -401,15 +525,21 @@
                         adicionarTabela(dados.resultado || [], dados.colunas);
                         break;
                     case 'confirmacao_pendente':
-                        renderizarConfirmacaoPendente(dados.tool, dados.argumentos, dados.token);
+                        renderizarConfirmacaoPendente(dados.tool, dados.argumentos, dados.token, dados.risco);
                         break;
                     case 'erro':
                     default:
                         adicionarMensagem(dados.mensagem || 'Erro desconhecido.', 'msg--erro');
                         break;
                 }
+
+                // O aviso acompanha qualquer tipo de resposta (skill, seção 7).
+                if (dados.aviso) adicionarAviso(dados.aviso);
             } catch (err) {
                 adicionarMensagem('Falha ao contatar o servidor.', 'msg--erro');
+            } finally {
+                definirCarregando(false);
+                campoMensagem.focus();
             }
         });
     </script>

@@ -50,14 +50,20 @@ class AutenticacaoTest extends TestCase
     public function test_login_valido_regenera_a_sessao_e_vai_para_o_agente(): void
     {
         $usuario = $this->usuario();
-        $this->get('/login')->assertOk();
-        $sessaoAntes = session()->getId();
+        $cookie = config('session.cookie');
 
-        $this->post('/login', ['email' => $usuario->email, 'password' => self::SENHA])
-            ->assertRedirect('/agente');
+        // M5: o cookie de sessão vai de uma requisição para a outra, como no navegador.
+        $idAntes = $this->get('/login')->assertOk()->getCookie($cookie)->getValue();
+        $idSemLogin = $this->withCookie($cookie, $idAntes)->get('/login')->getCookie($cookie)->getValue();
+        $this->assertSame($idAntes, $idSemLogin, 'controle: sem login, o id de sessão se mantém');
+
+        $idDepois = $this->withCookie($cookie, $idAntes)
+            ->post('/login', ['email' => $usuario->email, 'password' => self::SENHA])
+            ->assertRedirect('/agente')
+            ->getCookie($cookie)->getValue();
 
         $this->assertAuthenticatedAs($usuario);
-        $this->assertNotSame($sessaoAntes, session()->getId(), 'id de sessão novo após o login (fixação de sessão)');
+        $this->assertNotSame($idAntes, $idDepois, 'id de sessão novo após o login (fixação de sessão)');
     }
 
     public function test_senha_errada_e_email_inexistente_dao_a_mesma_mensagem(): void

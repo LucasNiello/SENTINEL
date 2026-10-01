@@ -153,6 +153,22 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
         $this->assertSame(0, Funcionario::count(), 'nada foi gravado');
     }
 
+    // Método separado: cada caso é um pedido ao agente, e o RNF10 limita a 10 pedidos por minuto.
+    public function test_criar_funcionario_recusa_data_ambigua_e_salario_acima_do_teto(): void
+    {
+        $casos = [
+            [['data_admissao' => '10/01/2026'], 'A data de admissão deve ser uma data válida (AAAA-MM-DD).'],
+            [['data_demissao' => '30/06/2026'], 'A data de demissão deve ser uma data válida (AAAA-MM-DD).'],
+            [['salario' => 100000000], 'O salário deve ser no máximo 99999999.99.'],
+        ];
+
+        foreach ($casos as [$alteracao, $esperada]) {
+            $this->recusar('criar_funcionario', $this->funcionarioValido($alteracao), $esperada);
+        }
+
+        $this->assertSame(0, Funcionario::count(), 'nada foi gravado');
+    }
+
     public function test_criar_funcionario_exige_admin_operador_e_leitura_sao_negados_e_auditados(): void
     {
         foreach (['operador', 'leitura'] as $papel) {
@@ -295,6 +311,9 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
             [['valor' => -5], 'O valor deve ser no mínimo 0.'],
             [['data_emissao' => null], 'Informe a data de emissão.'],
             [['data_emissao' => 'não é data'], 'A data de emissão deve ser uma data válida (AAAA-MM-DD).'],
+            // B2/B3: dd/mm ambíguo é recusado e o valor respeita o teto de decimal(10,2).
+            [['data_emissao' => '01/09/2026'], 'A data de emissão deve ser uma data válida (AAAA-MM-DD).'],
+            [['valor' => 100000000], 'O valor deve ser no máximo 99999999.99.'],
         ];
 
         foreach ($casos as [$alteracao, $esperada]) {

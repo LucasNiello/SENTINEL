@@ -16,8 +16,10 @@ class NotaFiscalRequest extends FormRequest
         return [
             'numero' => 'required|string|max:50',
             'tipo' => 'required|in:entrada,saida',
-            'valor' => 'required|numeric|min:0',
-            'data_emissao' => 'required|date',
+            // O teto é o de decimal(10,2): acima disso o MySQL recusaria com erro genérico.
+            'valor' => 'required|numeric|min:0|max:99999999.99',
+            // date_format em vez de date: "10/09" seria lido como 9 de outubro.
+            'data_emissao' => 'required|date_format:Y-m-d',
             'cliente_id' => 'required_if:tipo,saida|prohibited_if:tipo,entrada|nullable|exists:clientes,id',
             'fornecedor_id' => 'required_if:tipo,entrada|prohibited_if:tipo,saida|nullable|exists:fornecedores,id',
             'lancamento_id' => 'nullable|exists:lancamentos,id',

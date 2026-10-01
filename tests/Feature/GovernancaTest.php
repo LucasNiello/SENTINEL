@@ -140,7 +140,13 @@ class GovernancaTest extends TestCase
         $base = ['numero' => '1', 'tipo' => 'saida', 'valor' => 1, 'data_emissao' => '2026-01-01', 'tenant_id' => 1];
 
         $this->assertTrue(Validator::make($base, $regras)->fails(), 'saída exige cliente');
-        $this->assertTrue(Validator::make([...$base, 'tipo' => 'entrada', 'cliente_id' => 1], $regras)->fails(), 'entrada proíbe cliente');
+        // M7: fornecedor válido e cliente existente — a única falha possível é a do prohibited_if.
+        $cliente = $this->cliente();
+        $fornecedor = Fornecedor::create(['nome' => 'F', 'tenant_id' => 1]);
+        $entradaComCliente = Validator::make([...$base, 'tipo' => 'entrada', 'fornecedor_id' => $fornecedor->id, 'cliente_id' => $cliente->id], $regras);
+        $this->assertTrue($entradaComCliente->fails(), 'entrada proíbe cliente');
+        $this->assertArrayHasKey('ProhibitedIf', $entradaComCliente->failed()['cliente_id'] ?? [], 'a falha é a do prohibited_if');
+        $this->assertArrayNotHasKey('fornecedor_id', $entradaComCliente->failed());
         $this->assertTrue(Validator::make([...$base, 'tipo' => 'outro'], $regras)->fails(), 'tipo fora do enum');
     }
 
@@ -184,6 +190,33 @@ class GovernancaTest extends TestCase
         } catch (ModelNotFoundException) {
             $this->assertNull($model::find($registro->id), 'o registro do tenant 2 continua na lixeira');
         }
+    }
+
+    // ---- B1: curingas digitados no filtro por nome são literais ----
+
+    public static function servicosComFiltroPorNome(): array
+    {
+        return [
+            'cliente' => [Cliente::class, ClienteService::class, []],
+            'fornecedor' => [Fornecedor::class, FornecedorService::class, []],
+            'funcionario' => [Funcionario::class, FuncionarioService::class, ['cpf' => '1', 'salario' => 1, 'data_admissao' => '2026-01-01']],
+        ];
+    }
+
+    #[DataProvider('servicosComFiltroPorNome')]
+    public function test_b1_porcento_sublinhado_barra_e_exclamacao_no_nome_sao_literais(string $model, string $service, array $extra): void
+    {
+        foreach (['Alfa Ltda', '100% Café', 'Beta_Comercio', 'C:\\Pasta', 'Ex!clama'] as $nome) {
+            $model::create([...$extra, 'nome' => $nome, 'tenant_id' => 1]);
+        }
+        $servico = app($service);
+        $nomes = fn (string $filtro) => $servico->buscarPorFiltro($filtro, 1)->pluck('nome')->all();
+
+        $this->assertSame(['100% Café'], $nomes('%'), '"%" não devolve tudo do tenant');
+        $this->assertSame(['Beta_Comercio'], $nomes('_'));
+        $this->assertSame(['C:\\Pasta'], $nomes('\\'));
+        $this->assertSame(['Ex!clama'], $nomes('!'));
+        $this->assertSame(['Alfa Ltda'], $nomes('alfa'), 'continua "contém" e sem diferenciar maiúsculas');
     }
 
     public function test_status_de_lancamento_de_outra_empresa_nao_e_alterado(): void

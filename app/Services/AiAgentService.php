@@ -155,24 +155,49 @@ class AiAgentService
             ];
         }
 
-        $mensagemResposta = $resposta->json('choices.0.message') ?? [];
-        $toolCalls = $mensagemResposta['tool_calls'] ?? [];
+        // N1: o corpo da Azure é dado externo. Fora do formato esperado (message que não é objeto, choices
+        // vazio, HTML com 200, name/arguments que não são texto...) vira erro amigável, nunca 500.
+        $mensagemResposta = $resposta->json('choices.0.message');
+
+        // message precisa ser objeto: uma lista com itens (ex.: ["oi"]) também está fora do formato.
+        if (is_array($mensagemResposta) && $mensagemResposta !== [] && array_is_list($mensagemResposta)) {
+            $mensagemResposta = null;
+        }
+
+        $toolCalls = is_array($mensagemResposta) ? ($mensagemResposta['tool_calls'] ?? []) : null;
+
+        if (! is_array($mensagemResposta) || ! is_array($toolCalls)) {
+            return $this->respostaForaDoFormato($resposta->status());
+        }
 
         if (empty($toolCalls)) {
+            $conteudo = $mensagemResposta['content'] ?? null;
+
+            if ($conteudo !== null && ! is_string($conteudo)) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
+
             return [
                 'tipo' => 'texto',
-                'mensagem' => $mensagemResposta['content'] ?? '',
+                'mensagem' => $conteudo ?? '',
             ];
         }
 
+        $chamada = $toolCalls[0] ?? null;
+        $funcao = is_array($chamada) ? ($chamada['function'] ?? null) : null;
+        $tool = is_array($funcao) ? ($funcao['name'] ?? null) : null;
+        $argumentosJson = is_array($funcao) ? ($funcao['arguments'] ?? '{}') : null;
+
+        if (! is_string($tool) || ! is_string($argumentosJson)) {
+            return $this->respostaForaDoFormato($resposta->status());
+        }
+
         // Só o primeiro pedido é atendido; os demais não podem sumir calados.
-        $aviso = is_array($toolCalls) && count($toolCalls) > 1
+        $aviso = count($toolCalls) > 1
             ? 'Havia '.count($toolCalls).' pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.'
             : null;
 
-        $chamada = $toolCalls[0];
-        $tool = $chamada['function']['name'] ?? '';
-        $argumentos = json_decode($chamada['function']['arguments'] ?? '{}', true);
+        $argumentos = json_decode($argumentosJson, true);
         $argumentos = is_array($argumentos) ? $argumentos : [];
 
         // O tenant nunca vem do modelo: o servidor injeta o tenant atual na execução.
@@ -188,6 +213,7 @@ class AiAgentService
             return $this->comAviso([
                 'tipo' => 'confirmacao_pendente',
                 'tool' => $tool,
+                'risco' => $definicao['risco'],
                 'argumentos' => $argumentos,
             ], $aviso);
         }
@@ -212,6 +238,22 @@ class AiAgentService
     private function comAviso(array $resposta, ?string $aviso): array
     {
         return $aviso === null ? $resposta : [...$resposta, 'aviso' => $aviso];
+    }
+
+    /**
+     * N1: resposta 2xx da Chat Completions API fora do formato esperado. O log leva só o status
+     * (o corpo pode trazer dados do usuário); o usuário recebe uma frase amigável.
+     *
+     * @return array{tipo: string, mensagem: string}
+     */
+    private function respostaForaDoFormato(int $status): array
+    {
+        Log::warning('AiAgentService: resposta da Chat Completions API fora do formato esperado', ['status' => $status]);
+
+        return [
+            'tipo' => 'erro',
+            'mensagem' => 'O agente de IA respondeu de um jeito inesperado. Tente novamente.',
+        ];
     }
 
     /**
@@ -337,6 +379,7 @@ class AiAgentService
                 nome: 'consultar_lancamentos',
                 descricao: 'Consulta lançamentos financeiros, opcionalmente filtrando por status e período. Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
+                risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Lancamento',
                 papelMinimo: 'leitura',
@@ -359,6 +402,7 @@ class AiAgentService
                 nome: 'criar_lancamento',
                 descricao: 'Cria um novo lançamento financeiro. Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'criar',
                 entidade: 'Lancamento',
                 papelMinimo: 'operador',
@@ -375,6 +419,7 @@ class AiAgentService
                 nome: 'atualizar_status_lancamento',
                 descricao: 'Altera o status de um lançamento existente para "pendente" ou "conciliado". Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'atualizar',
                 entidade: 'Lancamento',
                 papelMinimo: 'operador',
@@ -390,6 +435,7 @@ class AiAgentService
                 nome: 'consultar_clientes',
                 descricao: 'Consulta clientes cadastrados, opcionalmente filtrando por parte do nome. Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
+                risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Cliente',
                 papelMinimo: 'leitura',
@@ -405,6 +451,7 @@ class AiAgentService
                 nome: 'criar_cliente',
                 descricao: 'Cadastra um novo cliente. Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'criar',
                 entidade: 'Cliente',
                 papelMinimo: 'operador',
@@ -422,6 +469,7 @@ class AiAgentService
                 nome: 'consultar_fornecedores',
                 descricao: 'Consulta fornecedores cadastrados, opcionalmente filtrando por parte do nome. Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
+                risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Fornecedor',
                 papelMinimo: 'leitura',
@@ -437,6 +485,7 @@ class AiAgentService
                 nome: 'criar_fornecedor',
                 descricao: 'Cadastra um novo fornecedor. Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'criar',
                 entidade: 'Fornecedor',
                 papelMinimo: 'operador',
@@ -454,6 +503,7 @@ class AiAgentService
                 nome: 'consultar_funcionarios',
                 descricao: 'Consulta funcionários cadastrados, opcionalmente filtrando por parte do nome. Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
+                risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Funcionario',
                 papelMinimo: 'leitura',
@@ -470,6 +520,7 @@ class AiAgentService
                 nome: 'criar_funcionario',
                 descricao: 'Cadastra um novo funcionário. Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'criar',
                 entidade: 'Funcionario',
                 papelMinimo: 'admin',
@@ -489,6 +540,7 @@ class AiAgentService
                 nome: 'consultar_notas_fiscais',
                 descricao: 'Consulta notas fiscais, opcionalmente filtrando por tipo (entrada ou saida). Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
+                risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'NotaFiscal',
                 papelMinimo: 'leitura',
@@ -504,6 +556,7 @@ class AiAgentService
                 nome: 'criar_nota_fiscal',
                 descricao: 'Cadastra uma nova nota fiscal. Nota de saída exige cliente_id; nota de entrada exige fornecedor_id. Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'criar',
                 entidade: 'NotaFiscal',
                 papelMinimo: 'operador',
@@ -528,6 +581,7 @@ class AiAgentService
                 nome: 'consultar_categorias_lancamento',
                 descricao: 'Consulta categorias de lançamento, opcionalmente filtrando por tipo (receita ou despesa). Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
+                risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'CategoriaLancamento',
                 papelMinimo: 'leitura',
@@ -543,6 +597,7 @@ class AiAgentService
                 nome: 'criar_categoria_lancamento',
                 descricao: 'Cadastra uma nova categoria de lançamento (receita ou despesa). Ação de escrita — exige confirmação humana antes de ser executada.',
                 tipo: 'escrita',
+                risco: 'escrita',
                 acao: 'criar',
                 entidade: 'CategoriaLancamento',
                 papelMinimo: 'operador',
@@ -649,6 +704,7 @@ class AiAgentService
         string $nome,
         string $descricao,
         string $tipo,
+        string $risco,
         string $acao,
         string $entidade,
         string $papelMinimo,
@@ -658,9 +714,19 @@ class AiAgentService
         string $mensagemErro,
         array $colunas = [],
     ): array {
+        // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
+        // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
+        if (! in_array($tipo, ['leitura', 'escrita'], true)
+            || ! in_array($risco, ['leitura', 'escrita', 'exclusao'], true)
+            || ($risco !== 'leitura') !== ($tipo === 'escrita')) {
+            throw new InvalidArgumentException("Tool {$nome}: tipo '{$tipo}' e risco '{$risco}' incoerentes.");
+        }
+
         return [
             'nome' => $nome,
             'tipo' => $tipo,
+            // Classe de risco pelo EFEITO da tool (leitura | escrita | exclusao): a interface usa na borda do card.
+            'risco' => $risco,
             'acao' => $acao,
             'entidade' => $entidade,
             'papel_minimo' => $papelMinimo,
