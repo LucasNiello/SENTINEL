@@ -18,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use Throwable;
@@ -106,17 +108,14 @@ class AiAgentService
      * aqui: o tool_call é devolvido ao front como confirmação pendente
      * (depois de checado o RBAC — sem permissão, nem chega a propor).
      */
-    public function processar(string $mensagem): array
+    public function processar(string $mensagem, array $historico = []): array
     {
         $endpoint = rtrim((string) config('services.azure_foundry.endpoint'), '/');
         $apiKey = (string) config('services.azure_foundry.api_key');
         $deployment = (string) config('services.azure_foundry.deployment');
 
         if ($endpoint === '' || $apiKey === '' || $deployment === '') {
-            return [
-                'tipo' => 'erro',
-                'mensagem' => 'Configuração do Microsoft Foundry ausente (AZURE_FOUNDRY_ENDPOINT/API_KEY/DEPLOYMENT).',
-            ];
+            return $this->falha('provider_configuration_error', 'AI_PROVIDER_UNAVAILABLE', 503);
         }
 
         try {
@@ -127,32 +126,45 @@ class AiAgentService
                     'messages' => [
                         [
                             'role' => 'system',
-                            'content' => 'Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita.',
+                            'content' => 'Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita.',
                         ],
+                        ...$historico,
                         ['role' => 'user', 'content' => $mensagem],
                     ],
                     'tools' => $this->tools(),
                     'tool_choice' => 'auto',
                 ]);
         } catch (\Throwable $e) {
-            Log::error('AiAgentService: falha ao chamar a Chat Completions API', ['erro' => $e->getMessage()]);
+            $anterior = $e->getPrevious();
+            $timeout = $e instanceof \GuzzleHttp\Exception\NetworkTimeoutException
+                || $e instanceof \GuzzleHttp\Exception\ConnectTimeoutException
+                || $e instanceof \GuzzleHttp\Exception\ResponseTimeoutException
+                || $anterior instanceof \GuzzleHttp\Exception\NetworkTimeoutException
+                || $anterior instanceof \GuzzleHttp\Exception\ConnectTimeoutException
+                || $anterior instanceof \GuzzleHttp\Exception\ResponseTimeoutException
+                || ($e instanceof ConnectionException && preg_match('/^cURL error 28:/', $e->getMessage()) === 1);
 
-            return [
-                'tipo' => 'erro',
-                'mensagem' => 'Não foi possível contatar o agente de IA agora. Tente novamente.',
-            ];
+            return $this->falha($timeout ? 'provider_timeout' : 'provider_connection_error',
+                $timeout ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE', $timeout ? 504 : 503, [], $e);
         }
 
-        if ($resposta->failed()) {
-            Log::error('AiAgentService: resposta de erro da Chat Completions API', [
-                'status' => $resposta->status(),
-                'corpo' => $resposta->body(),
-            ]);
+        if (! $resposta->successful()) {
+            $status = $resposta->status();
+            $categoria = match ($status) {
+                401 => 'provider_authentication_error',
+                403 => 'provider_authorization_error',
+                429 => 'provider_rate_limit',
+                408, 504 => 'provider_timeout',
+                default => 'provider_http_error',
+            };
+            $localStatus = match (true) {
+                in_array($status, [408, 504], true) => 504,
+                $status === 429 || $status >= 500 => 503,
+                default => 502,
+            };
 
-            return [
-                'tipo' => 'erro',
-                'mensagem' => 'O agente de IA retornou um erro (HTTP '.$resposta->status().').',
-            ];
+            return $this->falha($categoria, $localStatus === 504 ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE',
+                $localStatus, ['status' => $status]);
         }
 
         // N1: o corpo da Azure é dado externo. Fora do formato esperado (message que não é objeto, choices
@@ -167,6 +179,19 @@ class AiAgentService
         $toolCalls = is_array($mensagemResposta) ? ($mensagemResposta['tool_calls'] ?? []) : null;
 
         if (! is_array($mensagemResposta) || ! is_array($toolCalls)) {
+            return $this->respostaForaDoFormato($resposta->status());
+        }
+
+        $fim = $resposta->json('choices.0.finish_reason');
+        if ($fim === 'length' || $fim === 'content_filter') {
+            return $this->falha('provider_response_error', $fim === 'length' ? 'AI_RESPONSE_TRUNCATED' : 'AI_CONTENT_FILTERED', 502,
+                ['status' => $resposta->status()], null, $fim === 'length'
+                    ? 'A resposta do agente ficou incompleta. Reformule o pedido.'
+                    : 'O serviço de IA não pôde responder a esse pedido. Reformule a mensagem.');
+        }
+        if (($fim !== null && ! in_array($fim, ['stop', 'tool_calls'], true))
+            || ($fim === 'tool_calls' && empty($toolCalls)) || ($fim === 'stop' && ! empty($toolCalls))
+            || (! empty($toolCalls) && ! array_is_list($toolCalls))) {
             return $this->respostaForaDoFormato($resposta->status());
         }
 
@@ -186,7 +211,7 @@ class AiAgentService
         $chamada = $toolCalls[0] ?? null;
         $funcao = is_array($chamada) ? ($chamada['function'] ?? null) : null;
         $tool = is_array($funcao) ? ($funcao['name'] ?? null) : null;
-        $argumentosJson = is_array($funcao) ? ($funcao['arguments'] ?? '{}') : null;
+        $argumentosJson = is_array($funcao) ? ($funcao['arguments'] ?? null) : null;
 
         if (! is_string($tool) || ! is_string($argumentosJson)) {
             return $this->respostaForaDoFormato($resposta->status());
@@ -197,12 +222,32 @@ class AiAgentService
             ? 'Havia '.count($toolCalls).' pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.'
             : null;
 
-        $argumentos = json_decode($argumentosJson, true);
-        $argumentos = is_array($argumentos) ? $argumentos : [];
-
-        // O tenant nunca vem do modelo: o servidor injeta o tenant atual na execução.
+        // Valida todas as chamadas antes de processar a primeira; nunca converte JSON inválido em consulta ampla.
+        foreach ($toolCalls as $pedido) {
+            $f = is_array($pedido) ? ($pedido['function'] ?? null) : null;
+            if (! is_array($f) || ! is_string($f['name'] ?? null) || ! is_string($f['arguments'] ?? null)) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
+            try {
+                $objeto = json_decode($f['arguments'], false, 32, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
+            if (! $objeto instanceof \stdClass) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
+            $args = (array) $objeto;
+            // Compatibilidade defensiva: tenant é sempre removido e derivado do backend.
+            unset($args['tenant_id']);
+            if ($f['name'] === 'criar_lancamento') unset($args['status']);
+            $schema = $this->catalogo()[$f['name']]['definicao']['function']['parameters']['properties'] ?? null;
+            if ($schema !== null && array_diff(array_keys($args), array_keys($schema)) !== []) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
+        }
+        $argumentos = (array) json_decode($argumentosJson, false, 32, JSON_THROW_ON_ERROR);
         unset($argumentos['tenant_id']);
-
+        if ($tool === 'criar_lancamento') unset($argumentos['status']);
         $definicao = $this->catalogo()[$tool] ?? null;
 
         if ($definicao !== null && $definicao['tipo'] === 'escrita') {
@@ -223,8 +268,13 @@ class AiAgentService
         } catch (InvalidArgumentException $e) {
             return $this->comAviso([
                 'tipo' => 'erro',
-                'mensagem' => $e->getMessage(),
+                'mensagem' => 'Esta operação não é suportada pelo agente.',
+                'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'http_status' => 422,
             ], $aviso);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            return $this->erroTecnicoTool($e);
         }
     }
 
@@ -248,12 +298,31 @@ class AiAgentService
      */
     private function respostaForaDoFormato(int $status): array
     {
-        Log::warning('AiAgentService: resposta da Chat Completions API fora do formato esperado', ['status' => $status]);
+        return $this->falha('provider_response_error', 'AI_PROVIDER_RESPONSE_INVALID', 502,
+            ['status' => $status], null, 'O agente de IA respondeu de um jeito inesperado. Tente novamente.');
+    }
 
-        return [
-            'tipo' => 'erro',
-            'mensagem' => 'O agente de IA respondeu de um jeito inesperado. Tente novamente.',
-        ];
+    public function erroTecnicoTool(Throwable $e): array
+    {
+        return $this->falha('tool_error', 'AI_TOOL_ERROR', 500, [], $e,
+            'Não foi possível concluir a operação no momento. Tente novamente.');
+    }
+
+    /** Logs usam somente metadados definidos pelo servidor, nunca corpo, prompt ou mensagem de exception. */
+    private function falha(string $categoria, string $codigo, int $status, array $metadados = [], ?Throwable $e = null, ?string $mensagem = null): array
+    {
+        $correlacao = (string) Str::uuid();
+        $contexto = ['correlation_id' => $correlacao, 'categoria' => $categoria, 'provider' => 'azure', ...$metadados];
+        if ($e !== null) {
+            $contexto += ['classe' => $e::class, 'codigo' => $e->getCode(), 'arquivo' => basename($e->getFile()), 'linha' => $e->getLine()];
+        }
+        Log::warning('AiAgentService: falha controlada', $contexto);
+
+        return ['tipo' => 'erro', 'categoria' => $categoria, 'codigo' => $codigo,
+            'correlation_id' => $correlacao, 'http_status' => $status,
+            'mensagem' => $mensagem ?? ($status === 504
+                ? 'O serviço de IA demorou demais para responder. Tente novamente.'
+                : 'Não foi possível acessar o serviço de IA no momento. Tente novamente.')];
     }
 
     /**
@@ -323,6 +392,7 @@ class AiAgentService
 
             return [
                 'tipo' => 'erro',
+                'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422,
                 'mensagem' => $e->getMessage(),
             ];
         } catch (Throwable $e) {
@@ -334,7 +404,8 @@ class AiAgentService
                 'excecao' => $e::class,
                 'codigo' => $e->getCode(),
                 'local' => basename($e->getFile()).':'.$e->getLine(),
-                'argumentos' => AuditoriaService::mascararCamposSensiveis($argumentos),
+                'correlation_id' => $correlacao = (string) Str::uuid(),
+                'categoria' => 'tool_error',
             ]);
 
             $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'erro', $definicao['mensagem_erro'], true);
@@ -342,6 +413,8 @@ class AiAgentService
             return [
                 'tipo' => 'erro',
                 'mensagem' => $definicao['mensagem_erro'],
+                'categoria' => 'tool_error', 'codigo' => 'AI_TOOL_ERROR',
+                'correlation_id' => $correlacao, 'http_status' => 500,
             ];
         }
 
@@ -741,6 +814,7 @@ class AiAgentService
                     'parameters' => [
                         'type' => 'object',
                         'properties' => $propriedades,
+                        'additionalProperties' => false,
                         ...($obrigatorios ? ['required' => $obrigatorios] : []),
                     ],
                 ],
@@ -783,6 +857,7 @@ class AiAgentService
 
         return [
             'tipo' => 'negado',
+            'categoria' => 'authorization_error', 'codigo' => 'AI_FORBIDDEN', 'http_status' => 403,
             'mensagem' => 'Você não tem permissão para executar esta ação.',
         ];
     }

@@ -84,7 +84,7 @@ class AgenteGovernancaTest extends TestCase
 
         $token = $this->propor(['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21']);
 
-        $this->confirmar($token)->assertStatus(422);
+        $this->confirmar($token)->assertStatus(500);
 
         $log = AuditLog::query()->sole();
         $this->assertSame('erro', $log->resultado);
@@ -110,7 +110,7 @@ class AgenteGovernancaTest extends TestCase
 
         $token = $this->propor(['descricao' => 'Não pode ficar sem auditoria', 'valor' => 1, 'data' => '2026-09-21']);
 
-        $this->confirmar($token)->assertStatus(422)->assertJsonPath('tipo', 'erro');
+        $this->confirmar($token)->assertStatus(500)->assertJsonPath('tipo', 'erro');
 
         $this->assertSame(0, Lancamento::count(), 'escrita sem auditoria não pode persistir');
         $this->assertSame('erro', AuditLog::query()->sole()->resultado);
@@ -237,7 +237,7 @@ class AgenteGovernancaTest extends TestCase
 
     public function test_tool_inventada_pelo_modelo_nao_executa_nada(): void
     {
-        $this->comando('apagar_tudo')->assertOk()->assertJsonPath('tipo', 'erro');
+        $this->comando('apagar_tudo')->assertStatus(422)->assertJsonPath('tipo', 'erro');
 
         $this->assertSame(0, Lancamento::count());
         $this->assertSame('negado', AuditLog::query()->sole()->resultado);

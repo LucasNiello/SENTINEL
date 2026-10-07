@@ -32,7 +32,7 @@ class AgenteTest extends TestCase
     private function respostaComTool(string $tool, array $argumentos): array
     {
         return ['choices' => [['message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => [
-            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => $tool, 'arguments' => json_encode($argumentos)]],
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => $tool, 'arguments' => json_encode((object) $argumentos)]],
         ]]]]];
     }
 
@@ -206,7 +206,7 @@ class AgenteTest extends TestCase
     {
         Http::fake(['*' => Http::response(['error' => 'boom'], 500)]);
 
-        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'erro');
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
     }
 
     public function test_sem_credencial_do_foundry_devolve_erro_sem_chamar_a_rede(): void
@@ -214,7 +214,7 @@ class AgenteTest extends TestCase
         config(['services.azure_foundry.api_key' => '']);
         Http::fake();
 
-        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'erro');
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
 
         Http::assertNothingSent();
     }
@@ -234,7 +234,7 @@ class AgenteTest extends TestCase
     private function respostaComVariasTools(array $chamadas): array
     {
         return ['choices' => [['message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => array_map(
-            fn (array $c, int $i) => ['id' => "call_{$i}", 'type' => 'function', 'function' => ['name' => $c[0], 'arguments' => json_encode($c[1])]],
+            fn (array $c, int $i) => ['id' => "call_{$i}", 'type' => 'function', 'function' => ['name' => $c[0], 'arguments' => json_encode((object) $c[1])]],
             $chamadas,
             array_keys($chamadas),
         )]]]];
@@ -385,12 +385,12 @@ class AgenteTest extends TestCase
         Http::fake(['*' => Http::response($corpo)]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])
-            ->assertOk()
+            ->assertStatus(502)
             ->assertJsonPath('tipo', 'erro')
             ->assertJsonPath('mensagem', 'O agente de IA respondeu de um jeito inesperado. Tente novamente.');
 
         // LGPD: o log leva só o status, nunca o corpo (que pode trazer argumentos com CPF ou salário).
-        Log::shouldHaveReceived('warning')->once()->with(Mockery::any(), ['status' => 200]);
+        Log::shouldHaveReceived('warning')->once()->with(Mockery::any(), Mockery::on(fn ($c) => $c['status'] === 200 && $c['categoria'] === 'provider_response_error' && isset($c['correlation_id']) && !isset($c['corpo'])));
         $this->assertSame(0, AuditLog::count(), 'nenhuma tool foi executada');
     }
 

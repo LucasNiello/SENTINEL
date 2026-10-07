@@ -473,6 +473,7 @@
             btnConfirmar.addEventListener('mousedown', iniciarHold);
             btnConfirmar.addEventListener('touchstart', iniciarHold);
             btnConfirmar.addEventListener('mouseup', soltarHold);
+            btnConfirmar.addEventListener('blur', soltarHold);
             btnConfirmar.addEventListener('mouseleave', soltarHold);
             btnConfirmar.addEventListener('touchend', soltarHold);
             btnConfirmar.addEventListener('touchcancel', soltarHold);
@@ -501,6 +502,8 @@
             campoMensagem.value = '';
             definirCarregando(true);
 
+            const abortController = new AbortController();
+            const timeout = setTimeout(() => abortController.abort(), 35000);
             try {
                 const resp = await fetch('/agente/comando', {
                     method: 'POST',
@@ -510,12 +513,25 @@
                         'X-CSRF-TOKEN': csrfToken,
                     },
                     body: JSON.stringify({ mensagem }),
+                    signal: abortController.signal,
                 });
                 if (resp.status === 401 || resp.status === 419) {
                     window.location.href = '/login';
                     return;
                 }
-                const dados = await resp.json();
+                const dados = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    const mensagens = {
+                        422: 'Confira os dados do pedido.',
+                        403: 'Você não tem permissão para esta operação.',
+                        429: 'Muitos pedidos. Aguarde antes de tentar novamente.',
+                        502: 'O serviço de IA retornou uma resposta inesperada. Tente novamente.',
+                        503: 'O serviço de IA está indisponível no momento. Tente novamente.',
+                        504: 'O serviço de IA demorou demais para responder. Tente novamente.',
+                    };
+                    adicionarMensagem(mensagens[resp.status] || 'Não foi possível processar o pedido.', 'msg--erro');
+                    return;
+                }
 
                 switch (dados.tipo) {
                     case 'texto':
@@ -536,8 +552,9 @@
                 // O aviso acompanha qualquer tipo de resposta (skill, seção 7).
                 if (dados.aviso) adicionarAviso(dados.aviso);
             } catch (err) {
-                adicionarMensagem('Falha ao contatar o servidor.', 'msg--erro');
+                adicionarMensagem(err.name === 'AbortError' ? 'O serviço de IA demorou demais para responder. Tente novamente.' : 'Falha ao contatar o servidor.', 'msg--erro');
             } finally {
+                clearTimeout(timeout);
                 definirCarregando(false);
                 campoMensagem.focus();
             }
