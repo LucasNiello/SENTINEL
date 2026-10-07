@@ -145,6 +145,16 @@ function Ensure-VC {
     $p=Start-Process $file -ArgumentList '/install /quiet /norestart' -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     if ($p.ExitCode -notin 0,1638,3010) { throw 'Falha no runtime Visual C++. Verifique o UAC.' }
 }
+function Set-TempoMaximo([string]$content) {
+    # N3: on Windows the limit is wall-clock; php.ini-development's 30 s ties with the Azure timeout(30).
+    # Ensures 60 s and never lowers: 0 (no limit) or >= 60 stay; a commented line counts as absent.
+    $pattern='(?m)^[ \t]*max_execution_time[ \t]*=[ \t]*"?(\d+)"?[ \t]*(?=\r?$)'
+    $active=[regex]::Matches($content,$pattern)
+    if (!$active.Count) { return $content+"`r`nmax_execution_time = 60`r`n" }
+    $current=[int]$active[$active.Count-1].Groups[1].Value
+    if ($current -eq 0 -or $current -ge 60) { return $content }
+    return [regex]::Replace($content,$pattern,'max_execution_time = 60')
+}
 function Ensure-Php {
     Step 'PHP e extensoes'; $available=@()
     foreach ($candidate in (Candidates 'php.exe' @('C:\php\php.exe','C:\laragon\bin\php\*\php.exe',"$local\php-*\php.exe",'C:\Program Files\PHP\*\php.exe'))) {
@@ -180,6 +190,7 @@ function Ensure-Php {
         $content=[regex]::Replace($content,$pattern,'; configured by SENTINEL below')
         $content+="`r`nextension=`"$($dll.Replace('\','/'))`"`r`n"
     }
+    $content=Set-TempoMaximo $content
     if ($content -ne $original) { Write-Utf8 $ini $content }
     $modules=(Run $php @('-m')).Text -split '\r?\n'
     foreach ($ext in ($required | Select-Object -Unique)) { if ($modules -inotcontains $ext) { throw "PHP nao carregou $ext. Confira $ini e suas DLLs." } }
