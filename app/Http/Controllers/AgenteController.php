@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\AiAgentService;
+use App\Services\ConversaAgente;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
@@ -17,7 +18,7 @@ class AgenteController extends Controller
     /** Validade máxima da confirmação — janela ociosa do front (DURACAO_IDLE_MS, 10 s) + folga. */
     private const VALIDADE_MAXIMA_S = 12;
 
-    public function __construct(private AiAgentService $aiAgentService)
+    public function __construct(private AiAgentService $aiAgentService, private ConversaAgente $conversa)
     {
     }
 
@@ -37,10 +38,18 @@ class AgenteController extends Controller
         ]);
 
         if ($validador->fails()) {
-            return response()->json(['tipo' => 'erro', 'mensagem' => $validador->errors()->first()], 422);
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR', 'mensagem' => $validador->errors()->first()], 422);
         }
 
-        $resposta = $this->aiAgentService->processar($validador->validated()['mensagem']);
+        $mensagem = $validador->validated()['mensagem'];
+        try {
+            $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()));
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $resposta = $this->aiAgentService->erroTecnicoTool($e);
+        }
+        $this->conversa->guardar($request->session(), $mensagem, $resposta);
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             $token = (string) Str::uuid();
@@ -54,7 +63,11 @@ class AgenteController extends Controller
             $resposta['token'] = $token;
         }
 
-        return response()->json($resposta, ($resposta['tipo'] ?? null) === 'negado' ? 403 : 200);
+        return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
+            'negado' => 403,
+            'erro' => 422,
+            default => 200,
+        });
     }
 
     /**
@@ -95,10 +108,14 @@ class AgenteController extends Controller
         try {
             $resultado = $this->aiAgentService->executarTool($pendente['tool'], $pendente['argumentos']);
         } catch (InvalidArgumentException $e) {
-            return response()->json(['tipo' => 'erro', 'mensagem' => $e->getMessage()], 422);
+            return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $resultado = $this->aiAgentService->erroTecnicoTool($e);
         }
 
-        $status = match ($resultado['tipo'] ?? null) {
+        $status = $resultado['http_status'] ?? match ($resultado['tipo'] ?? null) {
             'erro' => 422,
             'negado' => 403,
             default => 200,

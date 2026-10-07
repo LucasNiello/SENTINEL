@@ -25,7 +25,7 @@ trait SimulaAgente
     private function respostaComTool(string $tool, array $argumentos): array
     {
         return ['choices' => [['message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => [
-            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => $tool, 'arguments' => json_encode($argumentos)]],
+            ['id' => 'call_1', 'type' => 'function', 'function' => ['name' => $tool, 'arguments' => json_encode((object) $argumentos)]],
         ]]]]];
     }
 

@@ -204,7 +204,7 @@ class AuditoriaMascaraTest extends TestCase
         $token = $this->propor($this->funcionario(), 'criar_funcionario');
         $frase = 'Não consegui cadastrar o funcionário. Tente novamente.';
 
-        $this->confirmar($token)->assertStatus(422)->assertJsonPath('tipo', 'erro')->assertJsonPath('mensagem', $frase);
+        $this->confirmar($token)->assertStatus(500)->assertJsonPath('tipo', 'erro')->assertJsonPath('mensagem', $frase);
         $this->assertSame(0, Funcionario::count());
 
         // audit_logs: a mensagem é a frase genérica; nada de SQL, CPF ou salário em nenhuma coluna.
@@ -217,16 +217,16 @@ class AuditoriaMascaraTest extends TestCase
         }
         $this->assertSame('***.***.333-44', $log->parametros['cpf']);
 
-        // Log de arquivo: registrou a falha (o teste não é vazio), com argumentos mascarados e sem a mensagem da exceção.
+        // Log de arquivo: registrou a falha (o teste não é vazio), sem argumentos nem a mensagem da exceção.
         Log::shouldHaveReceived('error')->once()->withArgs(function ($mensagem, $contexto) {
             $json = json_encode($contexto, JSON_UNESCAPED_UNICODE);
 
             return $mensagem === 'AiAgentService: falha ao executar tool'
                 && $contexto['tool'] === 'criar_funcionario'
                 && $contexto['excecao'] === QueryException::class
-                && $contexto['argumentos']['cpf'] === '***.***.333-44'
-                && $contexto['argumentos']['salario'] === '[redigido]'
-                && $contexto['argumentos']['nome'] === 'Ana Souza'
+                && !isset($contexto['argumentos'])
+                && isset($contexto['correlation_id'])
+                && $contexto['categoria'] === 'tool_error'
                 && ! str_contains($json, '111.222.333-44')
                 && ! str_contains($json, '3200.5')
                 && ! str_contains($json, 'insert into');
