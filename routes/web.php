@@ -24,3 +24,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
     Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
 });
+
+// AMOSTRA: telas de demonstração com dados fictícios (sem login e sem banco). Fora do ar em produção.
+if (! app()->environment('production')) {
+    require __DIR__.'/amostra.php';
+}
