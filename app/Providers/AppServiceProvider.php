@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\DetalhesAuditoria;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -15,7 +16,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Uma por requisição: o escopo aberto pelo AiAgentService vale para o registro gravado pelo AuditoriaService.
+        $this->app->scoped(DetalhesAuditoria::class);
     }
 
     /**
@@ -38,6 +40,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('agente', function (Request $request) {
             return Limit::perMinute(10)->by((string) $request->user()->id)->response(
                 fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'mensagem' => 'Muitos pedidos em pouco tempo. Aguarde um minuto.'], 429, $headers),
+            );
+        });
+
+        // Ações do card que não chamam a IA (cancelar): teto folgado por usuário, só contra abuso.
+        RateLimiter::for('agente-sem-ia', function (Request $request) {
+            return Limit::perMinute(30)->by((string) $request->user()->id)->response(
+                fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
+                    'http_status' => 429, 'mensagem' => 'Muitos pedidos em pouco tempo. Aguarde um minuto.'], 429, $headers),
             );
         });
     }

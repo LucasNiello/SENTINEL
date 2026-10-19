@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AutenticacaoController;
+use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -17,12 +18,16 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AutenticacaoController::class, 'sair']);
 
-    Route::get('/agente', function () {
-        return view('agente');
-    });
+    // R3: em toda requisição ao agente, as propostas vencidas são auditadas como "expirado" e saem da sessão.
+    Route::middleware(VarrerConfirmacoesVencidas::class)->group(function () {
+        Route::get('/agente', function () {
+            return view('agente');
+        });
 
-    Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
-    Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
+        Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
+        Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
+        Route::post('/agente/cancelar', [AgenteController::class, 'cancelar'])->middleware('throttle:agente-sem-ia');
+    });
 });
 
 // AMOSTRA: telas de demonstração com dados fictícios (sem login e sem banco). Fora do ar em produção.

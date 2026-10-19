@@ -16,7 +16,8 @@ class AuditoriaService
     }
 
     /**
-     * @param  string  $resultado  'sucesso' | 'erro' (falha técnica) | 'recusado' (regra de negócio) | 'negado' (RBAC/whitelist)
+     * @param  string  $resultado  'sucesso' | 'erro' (falha técnica) | 'recusado' (regra de negócio ou prazo)
+     *                             | 'negado' (RBAC/whitelist) | 'cancelado' | 'expirado' (proposta encerrada sem gravar)
      */
     public function registrar(
         string $tool,
@@ -31,17 +32,25 @@ class AuditoriaService
     ): AuditLog {
         // LGPD: CPF e salário não ficam em claro no log de auditoria. O registro real está na
         // tabela da entidade; aqui basta provar que a ação ocorreu e permitir conferência. Vale
-        // para todo resultado (sucesso, erro, recusado, negado), pois este é o ponto único de
-        // gravação.
+        // para todo resultado (sucesso, erro, recusado, negado, cancelado, expirado) e para os
+        // dois lados (proposto e confirmado), pois este é o ponto único de gravação.
         $parametros = self::mascararCamposSensiveis($parametros);
+        // Campos que a assinatura não carrega (ver DetalhesAuditoria). Lidos do contêiner, e não
+        // recebidos no construtor, para valer em qualquer instância deste service.
+        $detalhes = app(DetalhesAuditoria::class)->atuais();
+        $propostos = $detalhes['parametros_propostos'] ?? null;
 
         return AuditLog::create([
             'user_id' => $this->contexto->usuario()->id,
+            'autorizado_por' => $detalhes['autorizado_por'] ?? null,
             'tool' => $tool,
+            'origem' => $detalhes['origem'] ?? null,
             'acao' => $acao,
             'entidade_tipo' => $entidadeTipo,
             'entidade_id' => $entidadeId,
             'parametros' => $parametros,
+            'parametros_propostos' => is_array($propostos) ? self::mascararCamposSensiveis($propostos) : null,
+            'tempo_ia_ms' => $detalhes['tempo_ia_ms'] ?? null,
             'resultado' => $resultado,
             'mensagem' => $mensagem === null ? null : Str::limit($mensagem, 250, ''),
             'papel' => $papel,

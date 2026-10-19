@@ -42,17 +42,15 @@ trait ExclusaoSegura
     }
 
     /**
-     * PENDÊNCIA RF10: a reautenticação por senha de administrador ainda não
-     * existe (não há sistema de autenticação no projeto). $reautenticadoComoAdmin
-     * é um placeholder que o chamador deve preencher quando essa camada existir
-     * — por ora, quem decide o valor da flag é responsabilidade de quem chama.
+     * RF10: $reautenticadoComoAdmin é o resultado de ReautenticacaoAdmin::confirmar()
+     * (senha de um admin do mesmo tenant), conferido por quem chama antes de restaurar.
      *
      * @return array{restaurado: bool, motivo?: string}
      */
     protected function restaurar(Model $registro, bool $reautenticadoComoAdmin): array
     {
         if (! $reautenticadoComoAdmin) {
-            return ['restaurado' => false, 'motivo' => 'Reautenticação de administrador necessária (RF10 — pendente).'];
+            return ['restaurado' => false, 'motivo' => 'Para restaurar, é preciso a senha de um administrador.'];
         }
 
         if ($registro->arquivado_em !== null) {

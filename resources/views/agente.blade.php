@@ -152,13 +152,14 @@
             color: var(--color-tinta);
         }
 
-        /* Popup de resultado */
+        /* Popup de resultado. Sem fade (bancada não anima); o de erro fica até o usuário fechar (seção 7). */
         #overlay-popup {
             position: fixed;
             inset: 0;
             display: none;
             align-items: center;
             justify-content: center;
+            padding: 1rem;
             background: color-mix(in srgb, var(--color-tinta) 15%, transparent);
         }
         #popup {
@@ -166,14 +167,14 @@
             border-radius: 10px;
             padding: 1.5rem 2rem;
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 0.75rem;
+            max-width: 460px;
             font-size: 1.05rem;
             font-weight: 600;
-            opacity: 0;
-            transition: opacity 1.5s ease;
         }
-        #popup.visivel { opacity: 1; }
+        #popup .popup-fechar { min-height: 44px; padding: 0.5rem 1rem; font-weight: 400; }
         #popup.sucesso { color: var(--color-sucesso); border: 2px solid var(--color-sucesso); }
         #popup.erro { color: var(--color-erro); border: 2px solid var(--color-erro); }
         #popup.neutro { color: var(--color-tinta); border: 2px solid var(--color-tinta-2); }
@@ -285,16 +286,58 @@
             historico.appendChild(table);
         }
 
+        let timerPopup = null;
+
+        function fecharPopup() {
+            clearTimeout(timerPopup);
+            overlayPopup.style.display = 'none';
+            popup.replaceChildren();
+        }
+
         // textContent: a mensagem pode vir do servidor, nunca vira HTML.
+        // Erro é mensagem crítica: fica até o usuário fechar (botão ou Esc). Os demais somem sozinhos.
         function mostrarPopup(estado, texto) {
+            clearTimeout(timerPopup);
             popup.className = estado;
             popup.textContent = texto;
             overlayPopup.style.display = 'flex';
-            requestAnimationFrame(() => popup.classList.add('visivel'));
-            setTimeout(() => {
-                popup.classList.remove('visivel');
-                setTimeout(() => { overlayPopup.style.display = 'none'; }, 400);
-            }, 2500);
+            if (estado === 'erro') {
+                const fechar = document.createElement('button');
+                fechar.type = 'button';
+                fechar.className = 'popup-fechar';
+                fechar.textContent = 'Fechar';
+                fechar.addEventListener('click', () => {
+                    fecharPopup();
+                    campoMensagem.focus();
+                });
+                popup.appendChild(fechar);
+                fechar.focus();
+            } else {
+                timerPopup = setTimeout(fecharPopup, 2500);
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && popup.classList.contains('erro') && overlayPopup.style.display === 'flex') {
+                fecharPopup();
+                campoMensagem.focus();
+            }
+        });
+
+        // Cancelar e fim da janela: o servidor tira a proposta da sessão e audita o desfecho. Se foi
+        // cancelado ou expirado, quem decide é ele, pelo horário da proposta. Sem rede, a proposta
+        // vence na sessão e a varredura do servidor a audita como expirada na requisição seguinte.
+        function encerrarSemGravar(token) {
+            fetch('/agente/cancelar', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+                body: JSON.stringify({ token }),
+                keepalive: true,
+            }).catch(() => {});
         }
 
         function popupConfirmado() {
@@ -302,8 +345,8 @@
             anunciar('confirmado');
         }
         function popupCancelado() {
-            mostrarPopup('neutro', '✕ Cancelado');
-            anunciar('cancelado');
+            mostrarPopup('neutro', '✕ Cancelado. Nada foi gravado.');
+            anunciar('cancelado, nada foi gravado');
         }
         function popupErro(mensagem) {
             mostrarPopup('erro', '✕ ' + (mensagem || 'Erro ao confirmar — tente novamente'));
@@ -340,6 +383,14 @@
             const grande = document.createElement('span');
             grande.className = 'grande';
 
+            // Soltou antes do fim: nada vai ao servidor e o card continua valendo (dá para segurar de novo).
+            const avisoSoltou = document.createElement('div');
+            avisoSoltou.className = 'msg msg--aviso card-expirado-texto';
+            avisoSoltou.setAttribute('role', 'status');
+            avisoSoltou.textContent = 'Você soltou antes do fim. Nada foi gravado.';
+            avisoSoltou.hidden = true;
+            card.appendChild(avisoSoltou);
+
             let segurando = false;
             let inicioHold = 0;
             let rafId = null;
@@ -375,6 +426,7 @@
             function bloquearPorTempo() {
                 if (segurando || btnConfirmar.disabled) return;
                 btnConfirmar.disabled = true;
+                avisoSoltou.hidden = true;
                 avisoTempo = document.createElement('div');
                 avisoTempo.className = 'msg msg--aviso card-expirado-texto';
                 avisoTempo.textContent = 'Tempo quase esgotado. Peça de novo.';
@@ -385,7 +437,9 @@
             // Expirou: o card não some calado — fica visível, marcado, com os botões desativados.
             function expirarCard() {
                 pararTimers();
+                encerrarSemGravar(token);
                 if (avisoTempo) avisoTempo.remove();
+                avisoSoltou.hidden = true;
                 segurando = false;
                 if (rafId) cancelAnimationFrame(rafId);
                 fill.style.width = '0%';
@@ -408,6 +462,7 @@
                     return;
                 }
                 pararTimers();
+                avisoSoltou.hidden = true;
                 segurando = true;
                 inicioHold = performance.now();
                 btnConfirmar.classList.add('segurando');
@@ -438,11 +493,16 @@
                 fill.style.width = '0%';
                 label.textContent = 'Confirmar';
                 btnConfirmar.classList.remove('segurando');
+                avisoSoltou.hidden = false;
+                anunciar('você soltou antes do fim, nada foi gravado');
                 agendarExpiracao();
             }
 
             async function confirmarAcao() {
                 pararTimers();
+                // Confirmação a caminho: Cancelar agora disputaria o mesmo token com ela.
+                btnConfirmar.disabled = true;
+                btnCancelar.disabled = true;
                 try {
                     const resp = await fetch('/agente/confirmar', {
                         method: 'POST',
@@ -488,6 +548,7 @@
             });
 
             btnCancelar.addEventListener('click', () => {
+                encerrarSemGravar(token);
                 encerrarCard();
                 popupCancelado();
             });

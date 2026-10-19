@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\AiAgentService;
+use App\Services\ConfirmacoesPendentes;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -48,8 +51,23 @@ class AutenticacaoController extends Controller
         return redirect()->intended('/agente');
     }
 
-    public function sair(Request $request)
+    public function sair(Request $request, ConfirmacoesPendentes $pendentes, AiAgentService $aiAgentService)
     {
+        // Card ainda aberto ao sair: a proposta também ganha desfecho na auditoria (antes do logout,
+        // porque a auditoria precisa do usuário), pela mesma regra de horário do /agente/cancelar.
+        // A sessão é invalidada logo abaixo (R3).
+        foreach ($pendentes->retirarTodas($request->session()) as $pendente) {
+            [$desfecho, $motivo] = $pendentes->decorrido($pendente) >= ConfirmacoesPendentes::JANELA_INTERFACE_S
+                ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
+                : ['cancelado', 'Encerrada ao sair do sistema. Nada foi gravado.'];
+
+            try {
+                $aiAgentService->auditarDesfecho($pendente['tool'], $pendente['argumentos'] ?? [], $desfecho, $motivo);
+            } catch (AuthenticationException) {
+                // Usuário sem papel ou tenant: não dá para auditar em nome dele, mas sair nunca pode falhar.
+            }
+        }
+
         Auth::logout();
 
         $request->session()->invalidate();

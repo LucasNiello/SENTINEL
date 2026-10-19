@@ -94,6 +94,7 @@ class AiAgentService
         private CategoriaLancamentoService $categoriaLancamentoService,
         private AuditoriaService $auditoria,
         private ContextoUsuario $contexto,
+        private DetalhesAuditoria $detalhesAuditoria,
     ) {
     }
 
@@ -860,6 +861,46 @@ class AiAgentService
             'categoria' => 'authorization_error', 'codigo' => 'AI_FORBIDDEN', 'http_status' => 403,
             'mensagem' => 'Você não tem permissão para executar esta ação.',
         ];
+    }
+
+    /**
+     * Desfecho de uma proposta de escrita que não executou (cancelada, expirada
+     * ou recusada pelo prazo): fica em audit_logs com o que a IA propôs e nada
+     * confirmado. Acao e entidade vêm do catálogo, como nas demais auditorias.
+     *
+     * Nada foi gravado de qualquer jeito, então uma falha ao auditar não vira 500
+     * para o usuário: fica no log só com metadados — nunca argumentos nem a
+     * mensagem da exceção, que numa QueryException traz o SQL com os valores (AI-003).
+     *
+     * @param  string  $resultado  'cancelado' | 'expirado' | 'recusado'
+     */
+    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem): void
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+
+        try {
+            $this->detalhesAuditoria->com(['parametros_propostos' => $argumentosPropostos], fn () => $this->auditar(
+                $tool,
+                $definicao['acao'] ?? 'desconhecida',
+                $definicao['entidade'] ?? null,
+                null,
+                [],
+                $resultado,
+                $mensagem,
+                true,
+            ));
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::warning('AiAgentService: falha ao auditar desfecho', [
+                'correlation_id' => (string) Str::uuid(),
+                'categoria' => 'tool_error',
+                'tool' => $tool,
+                'resultado' => $resultado,
+                'excecao' => $e::class,
+                'local' => basename($e->getFile()).':'.$e->getLine(),
+            ]);
+        }
     }
 
     private function auditar(

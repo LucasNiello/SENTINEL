@@ -3,23 +3,19 @@
 namespace App\Http\Controllers;
 
 use App\Services\AiAgentService;
+use App\Services\ConfirmacoesPendentes;
 use App\Services\ConversaAgente;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class AgenteController extends Controller
 {
-    /** Espera mínima entre propor e confirmar — igual ao hold físico do front (DURACAO_HOLD_MS). */
-    private const ESPERA_MINIMA_S = 2;
-
-    /** Validade máxima da confirmação — janela ociosa do front (DURACAO_IDLE_MS, 10 s) + folga. */
-    private const VALIDADE_MAXIMA_S = 12;
-
-    public function __construct(private AiAgentService $aiAgentService, private ConversaAgente $conversa)
-    {
+    public function __construct(
+        private AiAgentService $aiAgentService,
+        private ConversaAgente $conversa,
+        private ConfirmacoesPendentes $pendentes,
+    ) {
     }
 
     /**
@@ -52,15 +48,7 @@ class AgenteController extends Controller
         $this->conversa->guardar($request->session(), $mensagem, $resposta);
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
-            $token = (string) Str::uuid();
-
-            $request->session()->put("confirmacoes.{$token}", [
-                'tool' => $resposta['tool'],
-                'argumentos' => $resposta['argumentos'],
-                'emitido_em' => now()->timestamp,
-            ]);
-
-            $resposta['token'] = $token;
+            $resposta['token'] = $this->pendentes->guardar($request->session(), $resposta['tool'], $resposta['argumentos']);
         }
 
         return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
@@ -86,22 +74,24 @@ class AgenteController extends Controller
         }
 
         $token = $validador->validated()['token'];
-        $pendente = $request->session()->pull("confirmacoes.{$token}"); // uso único
+        $pendente = $this->pendentes->retirar($request->session(), $token); // uso único
 
         if (! $pendente) {
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
         }
 
-        // M1: duas requisições simultâneas leem a mesma sessão e as duas "puxam" o token.
-        // O add é atômico no store (chave única no driver database), então só a primeira passa.
-        // A marca dura pelo menos a validade do token, para não "expirar" antes da janela.
-        if (! Cache::add("agente:token_usado:{$token}", true, max(60, self::VALIDADE_MAXIMA_S))) {
+        if (! $this->pendentes->concluir($token)) {
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Esta confirmação já foi usada.'], 409);
         }
 
-        $decorrido = now()->timestamp - $pendente['emitido_em'];
+        $decorrido = $this->pendentes->decorrido($pendente);
 
-        if ($decorrido < self::ESPERA_MINIMA_S || $decorrido > self::VALIDADE_MAXIMA_S) {
+        if ($decorrido < ConfirmacoesPendentes::ESPERA_MINIMA_S || $decorrido > ConfirmacoesPendentes::VALIDADE_MAXIMA_S) {
+            [$desfecho, $motivo] = $decorrido > ConfirmacoesPendentes::VALIDADE_MAXIMA_S
+                ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
+                : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], $pendente['argumentos'], $desfecho, $motivo);
+
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
 
@@ -122,5 +112,42 @@ class AgenteController extends Controller
         };
 
         return response()->json($resultado, $status);
+    }
+
+    /**
+     * Encerra uma proposta sem gravar: Cancelar no card ou fim da janela da interface.
+     *
+     * Contrato: { "token": "<uuid>" }. Se foi "cancelado" ou "expirado", decide o
+     * servidor pelo horário da proposta, nunca pelo que o front manda: depois da
+     * janela da interface (10 s) o card já não aceitava ação do usuário, então
+     * quem encerrou foi o prazo, não uma escolha. O desfecho vai para a auditoria
+     * e a proposta sai da sessão.
+     */
+    public function cancelar(Request $request)
+    {
+        $validador = Validator::make($request->all(), ['token' => 'required|string|uuid']);
+        $token = $validador->fails() ? null : $validador->validated()['token'];
+        $pendente = $token === null ? null : $this->pendentes->retirar($request->session(), $token);
+
+        if (! $pendente) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_CONFIRMATION_INVALID',
+                'http_status' => 422, 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
+        }
+
+        // Mesma marca do /confirmar: se a proposta já foi confirmada por uma requisição concorrente, não há o que cancelar.
+        if (! $this->pendentes->concluir($token)) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_CONFIRMATION_USED',
+                'http_status' => 409, 'mensagem' => 'Esta confirmação já foi usada.'], 409);
+        }
+
+        $expirou = $this->pendentes->decorrido($pendente) >= ConfirmacoesPendentes::JANELA_INTERFACE_S;
+        [$desfecho, $motivo] = $expirou
+            ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
+            : ['cancelado', 'Cancelado pelo usuário. Nada foi gravado.'];
+        $this->aiAgentService->auditarDesfecho($pendente['tool'], $pendente['argumentos'], $desfecho, $motivo);
+
+        return response()->json($expirou
+            ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
+            : ['tipo' => 'cancelado', 'mensagem' => 'Cancelado. Nada foi gravado.']);
     }
 }
