@@ -93,15 +93,35 @@ class ConfirmacaoDesfechoTest extends TestCase
             ->assertOk()
             ->assertJsonPath('tipo', 'cancelado');
 
-        // Depois da janela da interface: foi o prazo, mesmo que o corpo diga "cancelado".
+        // Depois da validade: foi o prazo, mesmo que o corpo diga "cancelado".
         $token = $this->propor(self::LANCAMENTO);
-        $this->travel(ConfirmacoesPendentes::JANELA_INTERFACE_S)->seconds();
+        $this->travel(ConfirmacoesPendentes::VALIDADE_MAXIMA_S + 1)->seconds();
         $this->cancelar($token, ['tipo' => 'cancelado', 'resultado' => 'cancelado'])
             ->assertOk()
             ->assertJsonPath('tipo', 'expirado')
             ->assertJsonPath('mensagem', 'Confirmação expirada. Nada foi gravado. Peça de novo.');
 
         $this->assertSame(['cancelado', 'expirado'], $this->resultadosAuditados());
+    }
+
+    public function test_cancelar_e_confirmar_usam_o_mesmo_limite_de_validade(): void
+    {
+        // Aos 11 s a proposta ainda é confirmável, então encerrá-la é cancelamento, não expiração.
+        $token = $this->propor(self::LANCAMENTO);
+        $this->travel(11)->seconds();
+        $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'cancelado');
+
+        // A prova de que, com o mesmo tempo decorrido, ela ainda era confirmável.
+        $outro = $this->propor(self::LANCAMENTO);
+        $this->travel(11)->seconds();
+        $this->postJson('/agente/confirmar', ['token' => $outro])->assertOk();
+
+        // Exatamente no limite ainda é cancelamento (o /confirmar também aceita aos 12 s).
+        $limite = $this->propor(self::LANCAMENTO);
+        $this->travel(ConfirmacoesPendentes::VALIDADE_MAXIMA_S)->seconds();
+        $this->cancelar($limite)->assertJsonPath('tipo', 'cancelado');
+
+        $this->assertSame(['cancelado', 'sucesso', 'cancelado'], $this->resultadosAuditados());
     }
 
     public function test_cancelar_depois_de_confirmar_nao_tem_efeito_nem_nova_auditoria(): void
@@ -288,16 +308,15 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->assertEmpty(session('confirmacoes', []));
     }
 
-    public function test_cancelar_no_fim_da_janela_conta_pelo_tempo_real_e_nao_pelo_segundo_cheio(): void
+    public function test_limite_de_validade_conta_pelo_tempo_real_e_nao_pelo_segundo_cheio(): void
     {
-        $this->travelTo(Carbon::parse('2026-10-19 10:00:00.900'));
+        // 12,3 s reais, mas só 12 "segundos cheios" (de :00 a :12): já passou da validade.
+        $this->travelTo(Carbon::parse('2026-10-19 10:00:00.100'));
         $token = $this->propor(self::LANCAMENTO);
+        $this->travelTo(Carbon::parse('2026-10-19 10:00:12.400'));
+        $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'expirado');
 
-        // 9,35 s depois: o relógio já virou para o segundo 10, mas a janela da interface ainda não acabou.
-        $this->travelTo(Carbon::parse('2026-10-19 10:00:10.250'));
-
-        $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'cancelado');
-        $this->assertSame(['cancelado'], $this->resultadosAuditados());
+        $this->assertSame(['expirado'], $this->resultadosAuditados());
     }
 
     public function test_sair_com_card_aberto_audita_o_desfecho_em_nome_de_quem_saiu(): void

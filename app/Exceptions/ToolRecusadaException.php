@@ -14,4 +14,11 @@ use RuntimeException;
  */
 class ToolRecusadaException extends RuntimeException
 {
+    /**
+     * @param  array<string, string>  $erros  falha de validação: primeira frase de cada campo (o formulário do card mostra ao lado do campo)
+     */
+    public function __construct(string $mensagem, public readonly array $erros = [])
+    {
+        parent::__construct($mensagem);
+    }
 }

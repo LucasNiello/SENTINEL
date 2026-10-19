@@ -37,6 +37,21 @@ class ConversaAgente
             default => null,
         };
         if ($texto === null) return;
+        $this->acrescentar($sessao, $mensagem, $texto);
+    }
+
+    /**
+     * Escrita confirmada no card: o agente passa a saber que ela aconteceu. Entra como
+     * um par (a confirmação do humano + a frase fixa do servidor, sem valores), para o
+     * histórico continuar em pares user/assistant.
+     */
+    public function registrarResultado(Session $sessao, string $frase): void
+    {
+        $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase);
+    }
+
+    private function acrescentar(Session $sessao, string $mensagem, string $texto): void
+    {
         $historico = $this->ler($sessao);
         $historico[] = ['role' => 'user', 'content' => $this->sanitizar($mensagem)];
         $historico[] = ['role' => 'assistant', 'content' => $this->sanitizar($texto)];

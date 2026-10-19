@@ -13,13 +13,13 @@ use Illuminate\Support\Str;
  * (confirmada, cancelada ou expirada) e sai da sessão quando ele acontece (R3):
  * os argumentos não ficam para trás.
  *
- * Limitação conhecida: a sessão do Laravel não serializa requisições
+ * RISCO ACEITO (Lucas, 19/10): a sessão do Laravel não serializa requisições
  * simultâneas — a última a gravar vence. Se um cancelamento (que grava a
  * sessão) terminar logo depois de um /agente/comando que criou outra proposta,
  * essa proposta nova pode sumir: o card dela recebe "Confirmação inválida ou já
  * utilizada." e ela fica sem registro de desfecho. A janela é a duração do
- * cancelamento (dezenas de ms). DECISÃO PENDENTE (Lucas): aceitar, serializar
- * as rotas do agente (Route::block) ou guardar as propostas fora da sessão.
+ * cancelamento (dezenas de ms). Falha fechada: nada é gravado e o usuário
+ * repete o pedido.
  */
 class ConfirmacoesPendentes
 {
@@ -28,25 +28,41 @@ class ConfirmacoesPendentes
     /** Espera mínima entre propor e confirmar — igual ao hold físico do front (DURACAO_HOLD_MS). */
     public const ESPERA_MINIMA_S = 2;
 
-    /** Janela da interface (DURACAO_IDLE_MS): depois dela o card não aceita mais ação do usuário. */
-    public const JANELA_INTERFACE_S = 10;
-
-    /** Validade máxima da confirmação — janela da interface + folga para a requisição chegar. */
+    /**
+     * Validade máxima da confirmação — janela da interface (DURACAO_IDLE_MS, 10 s) + folga para a
+     * requisição chegar. É também o limite único entre "cancelado" e "expirado" (cancelar, sair e varredura).
+     */
     public const VALIDADE_MAXIMA_S = 12;
 
-    /** Guarda a proposta e devolve o token que autoriza o /agente/confirmar. */
-    public function guardar(Session $sessao, string $tool, array $argumentos): string
+    /**
+     * Guarda a proposta e devolve o token que autoriza o /agente/confirmar.
+     *
+     * @param  array|null  $propostos  o que a IA propôs, quando $argumentos já traz edições do humano
+     *                                 (formulário devolvido com erro): a auditoria compara com ele
+     */
+    public function guardar(Session $sessao, string $tool, array $argumentos, ?array $propostos = null): string
     {
         $token = (string) Str::uuid();
 
         $sessao->put(self::CHAVE.".{$token}", [
             'tool' => $tool,
             'argumentos' => $argumentos,
-            // Em segundos, com milissegundos: com segundos inteiros, um Cancelar aos 9,3 s podia contar como 10.
+            ...($propostos === null ? [] : ['propostos' => $propostos]),
+            // Em segundos, com milissegundos: com segundos inteiros, a fronteira dos 12 s errava em até 1 s.
             'emitido_em' => now()->getTimestampMs() / 1000,
         ]);
 
         return $token;
+    }
+
+    /**
+     * O que a IA propôs. Depois de um formulário devolvido com erro, "argumentos" já traz as
+     * edições do humano; a proposta original fica em "propostos" — é ela que a auditoria
+     * registra como proposto, em qualquer desfecho (RF04).
+     */
+    public static function propostos(array $pendente): array
+    {
+        return $pendente['propostos'] ?? $pendente['argumentos'] ?? [];
     }
 
     /** Tira a proposta da sessão (uso único). Null se não existe ou já saiu. */

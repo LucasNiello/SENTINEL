@@ -11,6 +11,21 @@ use Illuminate\Support\Str;
  */
 class AuditoriaService
 {
+    /**
+     * Fonte única dos campos sensíveis (LGPD): campo => método que mascara. A auditoria, a
+     * leitura e o formulário do card (RF04, que só mostra a máscara) leem daqui.
+     */
+    private const MASCARAS = ['cpf' => 'mascararCpf', 'salario' => 'redigir', 'documento' => 'mascararDocumento'];
+
+    /** O que fica no lugar de um valor que não pode aparecer nem em parte (ex.: salário). */
+    public const REDIGIDO = '[redigido]';
+
+    /** @return string[] */
+    public static function camposSensiveis(): array
+    {
+        return array_keys(self::MASCARAS);
+    }
+
     public function __construct(private ContextoUsuario $contexto)
     {
     }
@@ -61,21 +76,26 @@ class AuditoriaService
 
     /**
      * Mascara os campos pessoais/financeiros (LGPD) de um array de parâmetros. Só as chaves
-     * 'cpf' e 'salario' são tocadas, e só se existirem; qualquer outro campo passa intacto.
-     * Público e estático para valer também fora da auditoria: qualquer log que grave os
-     * argumentos de uma tool (ex.: Log::error do AiAgentService) deve passar por aqui.
+     * de MASCARAS (cpf, salario, documento) são tocadas, e só se existirem; qualquer outro
+     * campo passa intacto. Público e estático para valer também fora da auditoria: qualquer
+     * log que grave os argumentos de uma tool (ex.: Log::error do AiAgentService) deve passar por aqui.
      *
      * @param  array<string|int, mixed>  $parametros
      * @return array<string|int, mixed>
      */
     public static function mascararCamposSensiveis(array $parametros): array
     {
-        return collect($parametros)->map(fn ($valor, $campo) => match ($campo) {
-            'cpf' => self::mascararCpf($valor),
-            'salario' => $valor === null ? null : '[redigido]',
-            'documento' => self::mascararDocumento($valor),
-            default => $valor,
+        return collect($parametros)->map(function ($valor, $campo) {
+            $metodo = self::MASCARAS[$campo] ?? null;
+
+            return $metodo === null ? $valor : self::$metodo($valor);
         })->all();
+    }
+
+    /** Salário: nem parte do valor fica. */
+    private static function redigir(mixed $valor): mixed
+    {
+        return $valor === null ? null : self::REDIGIDO;
     }
 
     /**
@@ -89,7 +109,7 @@ class AuditoriaService
         }
 
         if (! is_scalar($valor)) {
-            return '[redigido]';
+            return self::REDIGIDO;
         }
 
         return strlen(preg_replace('/\D/', '', (string) $valor)) === 11 ? self::mascararCpf($valor) : $valor;
@@ -107,13 +127,13 @@ class AuditoriaService
         }
 
         if (! is_scalar($valor)) {
-            return '[redigido]';
+            return self::REDIGIDO;
         }
 
         $digitos = preg_replace('/\D/', '', (string) $valor);
 
         if (strlen($digitos) < 5) {
-            return '[redigido]';
+            return self::REDIGIDO;
         }
 
         return '***.***.'.substr($digitos, -5, 3).'-'.substr($digitos, -2);

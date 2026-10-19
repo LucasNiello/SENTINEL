@@ -92,15 +92,29 @@
         .card--risco-leitura { --cor-risco: var(--color-tinta-2); --cor-risco-faixa: var(--color-borda); }
         .card--risco-escrita { --cor-risco: var(--color-aviso); --cor-risco-faixa: var(--color-aviso-faixa); }
         .card--risco-exclusao { --cor-risco: var(--color-erro); --cor-risco-faixa: var(--color-erro-faixa); }
-        .card-confirmacao pre {
-            background: var(--color-creme);
-            border: 1px solid var(--color-borda);
+        /* RF04: o card é o formulário (ação + dados), nunca nome de tool nem JSON. */
+        .card-titulo { display: block; margin-bottom: 0.75rem; }
+        .card-form { display: grid; gap: 0.75rem; }
+        .campo { display: flex; flex-direction: column; gap: 0.25rem; }
+        .campo[hidden] { display: none; }
+        .campo label { font-weight: 500; }
+        .campo-obrigatorio { font-weight: 400; color: var(--color-tinta-2); }
+        .campo input, .campo select {
+            width: 100%;
+            min-height: 44px;
             padding: 0.5rem;
-            border-radius: 4px;
-            font-family: var(--fonte-mono);
-            font-size: 15px;
-            overflow-x: auto;
+            font: inherit;
+            background: var(--color-creme);
+            color: var(--color-tinta);
+            border: 1px solid var(--color-borda);
+            border-radius: 6px;
         }
+        .campo-info, .campo-falta, .campo-erro { margin: 0; font-size: 15px; }
+        .campo-info { color: var(--color-tinta-2); }
+        .campo-falta { color: var(--color-aviso); }
+        .campo-erro { color: var(--color-erro); }
+        .campo--faltando input, .campo--faltando select { border: 2px solid var(--color-aviso); }
+        .campo--erro input, .campo--erro select { border: 2px solid var(--color-erro); }
         .card-confirmacao .acoes {
             display: flex;
             gap: 0.75rem;
@@ -226,6 +240,8 @@
 
         const DURACAO_HOLD_MS = 2000;
         const DURACAO_IDLE_MS = 10000;
+        // Até 12 s o servidor ainda aceita a confirmação (VALIDADE_MAXIMA_S); só depois disso encerrar é "expirado".
+        const VALIDADE_SERVIDOR_MS = 12000;
         // Segurar só começa se ainda couber o hold (2 s) + margem antes do fim da janela: o servidor aceita até 12 s.
         const MINIMO_PARA_SEGURAR_MS = 2500;
         const RISCOS = ['leitura', 'escrita', 'exclusao'];
@@ -353,13 +369,143 @@
             anunciar(mensagem || 'erro ao confirmar');
         }
 
-        function renderizarConfirmacaoPendente(tool, argumentos, token, risco) {
-            const card = document.createElement('div');
+        let contadorCards = 0;
+
+        function paragrafo(classe, id, texto) {
+            const p = document.createElement('p');
+            p.className = classe;
+            p.id = id;
+            p.textContent = texto;
+            return p;
+        }
+
+        // RF04: um campo do formulário, descrito pelo servidor a partir das regras da tool.
+        // Tudo por createElement/textContent: o servidor nunca manda HTML.
+        function montarCampo(campo, prefixo) {
+            const id = prefixo + '-' + campo.nome;
+            const bloco = document.createElement('div');
+            bloco.className = 'campo';
+            bloco.dataset.campo = campo.nome;
+
+            const rotulo = document.createElement('label');
+            rotulo.htmlFor = id;
+            rotulo.textContent = campo.rotulo;
+            const marca = document.createElement('span');
+            marca.className = 'campo-obrigatorio';
+            marca.textContent = ' (obrigatório)';
+            marca.hidden = !campo.obrigatorio;
+            rotulo.appendChild(marca);
+            bloco.appendChild(rotulo);
+
+            let entrada;
+            if (campo.tipo === 'opcoes' || campo.tipo === 'referencia') {
+                entrada = document.createElement('select');
+                const nenhuma = document.createElement('option');
+                nenhuma.value = '';
+                nenhuma.textContent = '— escolha —';
+                entrada.appendChild(nenhuma);
+                (campo.opcoes || []).forEach((opcao) => {
+                    const item = document.createElement('option');
+                    item.value = String(opcao.valor);
+                    item.textContent = opcao.rotulo;
+                    entrada.appendChild(item);
+                });
+            } else {
+                entrada = document.createElement('input');
+                entrada.type = { email: 'email', data: 'date' }[campo.tipo] || 'text';
+                if (campo.tipo === 'numero') {
+                    // Texto com teclado numérico, não type=number: lá "4.567,89" vira vazio calado e, num
+                    // campo sensível, vazio = manter. Como texto, chega ao servidor e volta com a frase do erro.
+                    entrada.inputMode = campo.inteiro ? 'numeric' : 'decimal';
+                } else if (campo.max !== undefined) {
+                    entrada.maxLength = campo.max;
+                }
+            }
+            entrada.id = id;
+            entrada.name = campo.nome;
+            // Campo sensível (CPF, salário, documento): o servidor só manda a máscara. O campo fica vazio, e vazio = manter.
+            if (!campo.sensivel && campo.valor !== null && campo.valor !== undefined) entrada.value = String(campo.valor);
+            bloco.appendChild(entrada);
+
+            const descricoes = [];
+            if (campo.sensivel) {
+                // Com erro, manter repetiria o mesmo erro: aí só resta digitar de novo.
+                const texto = campo.erro ? 'Digite o valor de novo.'
+                    : !campo.informado ? 'Não informado.'
+                    : campo.valor ? 'Informado: ' + campo.valor + '. Deixe em branco para manter.'
+                    : 'Informado (oculto por segurança). Deixe em branco para manter.';
+                bloco.appendChild(paragrafo('campo-info', id + '-info', texto));
+                descricoes.push(id + '-info');
+            }
+            if (campo.tipo === 'numero' && !campo.inteiro) {
+                bloco.appendChild(paragrafo('campo-info', id + '-dica', 'Só números, com ponto nos centavos (ex.: 4567.89).'));
+                descricoes.push(id + '-dica');
+            }
+            if (campo.faltando && !campo.erro) {
+                bloco.classList.add('campo--faltando');
+                bloco.appendChild(paragrafo('campo-falta', id + '-falta', 'Falta preencher.'));
+                descricoes.push(id + '-falta');
+            }
+            if (campo.erro) {
+                bloco.classList.add('campo--erro');
+                entrada.setAttribute('aria-invalid', 'true');
+                bloco.appendChild(paragrafo('campo-erro', id + '-erro', campo.erro));
+                descricoes.push(id + '-erro');
+            }
+            if (descricoes.length) entrada.setAttribute('aria-describedby', descricoes.join(' '));
+
+            return bloco;
+        }
+
+        // Campos que dependem de outro (ex.: cliente só em nota de saída): some quando é proibido, marca quando é obrigatório.
+        function aplicarCondicoes(form, campos) {
+            campos.filter((campo) => campo.condicoes).forEach((campo) => {
+                let proibido = false;
+                let obrigatorio = campo.obrigatorio;
+                campo.condicoes.forEach((condicao) => {
+                    const controle = form.elements.namedItem(condicao.campo);
+                    if (!controle || controle.value !== condicao.valor) return;
+                    if (condicao.efeito === 'proibido') proibido = true;
+                    if (condicao.efeito === 'obrigatorio') obrigatorio = true;
+                });
+                const entrada = form.elements.namedItem(campo.nome);
+                entrada.disabled = proibido;
+                entrada.closest('.campo').hidden = proibido;
+                entrada.closest('.campo').querySelector('.campo-obrigatorio').hidden = !obrigatorio;
+            });
+        }
+
+        function coletarValores(form, campos) {
+            const valores = {};
+            campos.forEach((campo) => {
+                const entrada = form.elements.namedItem(campo.nome);
+                if (!entrada) return;
+                // Escondido pela situação: vai vazio, para não valer o que a IA tinha posto ali.
+                if (entrada.disabled) {
+                    valores[campo.nome] = '';
+                    return;
+                }
+                if (campo.sensivel && entrada.value === '') return; // vazio = manter o valor informado
+                valores[campo.nome] = entrada.value;
+            });
+            return valores;
+        }
+
+        // RF04: o card de confirmação É o formulário. Com "substituir", o card volta no mesmo lugar
+        // (erro de validação: frase em cada campo e token novo).
+        function renderizarConfirmacaoPendente(dados, substituir) {
+            const formulario = dados.formulario || { titulo: 'Confirmar a ação', campos: [] };
+            const token = dados.token;
+            const risco = dados.risco;
+            const prefixo = 'card-' + (++contadorCards);
+
+            const card = document.createElement('section');
             // Risco desconhecido cai no mais severo (exclusao), nunca no mais brando.
             card.className = 'card-confirmacao card--risco-' + (RISCOS.includes(risco) ? risco : 'exclusao');
+            card.setAttribute('aria-label', 'Confirmação necessária: ' + formulario.titulo);
             card.innerHTML = `
-                <strong>Confirmação necessária:</strong> <span class="card-tool"></span>
-                <pre class="card-argumentos"></pre>
+                <strong class="card-titulo">Confirmação necessária: <span class="card-acao"></span></strong>
+                <form class="card-form" novalidate></form>
                 <div class="acoes">
                     <button type="button" class="btn-confirmar">
                         <span class="btn-confirmar__fill"></span>
@@ -368,9 +514,26 @@
                     <button type="button" class="btn-cancelar">Cancelar</button>
                 </div>
             `;
-            card.querySelector('.card-tool').textContent = tool;
-            card.querySelector('.card-argumentos').textContent = JSON.stringify(argumentos, null, 2);
-            historico.appendChild(card);
+            card.querySelector('.card-acao').textContent = formulario.titulo;
+
+            const form = card.querySelector('.card-form');
+            formulario.campos.forEach((campo) => form.appendChild(montarCampo(campo, prefixo)));
+            form.addEventListener('submit', (e) => e.preventDefault());
+            form.addEventListener('change', () => aplicarCondicoes(form, formulario.campos));
+            aplicarCondicoes(form, formulario.campos);
+
+            if (formulario.campos.some((campo) => campo.erro)) {
+                const resumo = document.createElement('div');
+                resumo.className = 'msg msg--erro';
+                resumo.setAttribute('role', 'alert');
+                resumo.textContent = 'Confira os campos destacados. Nada foi gravado.';
+                form.before(resumo);
+            }
+
+            if (substituir) substituir.replaceWith(card); else historico.appendChild(card);
+
+            const primeiroComErro = form.querySelector('[aria-invalid="true"]');
+            if (primeiroComErro) primeiroComErro.focus();
 
             const btnConfirmar = card.querySelector('.btn-confirmar');
             const fill = card.querySelector('.btn-confirmar__fill');
@@ -437,7 +600,8 @@
             // Expirou: o card não some calado — fica visível, marcado, com os botões desativados.
             function expirarCard() {
                 pararTimers();
-                encerrarSemGravar(token);
+                // O card fecha aos 10 s, mas o aviso ao servidor espera a validade dele passar: antes disso seria lido como cancelamento.
+                setTimeout(() => encerrarSemGravar(token), VALIDADE_SERVIDOR_MS - DURACAO_IDLE_MS + 500);
                 if (avisoTempo) avisoTempo.remove();
                 avisoSoltou.hidden = true;
                 segurando = false;
@@ -511,17 +675,25 @@
                             'Accept': 'application/json',
                             'X-CSRF-TOKEN': csrfToken,
                         },
-                        body: JSON.stringify({ token }),
+                        body: JSON.stringify({ token, valores: coletarValores(form, formulario.campos) }),
                     });
                     if (resp.status === 401 || resp.status === 419) {
                         window.location.href = '/login';
                         return;
                     }
                     const dados = await resp.json().catch(() => ({}));
+                    if (dados.formulario && dados.token) {
+                        // Erro de validação: o card volta com a frase de cada campo e um token novo.
+                        renderizarConfirmacaoPendente(dados, card);
+                        anunciar('confira os campos destacados, nada foi gravado');
+                        return;
+                    }
                     encerrarCard();
                     if (!resp.ok || dados.tipo === 'erro') {
                         popupErro(dados.mensagem);
                     } else {
+                        // Frase do servidor: o que gravou e o que ficou vazio.
+                        if (dados.mensagem) adicionarMensagem(dados.mensagem, 'msg--agente');
                         popupConfirmado();
                     }
                 } catch (e) {
@@ -602,7 +774,7 @@
                         adicionarTabela(dados.resultado || [], dados.colunas);
                         break;
                     case 'confirmacao_pendente':
-                        renderizarConfirmacaoPendente(dados.tool, dados.argumentos, dados.token, dados.risco);
+                        renderizarConfirmacaoPendente(dados);
                         break;
                     case 'erro':
                     default:

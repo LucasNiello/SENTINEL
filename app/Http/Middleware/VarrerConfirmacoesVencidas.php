@@ -26,7 +26,7 @@ class VarrerConfirmacoesVencidas
         $resposta = $next($request);
 
         foreach ($this->pendentes->retirarVencidas($request->session()) as $pendente) {
-            $this->aiAgentService->auditarDesfecho($pendente['tool'], $pendente['argumentos'] ?? [], 'expirado',
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'expirado',
                 'A confirmação expirou sem resposta. Nada foi gravado.');
         }
 

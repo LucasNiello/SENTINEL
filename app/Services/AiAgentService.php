@@ -45,6 +45,7 @@ class AiAgentService
         ],
         'email' => 'O e-mail informado não é válido.',
         'numeric' => ':Attribute deve ser um número.',
+        'integer' => ':Attribute deve ser um número inteiro.',
         'min' => ':Attribute deve ser no mínimo :min.',
         'date' => ':Attribute deve ser uma data válida (AAAA-MM-DD).',
         'date_format' => ':Attribute deve ser uma data válida (AAAA-MM-DD).',
@@ -80,7 +81,12 @@ class AiAgentService
         'cliente_id' => 'o cliente',
         'fornecedor_id' => 'o fornecedor',
         'lancamento_id' => 'o lançamento',
+        'id' => 'o número do registro',
+        'novo_status' => 'o novo status',
     ];
+
+    /** atualizar_status_lancamento não tem Form Request: estas regras desenham o formulário e validam o executor. */
+    private const REGRAS_STATUS_LANCAMENTO = ['id' => 'required|numeric|integer|min:1', 'novo_status' => 'required|in:pendente,conciliado'];
 
     /** @var array<string, array<string, mixed>>|null */
     private ?array $catalogo = null;
@@ -95,6 +101,7 @@ class AiAgentService
         private AuditoriaService $auditoria,
         private ContextoUsuario $contexto,
         private DetalhesAuditoria $detalhesAuditoria,
+        private FormularioTool $formularios,
     ) {
     }
 
@@ -256,11 +263,14 @@ class AiAgentService
                 return $this->comAviso($this->negar($tool, $definicao, $argumentos), $aviso);
             }
 
+            // RF04: a proposta já chega como formulário (o próprio card de confirmação). Os argumentos
+            // voltam crus para o controller guardar na sessão; ele mascara antes de responder ao front.
             return $this->comAviso([
                 'tipo' => 'confirmacao_pendente',
                 'tool' => $tool,
                 'risco' => $definicao['risco'],
                 'argumentos' => $argumentos,
+                'formulario' => $this->formulario($tool, $argumentos),
             ], $aviso);
         }
 
@@ -395,6 +405,8 @@ class AiAgentService
                 'tipo' => 'erro',
                 'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422,
                 'mensagem' => $e->getMessage(),
+                // Falha de validação: a frase de cada campo, para o formulário do card (RF04).
+                ...($e->erros === [] ? [] : ['erros' => $e->erros]),
             ];
         } catch (Throwable $e) {
             // LGPD: nem a mensagem da exceção (uma QueryException traz o SQL com os valores, ex. CPF
@@ -425,12 +437,97 @@ class AiAgentService
             $resultado = $resultado->map(fn (Model $m) => AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $definicao['colunas'])))->values()->all();
         }
 
+        if ($definicao['tipo'] === 'escrita') {
+            return [
+                'tipo' => 'resultado_escrita',
+                'tool' => $tool,
+                // Frase fixa do servidor, sem valores e sem chamar a IA de novo: o que gravou e o que ficou vazio.
+                'mensagem' => $this->fraseDeSucesso($definicao, $argumentos),
+                // O registro gravado volta ao front com a mesma máscara LGPD da auditoria.
+                'resultado' => $resultado instanceof Model ? AuditoriaService::mascararCamposSensiveis($resultado->toArray()) : $resultado,
+            ];
+        }
+
         return [
-            'tipo' => $definicao['tipo'] === 'escrita' ? 'resultado_escrita' : 'resultado_leitura',
+            'tipo' => 'resultado_leitura',
             'tool' => $tool,
             'resultado' => $resultado,
             ...($definicao['colunas'] ? ['colunas' => $definicao['colunas']] : []),
         ];
+    }
+
+    /**
+     * Escrita depois da confirmação humana: a auditoria registra o que a IA propôs
+     * ($propostos) ao lado do que foi de fato executado ($argumentos) — RF04.
+     */
+    public function executarConfirmada(string $tool, array $argumentos, array $propostos): array
+    {
+        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos], fn () => $this->executarTool($tool, $argumentos));
+    }
+
+    /** Classe de risco da tool (borda do card); tool fora do catálogo cai na mais severa. */
+    public function risco(string $tool): string
+    {
+        return $this->catalogo()[$tool]['risco'] ?? 'exclusao';
+    }
+
+    /**
+     * Formulário do card (RF04) a partir das regras da tool, com os valores dados e,
+     * se houver, a frase de erro de cada campo. Null para tool sem formulário.
+     */
+    public function formulario(string $tool, array $valores, array $erros = []): ?array
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+
+        if ($definicao === null || $definicao['regras'] === []) {
+            return null;
+        }
+
+        return $this->formularios->montar($definicao['titulo'], $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS, $this->contexto->tenantId());
+    }
+
+    /**
+     * RF04: valores editados no card por cima da proposta guardada na sessão. Só
+     * entram os campos do formulário (as regras da tool, sem tenant_id); qualquer
+     * outro campo enviado é descartado. Campo vazio vira "sem valor", exceto o
+     * sensível: o card só mostra a máscara dele, então vazio = manter o da proposta.
+     */
+    public function aplicarValores(string $tool, array $proposta, array $valores): array
+    {
+        $regras = $this->catalogo()[$tool]['regras'] ?? [];
+
+        foreach (array_keys(FormularioTool::campos($regras)) as $campo) {
+            if (! array_key_exists($campo, $valores)) {
+                continue;
+            }
+
+            $vazio = $valores[$campo] === null || $valores[$campo] === '';
+
+            if ($vazio && in_array($campo, AuditoriaService::camposSensiveis(), true)) {
+                continue;
+            }
+
+            $proposta[$campo] = $vazio ? null : $valores[$campo];
+        }
+
+        return $proposta;
+    }
+
+    /**
+     * "Cliente cadastrado. Ficou sem e-mail e telefone." / "Cliente cadastrado com todos os dados."
+     * Tool sem campo opcional: só "Status do lançamento atualizado.".
+     */
+    private function fraseDeSucesso(array $definicao, array $argumentos): string
+    {
+        $opcionais = FormularioTool::opcionais($definicao['regras'], $argumentos);
+        $vazios = array_values(array_filter($opcionais, fn (string $campo) => blank($argumentos[$campo] ?? null)));
+
+        return match (true) {
+            $opcionais === [] => $definicao['sucesso'].'.',
+            $vazios === [] => $definicao['sucesso'].' com todos os dados.',
+            default => $definicao['sucesso'].'. Ficou sem '.Arr::join(array_map(
+                fn (string $campo) => FormularioTool::semArtigo(self::ROTULOS_CAMPOS[$campo] ?? $campo), $vazios), ', ', ' e ').'.',
+        };
     }
 
     /**
@@ -488,6 +585,9 @@ class AiAgentService
                 obrigatorios: ['descricao', 'valor', 'data'],
                 executar: fn (array $a) => $this->lancamentoService->criar($this->validar($a, (new LancamentoRequest)->rules())),
                 mensagemErro: 'Não consegui criar o lançamento — verifique se descrição, valor e data foram informados.',
+                regras: (new LancamentoRequest)->rules(),
+                titulo: 'Criar lançamento',
+                sucesso: 'Lançamento criado',
             ),
             $this->definirTool(
                 nome: 'atualizar_status_lancamento',
@@ -504,6 +604,10 @@ class AiAgentService
                 obrigatorios: ['id', 'novo_status'],
                 executar: fn (array $a) => $this->atualizarStatusLancamento($a),
                 mensagemErro: 'Não consegui atualizar o status do lançamento. Tente novamente.',
+                // Sem Form Request próprio: as mesmas regras desenham o formulário e validam no executor.
+                regras: self::REGRAS_STATUS_LANCAMENTO,
+                titulo: 'Alterar o status do lançamento',
+                sucesso: 'Status do lançamento atualizado',
             ),
             $this->definirTool(
                 nome: 'consultar_clientes',
@@ -521,12 +625,9 @@ class AiAgentService
                 mensagemErro: 'Não consegui consultar os clientes agora. Tente novamente.',
                 colunas: ['id', 'nome', 'documento', 'email', 'telefone'],
             ),
-            $this->definirTool(
+            $this->definirEscrita(
                 nome: 'criar_cliente',
                 descricao: 'Cadastra um novo cliente. Ação de escrita — exige confirmação humana antes de ser executada.',
-                tipo: 'escrita',
-                risco: 'escrita',
-                acao: 'criar',
                 entidade: 'Cliente',
                 papelMinimo: 'operador',
                 propriedades: [
@@ -536,8 +637,11 @@ class AiAgentService
                     'telefone' => ['type' => 'string'],
                 ],
                 obrigatorios: ['nome'],
-                executar: fn (array $a) => $this->clienteService->criar($this->validar($a, (new ClienteRequest)->rules())),
+                formRequest: ClienteRequest::class,
+                gravar: $this->clienteService->criar(...),
                 mensagemErro: 'Não consegui cadastrar o cliente. Tente novamente.',
+                titulo: 'Cadastrar cliente',
+                sucesso: 'Cliente cadastrado',
             ),
             $this->definirTool(
                 nome: 'consultar_fornecedores',
@@ -555,12 +659,9 @@ class AiAgentService
                 mensagemErro: 'Não consegui consultar os fornecedores agora. Tente novamente.',
                 colunas: ['id', 'nome', 'documento', 'email', 'telefone'],
             ),
-            $this->definirTool(
+            $this->definirEscrita(
                 nome: 'criar_fornecedor',
                 descricao: 'Cadastra um novo fornecedor. Ação de escrita — exige confirmação humana antes de ser executada.',
-                tipo: 'escrita',
-                risco: 'escrita',
-                acao: 'criar',
                 entidade: 'Fornecedor',
                 papelMinimo: 'operador',
                 propriedades: [
@@ -570,8 +671,11 @@ class AiAgentService
                     'telefone' => ['type' => 'string'],
                 ],
                 obrigatorios: ['nome'],
-                executar: fn (array $a) => $this->fornecedorService->criar($this->validar($a, (new FornecedorRequest)->rules())),
+                formRequest: FornecedorRequest::class,
+                gravar: $this->fornecedorService->criar(...),
                 mensagemErro: 'Não consegui cadastrar o fornecedor. Tente novamente.',
+                titulo: 'Cadastrar fornecedor',
+                sucesso: 'Fornecedor cadastrado',
             ),
             $this->definirTool(
                 nome: 'consultar_funcionarios',
@@ -590,12 +694,9 @@ class AiAgentService
                 // cpf e salario ficam de fora de propósito: a consulta é aberta ao papel "leitura" e são dados pessoais/financeiros (LGPD).
                 colunas: ['id', 'nome', 'cargo', 'data_admissao', 'data_demissao'],
             ),
-            $this->definirTool(
+            $this->definirEscrita(
                 nome: 'criar_funcionario',
                 descricao: 'Cadastra um novo funcionário. Ação de escrita — exige confirmação humana antes de ser executada.',
-                tipo: 'escrita',
-                risco: 'escrita',
-                acao: 'criar',
                 entidade: 'Funcionario',
                 papelMinimo: 'admin',
                 propriedades: [
@@ -607,8 +708,11 @@ class AiAgentService
                     'data_demissao' => ['type' => 'string', 'format' => 'date', 'description' => 'Só se o funcionário já foi desligado.'],
                 ],
                 obrigatorios: ['nome', 'cpf', 'salario', 'data_admissao'],
-                executar: fn (array $a) => $this->funcionarioService->criar($this->validar($a, (new FuncionarioRequest)->rules())),
+                formRequest: FuncionarioRequest::class,
+                gravar: $this->funcionarioService->criar(...),
                 mensagemErro: 'Não consegui cadastrar o funcionário. Tente novamente.',
+                titulo: 'Cadastrar funcionário',
+                sucesso: 'Funcionário cadastrado',
             ),
             $this->definirTool(
                 nome: 'consultar_notas_fiscais',
@@ -626,12 +730,9 @@ class AiAgentService
                 mensagemErro: 'Não consegui consultar as notas fiscais agora. Tente novamente.',
                 colunas: ['id', 'numero', 'tipo', 'valor', 'data_emissao', 'cliente_id', 'fornecedor_id', 'lancamento_id'],
             ),
-            $this->definirTool(
+            $this->definirEscrita(
                 nome: 'criar_nota_fiscal',
                 descricao: 'Cadastra uma nova nota fiscal. Nota de saída exige cliente_id; nota de entrada exige fornecedor_id. Ação de escrita — exige confirmação humana antes de ser executada.',
-                tipo: 'escrita',
-                risco: 'escrita',
-                acao: 'criar',
                 entidade: 'NotaFiscal',
                 papelMinimo: 'operador',
                 propriedades: [
@@ -644,12 +745,12 @@ class AiAgentService
                     'lancamento_id' => ['type' => 'integer', 'description' => 'Id do lançamento relacionado (opcional).'],
                 ],
                 obrigatorios: ['numero', 'tipo', 'valor', 'data_emissao'],
-                executar: fn (array $a) => $this->notaFiscalService->criar($this->validar(
-                    $a,
-                    (new NotaFiscalRequest)->rules(),
-                    ['tipo.in' => 'O tipo deve ser "entrada" ou "saida".'],
-                )),
+                formRequest: NotaFiscalRequest::class,
+                gravar: $this->notaFiscalService->criar(...),
                 mensagemErro: 'Não consegui cadastrar a nota fiscal. Tente novamente.',
+                titulo: 'Cadastrar nota fiscal',
+                sucesso: 'Nota fiscal cadastrada',
+                mensagens: ['tipo.in' => 'O tipo deve ser "entrada" ou "saida".'],
             ),
             $this->definirTool(
                 nome: 'consultar_categorias_lancamento',
@@ -667,12 +768,9 @@ class AiAgentService
                 mensagemErro: 'Não consegui consultar as categorias agora. Tente novamente.',
                 colunas: ['id', 'nome', 'tipo'],
             ),
-            $this->definirTool(
+            $this->definirEscrita(
                 nome: 'criar_categoria_lancamento',
                 descricao: 'Cadastra uma nova categoria de lançamento (receita ou despesa). Ação de escrita — exige confirmação humana antes de ser executada.',
-                tipo: 'escrita',
-                risco: 'escrita',
-                acao: 'criar',
                 entidade: 'CategoriaLancamento',
                 papelMinimo: 'operador',
                 propriedades: [
@@ -680,12 +778,12 @@ class AiAgentService
                     'tipo' => ['type' => 'string', 'enum' => ['receita', 'despesa']],
                 ],
                 obrigatorios: ['nome', 'tipo'],
-                executar: fn (array $a) => $this->categoriaLancamentoService->criar($this->validar(
-                    $a,
-                    (new CategoriaLancamentoRequest)->rules(),
-                    ['tipo.in' => 'O tipo deve ser "receita" ou "despesa".'],
-                )),
+                formRequest: CategoriaLancamentoRequest::class,
+                gravar: $this->categoriaLancamentoService->criar(...),
                 mensagemErro: 'Não consegui cadastrar a categoria. Tente novamente.',
+                titulo: 'Cadastrar categoria de lançamento',
+                sucesso: 'Categoria cadastrada',
+                mensagens: ['tipo.in' => 'O tipo deve ser "receita" ou "despesa".'],
             ),
         ], null, 'nome');
     }
@@ -707,7 +805,8 @@ class AiAgentService
         $validador = Validator::make($argumentos, $regras, [...self::MENSAGENS_VALIDACAO, ...$mensagens], self::ROTULOS_CAMPOS);
 
         if ($validador->fails()) {
-            throw new ToolRecusadaException($validador->errors()->first());
+            throw new ToolRecusadaException($validador->errors()->first(),
+                array_map(fn (array $frases) => $frases[0], $validador->errors()->toArray()));
         }
 
         return $validador->validated();
@@ -750,15 +849,19 @@ class AiAgentService
      */
     private function atualizarStatusLancamento(array $argumentos): Lancamento
     {
-        $id = (int) ($argumentos['id'] ?? 0);
-
-        if ($id < 1) {
-            throw new ToolRecusadaException('Informe qual lançamento deve ser atualizado.');
-        }
+        // As regras do formulário (RF04) valem aqui também, com as frases que esta tool já tinha.
+        $dados = $this->validar($argumentos, self::REGRAS_STATUS_LANCAMENTO, [
+            'id.required' => 'Informe qual lançamento deve ser atualizado.',
+            'id.numeric' => 'Informe qual lançamento deve ser atualizado.',
+            'id.integer' => 'Informe qual lançamento deve ser atualizado.',
+            'id.min' => 'Informe qual lançamento deve ser atualizado.',
+            'novo_status.required' => 'Informe o novo status: "pendente" ou "conciliado".',
+            'novo_status.in' => 'Status inválido: use "pendente" ou "conciliado".',
+        ]);
 
         $resultado = $this->lancamentoService->atualizarStatus(
-            $id,
-            (string) ($argumentos['novo_status'] ?? ''),
+            (int) $dados['id'],
+            $dados['novo_status'],
             $argumentos['tenant_id'],
         );
 
@@ -770,8 +873,55 @@ class AiAgentService
     }
 
     /**
+     * Criação padrão de uma entidade: o vínculo tool ↔ entidade ↔ Form Request ↔ service
+     * fica todo nesta entrada. As MESMAS regras do Form Request validam a execução (via
+     * validar(), que escopa exists: pelo tenant) e desenham o formulário do card (RF04).
+     * Trocar de domínio é trocar estas entradas, não o motor.
+     *
+     * @param  class-string<\Illuminate\Foundation\Http\FormRequest>  $formRequest
+     * @param  Closure(array): Model  $gravar  método do service que grava os dados já validados
+     * @param  array<string, string>  $mensagens  frases de validação específicas desta tool
+     */
+    private function definirEscrita(
+        string $nome,
+        string $descricao,
+        string $entidade,
+        string $papelMinimo,
+        array $propriedades,
+        array $obrigatorios,
+        string $formRequest,
+        Closure $gravar,
+        string $mensagemErro,
+        string $titulo,
+        string $sucesso,
+        array $mensagens = [],
+    ): array {
+        $regras = (new $formRequest)->rules();
+
+        return $this->definirTool(
+            nome: $nome,
+            descricao: $descricao,
+            tipo: 'escrita',
+            risco: 'escrita',
+            acao: 'criar',
+            entidade: $entidade,
+            papelMinimo: $papelMinimo,
+            propriedades: $propriedades,
+            obrigatorios: $obrigatorios,
+            executar: fn (array $a) => $gravar($this->validar($a, $regras, $mensagens)),
+            mensagemErro: $mensagemErro,
+            regras: $regras,
+            titulo: $titulo,
+            sucesso: $sucesso,
+        );
+    }
+
+    /**
      * @param  array<string, array<string, mixed>>  $propriedades
      * @param  string[]  $obrigatorios
+     * @param  array<string, mixed>  $regras  escrita: regras que desenham e filtram o formulário do card (RF04)
+     * @param  string  $titulo  escrita: ação em português no topo do card ("Cadastrar cliente")
+     * @param  string  $sucesso  escrita: começo da frase depois de gravar ("Cliente cadastrado")
      * @return array<string, mixed>
      */
     private function definirTool(
@@ -787,6 +937,9 @@ class AiAgentService
         Closure $executar,
         string $mensagemErro,
         array $colunas = [],
+        array $regras = [],
+        string $titulo = '',
+        string $sucesso = '',
     ): array {
         // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
         // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
@@ -807,6 +960,9 @@ class AiAgentService
             'executar' => $executar,
             'mensagem_erro' => $mensagemErro,
             'colunas' => $colunas, // só leitura: colunas que o front exibe na tabela
+            'regras' => $regras,
+            'titulo' => $titulo,
+            'sucesso' => $sucesso,
             'definicao' => [
                 'type' => 'function',
                 'function' => [
