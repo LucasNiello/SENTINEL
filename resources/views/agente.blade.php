@@ -14,6 +14,7 @@
 
         .msg { padding: 0.6rem 0.8rem; border-radius: 6px; overflow-wrap: anywhere; }
         .tabela-rolagem { max-width: 100%; overflow-x: auto; }
+        .btn-editar-linha { min-height: 44px; padding: 0.3rem 0.8rem; }
         .msg--usuario { background: var(--color-borda); align-self: flex-end; }
         .msg--agente { border: 1px solid var(--color-borda); }
         .msg--erro { background: var(--color-erro-faixa); color: var(--color-erro); }
@@ -229,7 +230,8 @@
         }
 
         // As colunas vêm do servidor (catálogo de tools); textContent evita XSS com dados gravados no banco.
-        function adicionarTabela(linhas, colunasServidor) {
+        // "editar" (RF02): nome da tool de atualizar; cada linha ganha um botão que abre o formulário sem IA.
+        function adicionarTabela(linhas, colunasServidor, editar) {
             if (!linhas.length) {
                 adicionarMensagem('Nenhum registro encontrado.', 'msg--agente');
                 return;
@@ -243,6 +245,11 @@
                 th.textContent = c;
                 trCabecalho.appendChild(th);
             });
+            if (editar) {
+                const th = document.createElement('th');
+                th.textContent = 'Ação';
+                trCabecalho.appendChild(th);
+            }
             thead.appendChild(trCabecalho);
             const tbody = document.createElement('tbody');
             linhas.forEach(l => {
@@ -252,6 +259,17 @@
                     td.textContent = l[c] ?? '';
                     tr.appendChild(td);
                 });
+                if (editar) {
+                    const td = document.createElement('td');
+                    const botao = document.createElement('button');
+                    botao.type = 'button';
+                    botao.className = 'btn-editar-linha';
+                    botao.textContent = 'Editar';
+                    botao.setAttribute('aria-label', 'Editar o registro ' + l.id);
+                    botao.addEventListener('click', () => abrirFormulario(editar, l.id, botao));
+                    td.appendChild(botao);
+                    tr.appendChild(td);
+                }
                 tbody.appendChild(tr);
             });
             table.appendChild(thead);
@@ -316,6 +334,33 @@
                 body: JSON.stringify(corpo),
                 keepalive: true,
             }).catch(() => {});
+        }
+
+        // RF02 / Bloco 3: abre o formulário de atualizar sem chamar a IA. O card segue o fluxo de sempre
+        // (Revisar → segurar); o servidor aplica RBAC e tenant e acha o registro pelo id.
+        async function abrirFormulario(tool, id, botao) {
+            if (botao) botao.disabled = true;
+            try {
+                const resp = await fetch('/agente/formulario', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                    body: JSON.stringify({ tool, id }),
+                });
+                if (resp.status === 401 || resp.status === 419) {
+                    window.location.href = '/login';
+                    return;
+                }
+                const dados = await resp.json().catch(() => ({}));
+                if (resp.ok && dados.tipo === 'confirmacao_pendente') {
+                    renderizarConfirmacaoPendente(dados);
+                } else {
+                    adicionarMensagem(dados.mensagem || 'Não consegui abrir esse formulário.', 'msg--erro');
+                }
+            } catch (e) {
+                adicionarMensagem('Falha ao contatar o servidor.', 'msg--erro');
+            } finally {
+                if (botao) botao.disabled = false;
+            }
         }
 
         function popupConfirmado() {
@@ -850,7 +895,7 @@
                         adicionarMensagem(dados.mensagem || '(sem resposta)', 'msg--agente');
                         break;
                     case 'resultado_leitura':
-                        adicionarTabela(dados.resultado || [], dados.colunas);
+                        adicionarTabela(dados.resultado || [], dados.colunas, dados.editar);
                         break;
                     case 'confirmacao_pendente':
                         renderizarConfirmacaoPendente(dados);

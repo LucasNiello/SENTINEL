@@ -46,7 +46,7 @@ class ConfirmacoesPendentes
     public const PRAZO_RASCUNHO_S = 300;
 
     /** Guarda o que a IA propôs como rascunho e devolve o id da proposta. */
-    public function guardarRascunho(Session $sessao, string $tool, array $argumentos): string
+    public function guardarRascunho(Session $sessao, string $tool, array $argumentos, ?array $propostos = null, string $origem = 'agente'): string
     {
         $proposta = (string) Str::uuid();
 
@@ -54,6 +54,10 @@ class ConfirmacoesPendentes
             'estado' => 'rascunho',
             'tool' => $tool,
             'argumentos' => $argumentos,
+            // O que a IA pediu de fato (atualizar: id/busca + campos que mudam); [] quando o formulário veio sem IA.
+            ...($propostos === null ? [] : ['propostos' => $propostos]),
+            // Por onde a ação entrou (coluna origem de audit_logs): agente ou formulario.
+            'origem' => $origem,
             'criado_em' => self::agora(),
         ]);
 
@@ -84,6 +88,7 @@ class ConfirmacoesPendentes
             'argumentos' => $revisados,
             'propostos' => self::propostos($rascunho),
             'proposta' => $proposta,
+            'origem' => self::origem($rascunho),
             // Os 5 min do rascunho são absolutos: o token também vence quando eles acabam (expirou()).
             'proposta_criada_em' => $rascunho['criado_em'],
             // Em segundos, com milissegundos: com segundos inteiros, a fronteira dos 12 s errava em até 1 s.
@@ -176,6 +181,12 @@ class ConfirmacoesPendentes
     public static function propostos(array $pendente): array
     {
         return $pendente['propostos'] ?? $pendente['argumentos'] ?? [];
+    }
+
+    /** Por onde a proposta entrou (coluna origem de audit_logs): agente (padrão) ou formulario. */
+    public static function origem(array $pendente): string
+    {
+        return (string) ($pendente['origem'] ?? 'agente');
     }
 
     /**

@@ -51,8 +51,9 @@ class AgenteController extends Controller
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             // A sessão guarda a proposta crua; o front só vê CPF/salário/documento mascarados (LGPD).
-            $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos']);
+            $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null);
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
+            unset($resposta['propostos']);
         }
 
         return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
@@ -99,7 +100,7 @@ class AgenteController extends Controller
         $revisados = $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores);
 
         try {
-            $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho));
+            $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho), ConfirmacoesPendentes::origem($rascunho));
             $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? []);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
@@ -177,13 +178,14 @@ class AgenteController extends Controller
             [$desfecho, $motivo] = $this->pendentes->expirou($pendente)
                 ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
                 : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
-            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo);
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente));
 
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
 
         try {
-            $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente));
+            $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
+                ConfirmacoesPendentes::origem($pendente));
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -275,11 +277,51 @@ class AgenteController extends Controller
         [$desfecho, $motivo] = $expirou
             ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
             : ['cancelado', 'Cancelado pelo usuário. Nada foi gravado.'];
-        $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo);
+        $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente));
 
         return response()->json($expirou
             ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
             : ['tipo' => 'cancelado', 'mensagem' => 'Cancelado. Nada foi gravado.']);
+    }
+
+    /**
+     * Bloco 3: abre o formulário de uma tool de escrita SEM chamar a IA ("Editar" numa
+     * linha de tabela, ou um cadastro em branco). Segue o mesmo caminho da proposta pelo
+     * agente: rascunho → Revisar → segurar, com o mesmo RBAC e tenant.
+     *
+     * Contrato: { "tool": "atualizar_cliente", "id"?: 12 }.
+     */
+    public function formulario(Request $request)
+    {
+        $validador = Validator::make($request->all(), ['tool' => 'required|string|max:64', 'id' => 'nullable|integer|min:1']);
+
+        if ($validador->fails()) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
+                'http_status' => 422, 'mensagem' => 'Não consegui abrir esse formulário. Tente de novo.'], 422);
+        }
+
+        $dados = $validador->validated();
+
+        try {
+            $resposta = $this->aiAgentService->abrirFormulario($dados['tool'], isset($dados['id']) ? (int) $dados['id'] : null);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $resposta = $this->aiAgentService->erroTecnicoTool($e);
+        }
+
+        if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
+            $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'],
+                $resposta['propostos'] ?? [], 'formulario');
+            $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
+            unset($resposta['propostos']);
+        }
+
+        return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
+            'negado' => 403,
+            'erro' => 422,
+            default => 200,
+        });
     }
 
     private function propostaIndisponivel()

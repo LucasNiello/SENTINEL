@@ -62,7 +62,8 @@ class AutenticacaoController extends Controller
                 : ['cancelado', 'Encerrada ao sair do sistema. Nada foi gravado.'];
 
             try {
-                $aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo);
+                $aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo,
+                    ConfirmacoesPendentes::origem($pendente));
             } catch (AuthenticationException) {
                 // Usuário sem papel ou tenant: não dá para auditar em nome dele, mas sair nunca pode falhar.
             }

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Funcionario;
 use App\Services\Concerns\ExclusaoSegura;
 use App\Services\Concerns\FiltroPorNome;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 
 class FuncionarioService
@@ -22,6 +23,31 @@ class FuncionarioService
             'data_demissao' => $dados['data_demissao'] ?? null,
             'tenant_id' => $dados['tenant_id'],
         ]);
+    }
+
+    /**
+     * Atualizar pelo agente: acha o registro por id ou por parte do nome, só no
+     * tenant e fora da lixeira (SoftDeletes). Até 6, para o agente saber se ficou ambíguo.
+     */
+    public function localizar(?int $id, ?string $busca, int $tenantId): Collection
+    {
+        return Funcionario::query()
+            ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $this->nomeContem($query, (string) $busca))
+            ->limit(6)
+            ->get();
+    }
+
+    /**
+     * Contrato: atualizar_*. Recebe só dados já validados pelo Form Request; registro de
+     * outro tenant ou na lixeira é tratado como inexistente (ModelNotFoundException).
+     */
+    public function atualizar(int $id, array $dados, int $tenantId): Funcionario
+    {
+        $funcionario = Funcionario::where('tenant_id', $tenantId)->findOrFail($id);
+        $funcionario->update(Arr::only($dados, ['nome', 'cpf', 'cargo', 'salario', 'data_admissao', 'data_demissao']));
+
+        return $funcionario;
     }
 
     /**

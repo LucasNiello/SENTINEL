@@ -12,6 +12,7 @@ use App\Http\Requests\NotaFiscalRequest;
 use App\Models\Lancamento;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -273,13 +274,29 @@ class AiAgentService
                 return $this->comAviso($this->negar($tool, $definicao, $argumentos), $aviso);
             }
 
+            // Atualizar (Bloco 3): o servidor acha o registro (por id ou nome, no tenant) e o formulário
+            // vem com os valores atuais mais o que a IA mudou. Nenhum ou vários: responde sem formulário.
+            $propostosPelaIa = $argumentos;
+
+            if ($definicao['localizar'] !== null) {
+                $localizado = $this->localizarRegistro($tool, $definicao, $argumentos);
+
+                if (isset($localizado['resposta'])) {
+                    return $this->comAviso($localizado['resposta'], $aviso);
+                }
+
+                $argumentos = $localizado['argumentos'];
+            }
+
             // RF04: a proposta já chega como formulário (o próprio card de confirmação). Os argumentos
             // voltam crus para o controller guardar na sessão; ele mascara antes de responder ao front.
+            // "propostos" é o que a IA pediu de fato (na atualização: id/busca + só os campos que mudam).
             return $this->comAviso([
                 'tipo' => 'confirmacao_pendente',
                 'tool' => $tool,
                 'risco' => $definicao['risco'],
                 'argumentos' => $argumentos,
+                'propostos' => $propostosPelaIa,
                 'formulario' => $this->formulario($tool, $argumentos),
             ], $aviso);
         }
@@ -463,6 +480,122 @@ class AiAgentService
             'tool' => $tool,
             'resultado' => $resultado,
             ...($definicao['colunas'] ? ['colunas' => $definicao['colunas']] : []),
+            // RF02 "editável": a linha abre o formulário de atualizar (sem IA), se o papel permitir.
+            ...($this->podeEditar($definicao['editavel_por']) ? ['editar' => $definicao['editavel_por']] : []),
+        ];
+    }
+
+    /** A tool de atualizar existe e o papel atual chega no mínimo dela. */
+    private function podeEditar(?string $toolAtualizar): bool
+    {
+        $atualizar = $toolAtualizar === null ? null : ($this->catalogo()[$toolAtualizar] ?? null);
+
+        return $atualizar !== null && $this->papelAtualPermite($atualizar['papel_minimo']);
+    }
+
+    /**
+     * Bloco 3: acha o registro a atualizar por id ou por nome/número, resolvido no
+     * SERVIDOR e dentro do tenant (a memória do agente não guarda as linhas das
+     * tabelas, então a IA só conhece o nome que o usuário digitou). Um registro:
+     * devolve os argumentos do formulário (valores atuais + o que a IA mudou + id).
+     * Nenhum: "Não encontrei…". Vários: a lista curta para escolher, sem formulário.
+     *
+     * @return array{argumentos?: array, resposta?: array}
+     */
+    private function localizarRegistro(string $tool, array $definicao, array $argumentos): array
+    {
+        $id = isset($argumentos['id']) && is_numeric($argumentos['id']) && (int) $argumentos['id'] >= 1 ? (int) $argumentos['id'] : null;
+        $busca = is_string($argumentos['busca'] ?? null) && trim($argumentos['busca']) !== '' ? trim($argumentos['busca']) : null;
+        $recusa = fn (string $mensagem) => ['resposta' => [
+            'tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422, 'mensagem' => $mensagem,
+        ]];
+
+        if ($id === null && $busca === null) {
+            return $recusa('Informe qual '.FormularioTool::semArtigo($definicao['rotulo']).' deve ser alterado: o número ou o nome.');
+        }
+
+        $encontrados = ($definicao['localizar'])($id, $busca, $this->contexto->tenantId());
+
+        if ($encontrados->isEmpty()) {
+            return $recusa('Não encontrei '.$definicao['rotulo'].' com '.($id !== null ? 'esse número' : 'esse '.$definicao['busca_por']).'.');
+        }
+
+        if ($encontrados->count() > 1) {
+            $colunas = ['id', $definicao['coluna_rotulo']];
+
+            return ['resposta' => [
+                'tipo' => 'resultado_leitura',
+                'tool' => $tool,
+                'resultado' => $encontrados->map(fn (Model $m) => AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)))->values()->all(),
+                'colunas' => $colunas,
+                'editar' => $tool,
+                'aviso' => 'Encontrei mais de um registro com esse nome. Escolha um na lista ou peça de novo com o número.',
+            ]];
+        }
+
+        return ['argumentos' => $this->valoresDoFormulario($definicao, $encontrados->first(), $argumentos)];
+    }
+
+    /**
+     * Valores atuais do registro nos campos do formulário (datas em AAAA-MM-DD), por
+     * cima deles o que veio informado (da IA) e, por fim, o id resolvido pelo servidor.
+     */
+    private function valoresDoFormulario(array $definicao, Model $registro, array $informados = []): array
+    {
+        $valores = [];
+
+        foreach (array_keys(FormularioTool::campos($definicao['regras'])) as $campo) {
+            $atual = $registro->getAttribute($campo);
+            $valores[$campo] = $atual instanceof \DateTimeInterface ? $atual->format('Y-m-d') : $atual;
+
+            if (array_key_exists($campo, $informados) && $informados[$campo] !== null) {
+                $valores[$campo] = $informados[$campo];
+            }
+        }
+
+        // "versao": o updated_at de quando o formulário abriu; se mudar até a confirmação, a gravação é recusada.
+        return [...$valores, 'id' => (int) $registro->getKey(), 'versao' => (string) $registro->getRawOriginal('updated_at')];
+    }
+
+    /**
+     * /agente/formulario (Bloco 3): o mesmo formulário da proposta, aberto SEM IA —
+     * "Editar" numa linha de tabela (com id) ou um cadastro em branco. Mesmo RBAC e
+     * tenant da proposta pelo agente; registro de outro tenant ou na lixeira responde
+     * igual a inexistente.
+     */
+    public function abrirFormulario(string $tool, ?int $id): array
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+
+        if ($definicao === null || $definicao['tipo'] !== 'escrita' || $definicao['regras'] === []) {
+            return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
+                'http_status' => 422, 'mensagem' => 'Esta operação não é suportada.'];
+        }
+
+        if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+            return $this->detalhesAuditoria->com(['origem' => 'formulario'],
+                fn () => $this->negar($tool, $definicao, $id === null ? [] : ['id' => $id]));
+        }
+
+        $argumentos = [];
+
+        if ($definicao['localizar'] !== null) {
+            $localizado = $this->localizarRegistro($tool, $definicao, ['id' => $id]);
+
+            if (isset($localizado['resposta'])) {
+                return $localizado['resposta'];
+            }
+
+            $argumentos = $localizado['argumentos'];
+        }
+
+        return [
+            'tipo' => 'confirmacao_pendente',
+            'tool' => $tool,
+            'risco' => $definicao['risco'],
+            'argumentos' => $argumentos,
+            'propostos' => [], // sem IA: nada foi proposto, só os valores atuais
+            'formulario' => $this->formulario($tool, $argumentos),
         ];
     }
 
@@ -470,9 +603,9 @@ class AiAgentService
      * Escrita depois da confirmação humana: a auditoria registra o que a IA propôs
      * ($propostos) ao lado do que foi de fato executado ($argumentos) — RF04.
      */
-    public function executarConfirmada(string $tool, array $argumentos, array $propostos): array
+    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente'): array
     {
-        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos], fn () => $this->executarTool($tool, $argumentos));
+        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem], fn () => $this->executarTool($tool, $argumentos));
     }
 
     /**
@@ -481,7 +614,7 @@ class AiAgentService
      * senão a resposta de recusa. RBAC negado e falha de validação ficam na
      * auditoria (com o proposto da IA), como ficavam quando a validação era na confirmação.
      */
-    public function revisar(string $tool, array $argumentos, array $propostos): ?array
+    public function revisar(string $tool, array $argumentos, array $propostos, string $origem = 'agente'): ?array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -490,7 +623,7 @@ class AiAgentService
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada pelo agente.'];
         }
 
-        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos], function () use ($tool, $definicao, $argumentos) {
+        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem], function () use ($tool, $definicao, $argumentos) {
             if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
                 return $this->negar($tool, $definicao, $argumentos);
             }
@@ -537,7 +670,9 @@ class AiAgentService
         // que vai confirmar. Só nesta resposta ao front: log, histórico e auditoria continuam mascarados.
         $revelados = $this->contexto->papel() === 'admin' ? ['salario'] : [];
 
-        return $this->formularios->montar($definicao['titulo'], $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS,
+        $titulo = $definicao['titulo'].(isset($valores['id']) && $definicao['localizar'] !== null ? ' #'.$valores['id'] : '');
+
+        return $this->formularios->montar($titulo, $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS,
             $this->contexto->tenantId(), $revelados);
     }
 
@@ -680,6 +815,7 @@ class AiAgentService
                 executar: fn (array $a) => $this->clienteService->buscarPorFiltro($a['nome'] ?? null, $a['tenant_id']),
                 mensagemErro: 'Não consegui consultar os clientes agora. Tente novamente.',
                 colunas: ['id', 'nome', 'documento', 'email', 'telefone'],
+                editavelPor: 'atualizar_cliente',
             ),
             $this->definirEscrita(
                 nome: 'criar_cliente',
@@ -714,6 +850,7 @@ class AiAgentService
                 executar: fn (array $a) => $this->fornecedorService->buscarPorFiltro($a['nome'] ?? null, $a['tenant_id']),
                 mensagemErro: 'Não consegui consultar os fornecedores agora. Tente novamente.',
                 colunas: ['id', 'nome', 'documento', 'email', 'telefone'],
+                editavelPor: 'atualizar_fornecedor',
             ),
             $this->definirEscrita(
                 nome: 'criar_fornecedor',
@@ -749,6 +886,7 @@ class AiAgentService
                 mensagemErro: 'Não consegui consultar os funcionários agora. Tente novamente.',
                 // cpf e salario ficam de fora de propósito: a consulta é aberta ao papel "leitura" e são dados pessoais/financeiros (LGPD).
                 colunas: ['id', 'nome', 'cargo', 'data_admissao', 'data_demissao'],
+                editavelPor: 'atualizar_funcionario',
             ),
             $this->definirEscrita(
                 nome: 'criar_funcionario',
@@ -785,6 +923,7 @@ class AiAgentService
                 executar: fn (array $a) => $this->notaFiscalService->buscarPorFiltro($a['tipo'] ?? null, $a['tenant_id']),
                 mensagemErro: 'Não consegui consultar as notas fiscais agora. Tente novamente.',
                 colunas: ['id', 'numero', 'tipo', 'valor', 'data_emissao', 'cliente_id', 'fornecedor_id', 'lancamento_id'],
+                editavelPor: 'atualizar_nota_fiscal',
             ),
             $this->definirEscrita(
                 nome: 'criar_nota_fiscal',
@@ -823,6 +962,7 @@ class AiAgentService
                 executar: fn (array $a) => $this->categoriaLancamentoService->buscarPorFiltro($a['tipo'] ?? null, $a['tenant_id']),
                 mensagemErro: 'Não consegui consultar as categorias agora. Tente novamente.',
                 colunas: ['id', 'nome', 'tipo'],
+                editavelPor: 'atualizar_categoria_lancamento',
             ),
             $this->definirEscrita(
                 nome: 'criar_categoria_lancamento',
@@ -839,6 +979,116 @@ class AiAgentService
                 mensagemErro: 'Não consegui cadastrar a categoria. Tente novamente.',
                 titulo: 'Cadastrar categoria de lançamento',
                 sucesso: 'Categoria cadastrada',
+                mensagens: ['tipo.in' => 'O tipo deve ser "receita" ou "despesa".'],
+            ),
+            $this->definirAtualizacao(
+                nome: 'atualizar_cliente',
+                descricao: 'Altera um cliente existente, achado pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
+                entidade: 'Cliente',
+                rotulo: 'o cliente',
+                papelMinimo: 'operador',
+                propriedades: [
+                    'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
+                    'documento' => ['type' => 'string', 'description' => 'CPF ou CNPJ.'],
+                    'email' => ['type' => 'string'],
+                    'telefone' => ['type' => 'string'],
+                ],
+                formRequest: ClienteRequest::class,
+                localizar: $this->clienteService->localizar(...),
+                atualizar: $this->clienteService->atualizar(...),
+                buscaPor: 'nome',
+                colunaRotulo: 'nome',
+                mensagemErro: 'Não consegui alterar o cliente. Tente novamente.',
+                titulo: 'Alterar cliente',
+                sucesso: 'Cliente atualizado',
+            ),
+            $this->definirAtualizacao(
+                nome: 'atualizar_fornecedor',
+                descricao: 'Altera um fornecedor existente, achado pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
+                entidade: 'Fornecedor',
+                rotulo: 'o fornecedor',
+                papelMinimo: 'operador',
+                propriedades: [
+                    'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
+                    'documento' => ['type' => 'string', 'description' => 'CPF ou CNPJ.'],
+                    'email' => ['type' => 'string'],
+                    'telefone' => ['type' => 'string'],
+                ],
+                formRequest: FornecedorRequest::class,
+                localizar: $this->fornecedorService->localizar(...),
+                atualizar: $this->fornecedorService->atualizar(...),
+                buscaPor: 'nome',
+                colunaRotulo: 'nome',
+                mensagemErro: 'Não consegui alterar o fornecedor. Tente novamente.',
+                titulo: 'Alterar fornecedor',
+                sucesso: 'Fornecedor atualizado',
+            ),
+            $this->definirAtualizacao(
+                nome: 'atualizar_funcionario',
+                descricao: 'Altera um funcionário existente, achado pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
+                entidade: 'Funcionario',
+                rotulo: 'o funcionário',
+                papelMinimo: 'admin',
+                propriedades: [
+                    'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
+                    'cpf' => ['type' => 'string', 'description' => 'CPF no formato 000.000.000-00.'],
+                    'cargo' => ['type' => 'string'],
+                    'salario' => ['type' => 'number'],
+                    'data_admissao' => ['type' => 'string', 'format' => 'date'],
+                    'data_demissao' => ['type' => 'string', 'format' => 'date', 'description' => 'Só se o funcionário foi desligado.'],
+                ],
+                formRequest: FuncionarioRequest::class,
+                localizar: $this->funcionarioService->localizar(...),
+                atualizar: $this->funcionarioService->atualizar(...),
+                buscaPor: 'nome',
+                colunaRotulo: 'nome',
+                mensagemErro: 'Não consegui alterar o funcionário. Tente novamente.',
+                titulo: 'Alterar funcionário',
+                sucesso: 'Funcionário atualizado',
+            ),
+            $this->definirAtualizacao(
+                nome: 'atualizar_nota_fiscal',
+                descricao: 'Altera uma nota fiscal existente, achada pelo id ou pelo número exato da nota. Mande só os campos que mudam. Nota de saída exige cliente_id; de entrada, fornecedor_id. Ação de escrita — exige confirmação humana antes de ser executada.',
+                entidade: 'NotaFiscal',
+                rotulo: 'a nota fiscal',
+                papelMinimo: 'operador',
+                propriedades: [
+                    'numero' => ['type' => 'string', 'description' => 'Número novo, só se for mudar.'],
+                    'tipo' => ['type' => 'string', 'enum' => ['entrada', 'saida']],
+                    'valor' => ['type' => 'number'],
+                    'data_emissao' => ['type' => 'string', 'format' => 'date'],
+                    'cliente_id' => ['type' => 'integer'],
+                    'fornecedor_id' => ['type' => 'integer'],
+                    'lancamento_id' => ['type' => 'integer'],
+                ],
+                formRequest: NotaFiscalRequest::class,
+                localizar: $this->notaFiscalService->localizar(...),
+                atualizar: $this->notaFiscalService->atualizar(...),
+                buscaPor: 'número',
+                colunaRotulo: 'numero',
+                mensagemErro: 'Não consegui alterar a nota fiscal. Tente novamente.',
+                titulo: 'Alterar nota fiscal',
+                sucesso: 'Nota fiscal atualizada',
+                mensagens: ['tipo.in' => 'O tipo deve ser "entrada" ou "saida".'],
+            ),
+            $this->definirAtualizacao(
+                nome: 'atualizar_categoria_lancamento',
+                descricao: 'Altera uma categoria de lançamento existente, achada pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
+                entidade: 'CategoriaLancamento',
+                rotulo: 'a categoria',
+                papelMinimo: 'operador',
+                propriedades: [
+                    'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
+                    'tipo' => ['type' => 'string', 'enum' => ['receita', 'despesa']],
+                ],
+                formRequest: CategoriaLancamentoRequest::class,
+                localizar: $this->categoriaLancamentoService->localizar(...),
+                atualizar: $this->categoriaLancamentoService->atualizar(...),
+                buscaPor: 'nome',
+                colunaRotulo: 'nome',
+                mensagemErro: 'Não consegui alterar a categoria. Tente novamente.',
+                titulo: 'Alterar categoria de lançamento',
+                sucesso: 'Categoria atualizada',
                 mensagens: ['tipo.in' => 'O tipo deve ser "receita" ou "despesa".'],
             ),
         ], null, 'nome');
@@ -967,6 +1217,78 @@ class AiAgentService
     }
 
     /**
+     * Atualização padrão de uma entidade (Bloco 3): o mesmo vínculo da criação
+     * (tool ↔ entidade ↔ Form Request ↔ service) mais como achar o registro. A IA
+     * manda "id" ou "busca" e só os campos que mudam; o servidor localiza o registro
+     * no tenant e o formulário vem com os valores atuais. O id fica na proposta
+     * guardada na sessão, fora do formulário: o humano não troca de registro.
+     *
+     * @param  Closure(?int, ?string, int): Collection  $localizar
+     * @param  Closure(int, array, int): Model  $atualizar
+     */
+    private function definirAtualizacao(
+        string $nome,
+        string $descricao,
+        string $entidade,
+        string $rotulo,
+        string $papelMinimo,
+        array $propriedades,
+        string $formRequest,
+        Closure $localizar,
+        Closure $atualizar,
+        string $buscaPor,
+        string $colunaRotulo,
+        string $mensagemErro,
+        string $titulo,
+        string $sucesso,
+        array $mensagens = [],
+    ): array {
+        $regras = (new $formRequest)->rules();
+
+        return $this->definirTool(
+            nome: $nome,
+            descricao: $descricao,
+            tipo: 'escrita',
+            risco: 'escrita',
+            acao: 'atualizar',
+            entidade: $entidade,
+            papelMinimo: $papelMinimo,
+            propriedades: [
+                'id' => ['type' => 'integer', 'description' => 'Número (id) do registro a alterar, se o usuário informou.'],
+                'busca' => ['type' => 'string', 'description' => Str::ucfirst($buscaPor).' do registro a alterar, quando o número não foi informado.'],
+                ...$propriedades,
+            ],
+            obrigatorios: [],
+            executar: function (array $a) use ($regras, $mensagens, $atualizar, $localizar, $rotulo) {
+                $dados = $this->validar($a, $regras, $mensagens);
+                $id = (int) ($a['id'] ?? 0);
+
+                // Alterado por outra pessoa depois que o formulário abriu: gravar desfaria a mudança dela, calado.
+                $atual = $id >= 1 && is_string($a['versao'] ?? null) ? $localizar($id, null, (int) $a['tenant_id'])->first() : null;
+                if ($atual !== null && (string) $atual->getRawOriginal('updated_at') !== $a['versao']) {
+                    throw new ToolRecusadaException('Este registro foi alterado por outra pessoa depois que o formulário foi aberto. Nada foi gravado. Abra de novo para ver os dados atuais.');
+                }
+
+                try {
+                    return $atualizar($id, $dados, (int) $a['tenant_id']);
+                } catch (ModelNotFoundException) {
+                    // Apagado, foi para a lixeira ou é de outro tenant: para o usuário, não existe.
+                    throw new ToolRecusadaException('Não encontrei '.$rotulo.' #'.$id.'.');
+                }
+            },
+            mensagemErro: $mensagemErro,
+            regras: $regras,
+            titulo: $titulo,
+            sucesso: $sucesso,
+            mensagens: $mensagens,
+            localizar: $localizar,
+            rotulo: $rotulo,
+            buscaPor: $buscaPor,
+            colunaRotulo: $colunaRotulo,
+        );
+    }
+
+    /**
      * @param  array<string, array<string, mixed>>  $propriedades
      * @param  string[]  $obrigatorios
      * @param  array<string, mixed>  $regras  escrita: regras que desenham e filtram o formulário do card (RF04)
@@ -991,6 +1313,11 @@ class AiAgentService
         string $titulo = '',
         string $sucesso = '',
         array $mensagens = [],
+        ?string $editavelPor = null,
+        ?Closure $localizar = null,
+        string $rotulo = '',
+        string $buscaPor = '',
+        string $colunaRotulo = '',
     ): array {
         // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
         // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
@@ -1015,6 +1342,11 @@ class AiAgentService
             'titulo' => $titulo,
             'sucesso' => $sucesso,
             'mensagens' => $mensagens, // escrita: frases de validação desta tool (executor e /agente/revisar)
+            'editavel_por' => $editavelPor, // leitura: tool de atualizar que a linha da tabela abre (RF02)
+            'localizar' => $localizar, // atualizar: acha o registro por id ou busca, no tenant (Bloco 3)
+            'rotulo' => $rotulo, // atualizar: "o cliente" (frases de "Não encontrei…")
+            'busca_por' => $buscaPor, // atualizar: "nome" ou "número" (a busca por texto)
+            'coluna_rotulo' => $colunaRotulo, // atualizar: coluna que nomeia o registro na lista de escolha
             'definicao' => [
                 'type' => 'function',
                 'function' => [
@@ -1082,12 +1414,12 @@ class AiAgentService
      *
      * @param  string  $resultado  'cancelado' | 'expirado' | 'recusado'
      */
-    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem): void
+    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente'): void
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
         try {
-            $this->detalhesAuditoria->com(['parametros_propostos' => $argumentosPropostos], fn () => $this->auditar(
+            $this->detalhesAuditoria->com(['parametros_propostos' => $argumentosPropostos, 'origem' => $origem], fn () => $this->auditar(
                 $tool,
                 $definicao['acao'] ?? 'desconhecida',
                 $definicao['entidade'] ?? null,

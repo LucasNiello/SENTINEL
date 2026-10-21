@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\NotaFiscal;
 use App\Services\Concerns\ExclusaoSegura;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 
 class NotaFiscalService
@@ -22,6 +23,31 @@ class NotaFiscalService
             'lancamento_id' => $dados['lancamento_id'] ?? null,
             'tenant_id' => $dados['tenant_id'],
         ]);
+    }
+
+    /**
+     * Atualizar pelo agente: acha o registro por id ou por número exato da nota, só no
+     * tenant e fora da lixeira (SoftDeletes). Até 6, para o agente saber se ficou ambíguo.
+     */
+    public function localizar(?int $id, ?string $busca, int $tenantId): Collection
+    {
+        return NotaFiscal::query()
+            ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $query->where('numero', (string) $busca))
+            ->limit(6)
+            ->get();
+    }
+
+    /**
+     * Contrato: atualizar_*. Recebe só dados já validados pelo Form Request; registro de
+     * outro tenant ou na lixeira é tratado como inexistente (ModelNotFoundException).
+     */
+    public function atualizar(int $id, array $dados, int $tenantId): NotaFiscal
+    {
+        $notaFiscal = NotaFiscal::where('tenant_id', $tenantId)->findOrFail($id);
+        $notaFiscal->update(Arr::only($dados, ['numero', 'tipo', 'valor', 'data_emissao', 'cliente_id', 'fornecedor_id', 'lancamento_id']));
+
+        return $notaFiscal;
     }
 
     /**

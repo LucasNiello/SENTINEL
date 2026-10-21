@@ -455,6 +455,6 @@ class AgenteTest extends TestCase
 
         Http::assertSent(fn ($req) => $req->hasHeader('api-key', 'k')
             && $req->url() === 'https://foundry.test/openai/v1/chat/completions'
-            && collect($req['tools'])->pluck('function.name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento']);
+            && collect($req['tools'])->pluck('function.name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento', 'atualizar_cliente', 'atualizar_fornecedor', 'atualizar_funcionario', 'atualizar_nota_fiscal', 'atualizar_categoria_lancamento']);
     }
 }
