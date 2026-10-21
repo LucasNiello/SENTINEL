@@ -159,7 +159,7 @@ class ClienteFornecedorToolsTest extends TestCase
 
             $this->assertSame($i + 1, AuditLog::count());
             $log = AuditLog::query()->latest('id')->first();
-            $this->assertSame('recusado', $log->resultado);
+            $this->assertSame('revisao_com_erro', $log->resultado);
             $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');
         }
 

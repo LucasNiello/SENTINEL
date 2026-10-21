@@ -500,7 +500,8 @@ class AiAgentService
             try {
                 $this->validar($argumentos, $definicao['regras'], $definicao['mensagens']);
             } catch (ToolRecusadaException $e) {
-                $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'recusado', $e->getMessage(), true);
+                // Não é desfecho: a proposta segue em rascunho para o humano corrigir. Resultado não-final.
+                $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, AuditoriaService::REVISAO_COM_ERRO, $e->getMessage(), true);
 
                 return [
                     'tipo' => 'erro',

@@ -1,57 +1,10 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ config('app.name', 'Sentinel') }} — Agente</title>
+@extends('layouts.app')
+
+@section('titulo', 'Agente')
+
+@push('estilos')
     <style>
-        /* Tokens da skill sentinel-visual (seção 2). Única fonte de cor da tela: nenhum hex fora do :root. */
-        :root {
-            /* base */
-            --color-noite: #0A0E13;     /* fundo da vitrine */
-            --color-gelo: #A8C8E6;      /* destaque sobre fundo escuro */
-            --color-creme: #FFFCEF;     /* fundo da bancada */
-            --color-tinta: #1D232A;     /* texto sobre creme */
-            --color-tinta-2: #5B6570;   /* texto secundário sobre creme; borda de risco neutro */
-            --color-aco: #2E5B85;       /* destaque sobre creme: links, foco, rótulos */
-            --color-borda: #E3DDC6;     /* divisórias e contornos de campo sobre creme */
-
-            /* estados (bancada) */
-            --color-sucesso: #2F6B4F;  --color-sucesso-faixa: #E4EFE6;
-            --color-aviso: #8A5A12;    --color-aviso-faixa: #F6EBD0;
-            --color-erro: #A3412E;     --color-erro-faixa: #F5E0D9;
-
-            /* estados (vitrine, sobre noite) */
-            --color-sucesso-escuro: #8FC4A4;
-            --color-aviso-escuro: #E0B870;
-            --color-erro-escuro: #D9A38F;
-
-            /* tipografia (seção 3): sem webfont carregada, a tela usa o fallback */
-            --fonte-titulo: 'Sora', "Segoe UI", system-ui, sans-serif;
-            --fonte-corpo: 'IBM Plex Sans', "Segoe UI", system-ui, sans-serif;
-            --fonte-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
-
-            /* foco visível (seção 9): destaque da bancada */
-            --foco: var(--color-aco);
-        }
-
-        * { box-sizing: border-box; }
-
-        body {
-            font-family: var(--fonte-corpo);
-            font-size: 16px;
-            max-width: 640px;
-            margin: 2rem auto;
-            padding: 0 1rem;
-            background: var(--color-creme);
-            color: var(--color-tinta);
-        }
-
-        h1 { font-family: var(--fonte-titulo); font-weight: 400; font-size: 1.25rem; }
-
-        :focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }
-
+        /* Tela do agente. Tokens, foco, botões e .sr-only vêm da casca (layouts/app.blade.php). */
         #historico {
             display: flex;
             flex-direction: column;
@@ -59,7 +12,8 @@
             margin-bottom: 1rem;
         }
 
-        .msg { padding: 0.6rem 0.8rem; border-radius: 6px; }
+        .msg { padding: 0.6rem 0.8rem; border-radius: 6px; overflow-wrap: anywhere; }
+        .tabela-rolagem { max-width: 100%; overflow-x: auto; }
         .msg--usuario { background: var(--color-borda); align-self: flex-end; }
         .msg--agente { border: 1px solid var(--color-borda); }
         .msg--erro { background: var(--color-erro-faixa); color: var(--color-erro); }
@@ -70,10 +24,9 @@
         th { background: var(--color-borda); }
 
         form#form-comando { display: flex; gap: 0.5rem; }
-        #campo-mensagem { flex: 1; padding: 0.6rem; font-size: 1rem; background: var(--color-creme); color: var(--color-tinta); }
-        #campo-mensagem { border: 1px solid var(--color-borda); border-radius: 6px; }
-        button { cursor: pointer; font: inherit; background: var(--color-creme); color: var(--color-tinta); border: 1px solid var(--color-tinta-2); border-radius: 6px; }
-        button:disabled, input:disabled { cursor: not-allowed; opacity: 0.6; }
+        #campo-mensagem { flex: 1; min-width: 0; min-height: 44px; padding: 0.6rem; font-size: 1rem; background: var(--color-creme); color: var(--color-tinta); }
+        #campo-mensagem { border: 1px solid var(--color-borda-campo); border-radius: 6px; }
+        #botao-enviar { min-height: 44px; padding: 0.5rem 1rem; }
 
         /* Carregamento (seção 7): texto de estado + barra fina de 1px, sem animação. */
         .carregando { margin: 0 0 1rem; color: var(--color-tinta-2); }
@@ -106,7 +59,7 @@
             font: inherit;
             background: var(--color-creme);
             color: var(--color-tinta);
-            border: 1px solid var(--color-borda);
+            border: 1px solid var(--color-borda-campo);
             border-radius: 6px;
         }
         .campo-info, .campo-falta, .campo-erro { margin: 0; font-size: 15px; }
@@ -124,7 +77,6 @@
         .card-campos { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 0.75rem; }
         .card-etapa { margin: 0.75rem 0 0; color: var(--color-tinta-2); }
         .acoes { flex-wrap: wrap; }
-        [hidden] { display: none !important; }
 
         /* Revisar, Confirmar (segurar), Editar e Cancelar: mesmo formato e peso; Editar e Cancelar são neutros (seção 6). */
         .btn-revisar,
@@ -205,21 +157,11 @@
         #popup.erro { color: var(--color-erro); border: 2px solid var(--color-erro); }
         #popup.neutro { color: var(--color-tinta); border: 2px solid var(--color-tinta-2); }
 
-        .sr-only {
-            position: absolute;
-            width: 1px; height: 1px;
-            overflow: hidden;
-            clip: rect(0 0 0 0);
-        }
     </style>
-</head>
-<body>
-    <h1>Sentinel — Agente</h1>
+@endpush
 
-    <form method="POST" action="/logout">
-        @csrf
-        <button type="submit">Sair</button>
-    </form>
+@section('conteudo')
+    <h1>Agente</h1>
 
     <div id="historico" aria-live="polite"></div>
 
@@ -229,6 +171,7 @@
     </div>
 
     <form id="form-comando">
+        <label for="campo-mensagem" class="sr-only">Seu pedido ao agente</label>
         <input type="text" id="campo-mensagem" placeholder="Pergunte algo sobre os lançamentos..." required>
         <button type="submit" id="botao-enviar">Enviar</button>
     </form>
@@ -313,7 +256,11 @@
             });
             table.appendChild(thead);
             table.appendChild(tbody);
-            historico.appendChild(table);
+            // Tabela larga rola dentro do próprio contêiner, nunca a página (375 px; skill seção 9).
+            const rolagem = document.createElement('div');
+            rolagem.className = 'tabela-rolagem';
+            rolagem.appendChild(table);
+            historico.appendChild(rolagem);
         }
 
         let timerPopup = null;
@@ -925,5 +872,4 @@
             }
         });
     </script>
-</body>
-</html>
+@endsection

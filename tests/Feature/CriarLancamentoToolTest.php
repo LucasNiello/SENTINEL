@@ -56,7 +56,7 @@ class CriarLancamentoToolTest extends TestCase
             $this->assertSame($esperada, $mensagem, json_encode($alteracao));
             $this->assertSame($i + 1, AuditLog::count());
             $log = AuditLog::query()->latest('id')->first();
-            $this->assertSame('recusado', $log->resultado);
+            $this->assertSame('revisao_com_erro', $log->resultado);
             $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');
         }
 

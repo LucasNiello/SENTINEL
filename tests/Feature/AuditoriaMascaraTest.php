@@ -156,7 +156,7 @@ class AuditoriaMascaraTest extends TestCase
         $this->confirmar($token)->assertStatus(422);
 
         $log = AuditLog::query()->sole();
-        $this->assertSame('recusado', $log->resultado);
+        $this->assertSame('revisao_com_erro', $log->resultado);
         $this->assertSame('***.***.333-44', $log->parametros['cpf']);
         $this->assertSame('[redigido]', $log->parametros['salario']);
     }

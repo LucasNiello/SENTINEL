@@ -30,7 +30,8 @@ Defina uma vez em `resources/css/app.css`, dentro do `@theme` (Tailwind 4 gera a
     --color-tinta: #1D232A;     /* texto sobre creme */
     --color-tinta-2: #5B6570;   /* texto secundário sobre creme; borda de risco neutro */
     --color-aco: #2E5B85;       /* destaque sobre creme: links, foco, rótulos */
-    --color-borda: #E3DDC6;     /* divisórias e contornos de campo sobre creme */
+    --color-borda: #E3DDC6;     /* divisórias sobre creme (1,3:1: NÃO serve de contorno de campo) */
+    --color-borda-campo: #5B6570; /* contorno de campo (input, select) sobre creme: 5,8:1 (WCAG 1.4.11 pede ≥ 3:1) */
 
     /* estados (bancada) */
     --color-sucesso: #2F6B4F;  --color-sucesso-faixa: #E4EFE6;

@@ -287,7 +287,10 @@ class FormularioAgenteTest extends TestCase
         $this->revisarEConfirmar($proposta, ['nome' => 'Loja Certa', 'email' => 'loja@exemplo.com'])->assertOk();
 
         $this->assertSame('Loja Certa', Cliente::query()->sole()->nome);
-        $this->assertSame(['recusado', 'sucesso'], AuditLog::query()->orderBy('id')->pluck('resultado')->all());
+        $this->assertSame(['revisao_com_erro', 'sucesso'], AuditLog::query()->orderBy('id')->pluck('resultado')->all());
+        // A tela de auditoria (Bloco 5) separa os dois: um desfecho só por proposta; a revisão com erro não é desfecho.
+        $this->assertNotContains(AuditoriaService::REVISAO_COM_ERRO, AuditoriaService::RESULTADOS_FINAIS);
+        $this->assertSame(1, AuditLog::query()->whereIn('resultado', AuditoriaService::RESULTADOS_FINAIS)->count());
         $this->assertSame(['nome' => 'Loja'], AuditLog::query()->latest('id')->first()->parametros_propostos, 'o proposto continua sendo o da IA');
     }
 

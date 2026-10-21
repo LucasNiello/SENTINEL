@@ -20,6 +20,15 @@ class AuditoriaService
     /** O que fica no lugar de um valor que não pode aparecer nem em parte (ex.: salário). */
     public const REDIGIDO = '[redigido]';
 
+    /**
+     * Resultado NÃO-FINAL: o /agente/revisar recusou os valores e a proposta continua em rascunho.
+     * Não é desfecho — a tela de auditoria (Bloco 5) separa estes registros dos desfechos em RESULTADOS_FINAIS.
+     */
+    public const REVISAO_COM_ERRO = 'revisao_com_erro';
+
+    /** Desfechos: cada proposta termina em exatamente um deles. */
+    public const RESULTADOS_FINAIS = ['sucesso', 'erro', 'recusado', 'negado', 'cancelado', 'expirado'];
+
     /** @return string[] */
     public static function camposSensiveis(): array
     {
@@ -31,8 +40,9 @@ class AuditoriaService
     }
 
     /**
-     * @param  string  $resultado  'sucesso' | 'erro' (falha técnica) | 'recusado' (regra de negócio ou prazo)
-     *                             | 'negado' (RBAC/whitelist) | 'cancelado' | 'expirado' (proposta encerrada sem gravar)
+     * @param  string  $resultado  desfechos (finais): 'sucesso' | 'erro' (falha técnica) | 'recusado' (regra de negócio
+     *                             na execução ou prazo) | 'negado' (RBAC/whitelist) | 'cancelado' | 'expirado';
+     *                             não-final: REVISAO_COM_ERRO (o Revisar recusou os valores; a proposta segue em rascunho)
      */
     public function registrar(
         string $tool,

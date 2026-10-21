@@ -44,7 +44,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
         return array_merge(['numero' => 'NF-901', 'tipo' => 'entrada', 'valor' => 700, 'data_emissao' => '2026-09-02', 'fornecedor_id' => $fornecedorId], $sobrescrever);
     }
 
-    /** Propõe, confirma e exige: recusa 422 com a frase esperada, sem termo técnico, auditada como 'recusado'. */
+    /** Propõe, confirma e exige: recusa 422 com a frase esperada, sem termo técnico, auditada como 'revisao_com_erro' (não-final). */
     private function recusar(string $tool, array $argumentos, string $esperada): void
     {
         $antes = AuditLog::count();
@@ -62,7 +62,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
 
         $this->assertSame($antes + 1, AuditLog::count());
         $log = AuditLog::query()->latest('id')->first();
-        $this->assertSame('recusado', $log->resultado);
+        $this->assertSame('revisao_com_erro', $log->resultado);
         $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');
     }
 
