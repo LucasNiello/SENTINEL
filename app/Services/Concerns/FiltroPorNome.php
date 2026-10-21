@@ -12,10 +12,11 @@ use Illuminate\Database\Eloquent\Builder;
  */
 trait FiltroPorNome
 {
-    protected function nomeContem(Builder $query, string $nome): Builder
+    /** $coluna é sempre um nome fixo do código (ex.: 'descricao' no lançamento), nunca o que veio da IA ou do usuário. */
+    protected function nomeContem(Builder $query, string $nome, string $coluna = 'nome'): Builder
     {
         $termo = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $nome);
 
-        return $query->whereRaw("nome like ? escape '!'", ["%{$termo}%"]);
+        return $query->whereRaw("{$coluna} like ? escape '!'", ["%{$termo}%"]);
     }
 }

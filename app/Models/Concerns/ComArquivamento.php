@@ -30,4 +30,14 @@ trait ComArquivamento
     {
         return $query->onlyTrashed()->whereNotNull('arquivado_em');
     }
+
+    /** Lixeira pelo agente (Bloco 4): 'ativo' (padrão do SoftDeletes), 'lixeira' ou 'arquivado'. */
+    protected function scopeNaSituacao(Builder $query, string $situacao): Builder
+    {
+        return match ($situacao) {
+            'lixeira' => $this->scopeNaLixeira($query),
+            'arquivado' => $this->scopeArquivados($query),
+            default => $query,
+        };
+    }
 }

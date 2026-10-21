@@ -12,6 +12,12 @@ class ClienteService
 {
     use ExclusaoSegura, FiltroPorNome;
 
+    /** Lixeira (RF08/RF12): relações cujos registros impedem excluir — e, contando lixeira e arquivados, excluir de vez. */
+    private const DEPENDENTES = ['lancamentos', 'notasFiscais'];
+
+    /** Relações que precisam estar ativas para o registro voltar da lixeira (pai na lixeira: recusa, dizendo qual). */
+    private const PAIS = [];
+
     public function criar(array $dados): Cliente
     {
         return Cliente::create([
@@ -25,11 +31,13 @@ class ClienteService
 
     /**
      * Atualizar pelo agente: acha o registro por id ou por parte do nome, só no
-     * tenant e fora da lixeira (SoftDeletes). Até 6, para o agente saber se ficou ambíguo.
+     * tenant; por padrão fora da lixeira (SoftDeletes), e a lixeira do agente (Bloco 4) pede
+     * 'lixeira' ou 'arquivado'. Até 6, para o agente saber se ficou ambíguo.
      */
-    public function localizar(?int $id, ?string $busca, int $tenantId): Collection
+    public function localizar(?int $id, ?string $busca, int $tenantId, string $situacao = 'ativo'): Collection
     {
         return Cliente::query()
+            ->naSituacao($situacao)
             ->where('tenant_id', $tenantId)
             ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $this->nomeContem($query, (string) $busca))
             ->limit(6)
@@ -66,7 +74,7 @@ class ClienteService
     {
         $cliente = Cliente::where('tenant_id', $tenantId)->findOrFail($id);
 
-        return $this->excluirComBloqueio($cliente, ['lancamentos', 'notasFiscais']);
+        return $this->excluirComBloqueio($cliente, self::DEPENDENTES);
     }
 
     /**
@@ -77,5 +85,17 @@ class ClienteService
         $cliente = Cliente::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($cliente, $reautenticadoComoAdmin);
+    }
+
+    /**
+     * RF12: exclusão física manual, só de registro arquivado e com a senha de um admin.
+     *
+     * @return array{excluido: bool, motivo?: string}
+     */
+    public function excluirDefinitivo(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    {
+        $cliente = Cliente::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+
+        return $this->excluirDeVez($cliente, $reautenticadoComoAdmin);
     }
 }

@@ -4,6 +4,9 @@ namespace App\Providers;
 
 use App\Services\DetalhesAuditoria;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Foundation\Exceptions\Handler;
+use Illuminate\Foundation\Http\Middleware\TrimStrings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -50,5 +53,13 @@ class AppServiceProvider extends ServiceProvider
                     'http_status' => 429, 'mensagem' => 'Muitos pedidos em pouco tempo. Aguarde um minuto.'], 429, $headers),
             );
         });
+
+        // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
+        // volta à sessão como "valor antigo" num redirecionamento de erro de validação.
+        TrimStrings::except(['senha_admin']);
+        $tratador = $this->app->make(ExceptionHandler::class);
+        if ($tratador instanceof Handler) {
+            $tratador->dontFlash('senha_admin');
+        }
     }
 }

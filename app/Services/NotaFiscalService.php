@@ -11,6 +11,12 @@ class NotaFiscalService
 {
     use ExclusaoSegura;
 
+    /** Lixeira (RF08/RF12): relações cujos registros impedem excluir — e, contando lixeira e arquivados, excluir de vez. */
+    private const DEPENDENTES = [];
+
+    /** Relações que precisam estar ativas para o registro voltar da lixeira (pai na lixeira: recusa, dizendo qual). */
+    private const PAIS = ['cliente', 'fornecedor', 'lancamento'];
+
     public function criar(array $dados): NotaFiscal
     {
         return NotaFiscal::create([
@@ -27,11 +33,13 @@ class NotaFiscalService
 
     /**
      * Atualizar pelo agente: acha o registro por id ou por número exato da nota, só no
-     * tenant e fora da lixeira (SoftDeletes). Até 6, para o agente saber se ficou ambíguo.
+     * tenant; por padrão fora da lixeira (SoftDeletes), e a lixeira do agente (Bloco 4) pede
+     * 'lixeira' ou 'arquivado'. Até 6, para o agente saber se ficou ambíguo.
      */
-    public function localizar(?int $id, ?string $busca, int $tenantId): Collection
+    public function localizar(?int $id, ?string $busca, int $tenantId, string $situacao = 'ativo'): Collection
     {
         return NotaFiscal::query()
+            ->naSituacao($situacao)
             ->where('tenant_id', $tenantId)
             ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $query->where('numero', (string) $busca))
             ->limit(6)
@@ -71,7 +79,7 @@ class NotaFiscalService
     {
         $notaFiscal = NotaFiscal::where('tenant_id', $tenantId)->findOrFail($id);
 
-        return $this->excluirComBloqueio($notaFiscal, []);
+        return $this->excluirComBloqueio($notaFiscal, self::DEPENDENTES);
     }
 
     /**
@@ -82,5 +90,17 @@ class NotaFiscalService
         $notaFiscal = NotaFiscal::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($notaFiscal, $reautenticadoComoAdmin);
+    }
+
+    /**
+     * RF12: exclusão física manual, só de registro arquivado e com a senha de um admin.
+     *
+     * @return array{excluido: bool, motivo?: string}
+     */
+    public function excluirDefinitivo(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    {
+        $notaFiscal = NotaFiscal::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+
+        return $this->excluirDeVez($notaFiscal, $reautenticadoComoAdmin);
     }
 }

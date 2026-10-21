@@ -9,7 +9,12 @@ use App\Http\Requests\FornecedorRequest;
 use App\Http\Requests\FuncionarioRequest;
 use App\Http\Requests\LancamentoRequest;
 use App\Http\Requests\NotaFiscalRequest;
+use App\Models\CategoriaLancamento;
+use App\Models\Cliente;
+use App\Models\Fornecedor;
+use App\Models\Funcionario;
 use App\Models\Lancamento;
+use App\Models\NotaFiscal;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -99,6 +104,9 @@ class AiAgentService
         'novo_status.in' => 'Status inválido: use "pendente" ou "conciliado".',
     ];
 
+    /** Até quantos itens a consulta da lixeira devolve (os excluídos mais recentes). */
+    private const LIMITE_LIXEIRA = 50;
+
     /** @var array<string, array<string, mixed>>|null */
     private ?array $catalogo = null;
 
@@ -145,7 +153,7 @@ class AiAgentService
                     'messages' => [
                         [
                             'role' => 'system',
-                            'content' => 'Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita.',
+                            'content' => 'Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha de um administrador, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat.',
                         ],
                         ...$historico,
                         ['role' => 'user', 'content' => $mensagem],
@@ -405,6 +413,18 @@ class AiAgentService
             return $this->negar($tool, $definicao, $argumentos);
         }
 
+        // RF10 (Bloco 4): tool que exige a senha de um admin só roda com a reautenticação feita nesta
+        // mesma requisição (o /agente/confirmar confere a senha e abre o escopo com quem autorizou).
+        if ($definicao['reautenticar'] && $this->autorizadoPor() === null) {
+            $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'negado', 'Sem reautenticação de administrador.', false);
+
+            return [
+                'tipo' => 'erro',
+                'categoria' => 'authorization_error', 'codigo' => 'AI_REAUTH_REQUIRED', 'http_status' => 403,
+                'mensagem' => 'Para continuar, é preciso a senha de um administrador. Nada foi gravado.',
+            ];
+        }
+
         $argumentos['tenant_id'] = $this->contexto->tenantId();
 
         try {
@@ -493,6 +513,20 @@ class AiAgentService
         return $atualizar !== null && $this->papelAtualPermite($atualizar['papel_minimo']);
     }
 
+    /** A tool pede a senha de um administrador no card (Bloco 4: restaurar e excluir de vez). */
+    public function exigeReautenticacao(string $tool): bool
+    {
+        return (bool) ($this->catalogo()[$tool]['reautenticar'] ?? false);
+    }
+
+    /** O admin que reautenticou nesta requisição — posto só pelo /agente/confirmar, depois de conferir a senha. */
+    private function autorizadoPor(): ?int
+    {
+        $id = $this->detalhesAuditoria->atuais()['autorizado_por'] ?? null;
+
+        return is_int($id) && $id >= 1 ? $id : null;
+    }
+
     /**
      * Bloco 3: acha o registro a atualizar por id ou por nome/número, resolvido no
      * SERVIDOR e dentro do tenant (a memória do agente não guarda as linhas das
@@ -511,24 +545,29 @@ class AiAgentService
         ]];
 
         if ($id === null && $busca === null) {
-            return $recusa('Informe qual '.FormularioTool::semArtigo($definicao['rotulo']).' deve ser alterado: o número ou o nome.');
+            // "o número ou o nome" / "ou a descrição"; na nota fiscal a busca já é pelo número.
+            $ouTexto = match ($definicao['busca_por']) { 'número' => '', 'descrição' => ' ou a descrição', default => ' ou o '.$definicao['busca_por'] };
+
+            return $recusa('Informe qual '.FormularioTool::semArtigo($definicao['rotulo']).' deve ser '.$definicao['feito'].': o número'.$ouTexto.'.');
         }
 
         $encontrados = ($definicao['localizar'])($id, $busca, $this->contexto->tenantId());
 
         if ($encontrados->isEmpty()) {
-            return $recusa('Não encontrei '.$definicao['rotulo'].' com '.($id !== null ? 'esse número' : 'esse '.$definicao['busca_por']).'.');
+            return $recusa('Não encontrei '.$definicao['rotulo'].' com '.($id !== null ? 'esse número' : ($definicao['busca_por'] === 'descrição' ? 'essa ' : 'esse ').$definicao['busca_por']).$definicao['onde'].'.');
         }
 
         if ($encontrados->count() > 1) {
             $colunas = ['id', $definicao['coluna_rotulo']];
+            // Bloco 4: na lixeira o botão de cada linha é a própria ação ("Restaurar"), não "Editar".
+            $acao = $definicao['rotulo_acao'] !== '' ? ['acao' => ['tool' => $tool, 'rotulo' => $definicao['rotulo_acao']]] : [];
 
             return ['resposta' => [
                 'tipo' => 'resultado_leitura',
                 'tool' => $tool,
-                'resultado' => $encontrados->map(fn (Model $m) => AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)))->values()->all(),
+                'resultado' => $encontrados->map(fn (Model $m) => [...AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)), ...$acao])->values()->all(),
                 'colunas' => $colunas,
-                'editar' => $tool,
+                ...($acao === [] ? ['editar' => $tool] : []),
                 'aviso' => 'Encontrei mais de um registro com esse nome. Escolha um na lista ou peça de novo com o número.',
             ]];
         }
@@ -567,7 +606,7 @@ class AiAgentService
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
-        if ($definicao === null || $definicao['tipo'] !== 'escrita' || $definicao['regras'] === []) {
+        if ($definicao === null || $definicao['tipo'] !== 'escrita' || ($definicao['regras'] === [] && $definicao['resumo'] === [])) {
             return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada.'];
         }
@@ -602,10 +641,16 @@ class AiAgentService
     /**
      * Escrita depois da confirmação humana: a auditoria registra o que a IA propôs
      * ($propostos) ao lado do que foi de fato executado ($argumentos) — RF04.
+     * $autorizadoPor: o admin cuja senha o /agente/confirmar acabou de conferir (RF10);
+     * fica na auditoria ao lado de quem estava logado e libera as tools que pedem senha.
      */
-    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente'): array
+    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null): array
     {
-        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem], fn () => $this->executarTool($tool, $argumentos));
+        return $this->detalhesAuditoria->com([
+            'parametros_propostos' => $propostos,
+            'origem' => $origem,
+            ...($autorizadoPor === null ? [] : ['autorizado_por' => $autorizadoPor]),
+        ], fn () => $this->executarTool($tool, $argumentos));
     }
 
     /**
@@ -632,6 +677,11 @@ class AiAgentService
 
             try {
                 $this->validar($argumentos, $definicao['regras'], $definicao['mensagens']);
+
+                $recusa = $definicao['conferir'] === null ? null : ($definicao['conferir'])($argumentos);
+                if ($recusa !== null) {
+                    throw new ToolRecusadaException($recusa['motivo'], [$recusa['campo'] => $recusa['motivo']]);
+                }
             } catch (ToolRecusadaException $e) {
                 // Não é desfecho: a proposta segue em rascunho para o humano corrigir. Resultado não-final.
                 $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, AuditoriaService::REVISAO_COM_ERRO, $e->getMessage(), true);
@@ -662,7 +712,7 @@ class AiAgentService
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
-        if ($definicao === null || $definicao['regras'] === []) {
+        if ($definicao === null || ($definicao['regras'] === [] && $definicao['resumo'] === [])) {
             return null;
         }
 
@@ -672,8 +722,53 @@ class AiAgentService
 
         $titulo = $definicao['titulo'].(isset($valores['id']) && $definicao['localizar'] !== null ? ' #'.$valores['id'] : '');
 
-        return $this->formularios->montar($titulo, $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS,
+        $formulario = $this->formularios->montar($titulo, $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS,
             $this->contexto->tenantId(), $revelados);
+
+        // Bloco 4 (lixeira): o card mostra o registro, só para leitura, e pode pedir a senha de um admin.
+        // A senha não é campo do formulário: não vai no Revisar nem fica na sessão (ver /agente/confirmar).
+        if ($definicao['resumo'] !== []) {
+            $formulario['resumo'] = $this->resumo($definicao, $valores);
+        }
+        if ($definicao['reautenticar']) {
+            $formulario['reautenticar'] = true;
+        }
+
+        // Recusa que não é de um campo do formulário (ex.: "existem lançamentos vinculados"): vai no topo do card.
+        $avulsos = array_diff_key($erros, array_flip(array_column($formulario['campos'], 'nome')));
+        if ($avulsos !== []) {
+            $formulario['erro'] = reset($avulsos);
+        }
+
+        return $formulario;
+    }
+
+    /**
+     * Bloco 4: o registro que a ação vai mover, para o humano conferir no card — só leitura,
+     * com as colunas da consulta e a máscara LGPD. Vazio se ele já não está na situação
+     * esperada (ex.: alguém restaurou antes).
+     *
+     * @return array<int, array{rotulo: string, valor: mixed}>
+     */
+    private function resumo(array $definicao, array $valores): array
+    {
+        $id = isset($valores['id']) && is_numeric($valores['id']) ? (int) $valores['id'] : 0;
+        $registro = $id >= 1 ? ($definicao['localizar'])($id, null, $this->contexto->tenantId())->first() : null;
+
+        if ($registro === null) {
+            return [];
+        }
+
+        $dados = [];
+        foreach ($definicao['resumo'] as $campo) {
+            $valor = $registro->getAttribute($campo);
+            $dados[$campo] = $valor instanceof \DateTimeInterface ? $valor->format('Y-m-d') : $valor;
+        }
+
+        return array_map(fn (string $campo, mixed $valor) => [
+            'rotulo' => Str::ucfirst(FormularioTool::semArtigo(self::ROTULOS_CAMPOS[$campo] ?? str_replace('_', ' ', $campo))),
+            'valor' => $valor,
+        ], array_keys($dados), AuditoriaService::mascararCamposSensiveis($dados));
     }
 
     /**
@@ -797,6 +892,8 @@ class AiAgentService
                 // Sem Form Request próprio: as mesmas regras desenham o formulário e validam no executor.
                 regras: self::REGRAS_STATUS_LANCAMENTO,
                 mensagens: self::MENSAGENS_STATUS_LANCAMENTO,
+                // Inexistente, de outro tenant ou já no status pedido: recusado no Revisar, antes do segurar.
+                conferir: fn (array $a) => $this->lancamentoService->motivoParaNaoAtualizarStatus((int) $a['id'], (string) $a['novo_status'], (int) $a['tenant_id']),
                 titulo: 'Alterar o status do lançamento',
                 sucesso: 'Status do lançamento atualizado',
             ),
@@ -1091,7 +1188,210 @@ class AiAgentService
                 sucesso: 'Categoria atualizada',
                 mensagens: ['tipo.in' => 'O tipo deve ser "receita" ou "despesa".'],
             ),
+            ...$this->definirLixeira(),
         ], null, 'nome');
+    }
+
+    /**
+     * Bloco 4 — as entidades com lixeira (RF08–RF12). O vínculo tool ↔ entidade ↔ service
+     * da lixeira fica todo aqui; trocar de domínio é trocar estas linhas. "colunas": o que o
+     * card mostra do registro para o humano conferir (as da consulta, sem o id, que vai no
+     * título). "papel": o mínimo para restaurar — o mesmo de criar/alterar a entidade.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function lixeiras(): array
+    {
+        return [
+            'lancamento' => ['entidade' => 'Lancamento', 'modelo' => Lancamento::class, 'rotulo' => 'o lançamento', 'servico' => $this->lancamentoService,
+                'busca_por' => 'descrição', 'coluna_rotulo' => 'descricao', 'colunas' => ['descricao', 'valor', 'status', 'data'], 'papel' => 'operador'],
+            'cliente' => ['entidade' => 'Cliente', 'modelo' => Cliente::class, 'rotulo' => 'o cliente', 'servico' => $this->clienteService,
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papel' => 'operador'],
+            'fornecedor' => ['entidade' => 'Fornecedor', 'modelo' => Fornecedor::class, 'rotulo' => 'o fornecedor', 'servico' => $this->fornecedorService,
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papel' => 'operador'],
+            'funcionario' => ['entidade' => 'Funcionario', 'modelo' => Funcionario::class, 'rotulo' => 'o funcionário', 'servico' => $this->funcionarioService,
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'cargo', 'data_admissao', 'data_demissao'], 'papel' => 'admin'],
+            'nota_fiscal' => ['entidade' => 'NotaFiscal', 'modelo' => NotaFiscal::class, 'rotulo' => 'a nota fiscal', 'servico' => $this->notaFiscalService,
+                'busca_por' => 'número', 'coluna_rotulo' => 'numero', 'colunas' => ['numero', 'tipo', 'valor', 'data_emissao'], 'papel' => 'operador'],
+            'categoria_lancamento' => ['entidade' => 'CategoriaLancamento', 'modelo' => CategoriaLancamento::class, 'rotulo' => 'a categoria', 'servico' => $this->categoriaLancamentoService,
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'tipo'], 'papel' => 'operador'],
+        ];
+    }
+
+    /**
+     * As tools da lixeira: consultar_lixeira e, por entidade, excluir_* (vai para a lixeira se
+     * nada depender dele, RF08/RF09), restaurar_* (RF10) e excluir_definitivo_* (só arquivado,
+     * RF12). Restaurar e excluir de vez pedem a senha de um admin no card ("reautenticar").
+     * As regras de dependência e de "pai" ficam nos services; aqui, só o vínculo.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function definirLixeira(): array
+    {
+        $lixeiras = $this->lixeiras();
+
+        $tools = [$this->definirTool(
+            nome: 'consultar_lixeira',
+            descricao: 'Lista o que está na lixeira (excluído, ainda dá para restaurar) e o que já foi arquivado, opcionalmente por tipo de registro e por situação. Ação de leitura — não exige confirmação.',
+            tipo: 'leitura',
+            risco: 'leitura',
+            acao: 'consultar',
+            entidade: 'Lixeira',
+            // DECISÃO PENDENTE (Lucas): papel mínimo da lixeira. Padrão do plano aprovado: operador (quem pede para restaurar).
+            papelMinimo: 'operador',
+            propriedades: [
+                'tipo' => ['type' => 'string', 'enum' => array_keys($lixeiras)],
+                'situacao' => ['type' => 'string', 'enum' => ['lixeira', 'arquivado']],
+            ],
+            obrigatorios: [],
+            executar: fn (array $a) => $this->itensDaLixeira($lixeiras, $a),
+            mensagemErro: 'Não consegui consultar a lixeira agora. Tente novamente.',
+            colunas: ['tipo', 'id', 'nome', 'situacao', 'excluido_em', 'restaurar_ate'],
+        )];
+
+        foreach ($lixeiras as $sufixo => $lixeira) {
+            ['entidade' => $entidade, 'rotulo' => $rotulo, 'servico' => $servico, 'busca_por' => $buscaPor] = $lixeira;
+            $nome = FormularioTool::semArtigo($rotulo);
+            $o = str_starts_with($rotulo, 'a ') ? 'a' : 'o'; // concordância: "nota fiscal excluída", "cliente excluído"
+            $propriedades = [
+                'id' => ['type' => 'integer', 'description' => 'Número (id) do registro, se o usuário informou.'],
+                'busca' => ['type' => 'string', 'description' => Str::ucfirst($buscaPor).' do registro, quando o número não foi informado.'],
+            ];
+            $localizarEm = fn (string $situacao) => fn (?int $id, ?string $busca, int $tenantId) => $servico->localizar($id, $busca, $tenantId, $situacao);
+
+            foreach ([
+                // [tool, risco, ação, papel, situação em que o registro está, onde, motivo (só leitura), operação, título, sucesso, botão, feito, descrição]
+                ["excluir_{$sufixo}", 'exclusao', 'excluir', 'admin', 'ativo', '', 'motivoParaNaoExcluir',
+                    fn (int $id, int $t) => $servico->excluir($id, $t),
+                    "Excluir {$nome}", Str::ucfirst($nome)." movid{$o} para a lixeira", 'Excluir', "excluíd{$o}",
+                    "Move {$rotulo} para a lixeira (exclusão segura: dá para restaurar dentro do prazo), achado pelo id ou por {$buscaPor}. Não exclui se houver registros vinculados. Ação de exclusão — exige confirmação humana antes de ser executada."],
+                ["restaurar_{$sufixo}", 'escrita', 'restaurar', $lixeira['papel'], 'lixeira', ' na lixeira', 'motivoParaNaoRestaurar',
+                    fn (int $id, int $t) => $servico->restaurarDaLixeira($id, $t, $this->autorizadoPor() !== null),
+                    "Restaurar {$nome}", Str::ucfirst($nome)." restaurad{$o} da lixeira", 'Restaurar', "restaurad{$o}",
+                    "Restaura {$rotulo} que está na lixeira, achado pelo id ou por {$buscaPor}. Exige a senha de um administrador, digitada no card de confirmação (nunca no chat). Ação de escrita — exige confirmação humana antes de ser executada."],
+                ["excluir_definitivo_{$sufixo}", 'exclusao', 'excluir_definitivo', 'admin', 'arquivado', ' entre os arquivados', 'motivoParaNaoExcluirDeVez',
+                    fn (int $id, int $t) => $servico->excluirDefinitivo($id, $t, $this->autorizadoPor() !== null),
+                    "Excluir de vez: {$nome}", Str::ucfirst($nome)." excluíd{$o} de vez", 'Excluir de vez', "excluíd{$o} de vez",
+                    "Exclui de vez, sem volta, {$rotulo} que já foi arquivado (passou do prazo da lixeira), achado pelo id ou por {$buscaPor}. Só administrador; exige a senha de um administrador, digitada no card de confirmação (nunca no chat). Ação de exclusão — exige confirmação humana antes de ser executada."],
+            ] as [$tool, $risco, $acao, $papel, $situacao, $onde, $motivo, $operacao, $titulo, $sucesso, $botao, $feito, $descricao]) {
+                $localizar = $localizarEm($situacao);
+                $naoEncontrei = 'Não encontrei '.$rotulo;
+
+                $tools[] = $this->definirTool(
+                    nome: $tool,
+                    descricao: $descricao,
+                    tipo: 'escrita',
+                    risco: $risco,
+                    acao: $acao,
+                    entidade: $entidade,
+                    // DECISÃO PENDENTE (Lucas): papéis da lixeira. Padrão fechado do plano aprovado: excluir e
+                    // excluir de vez só admin; restaurar com o papel de criar/alterar a entidade + senha de admin.
+                    papelMinimo: $papel,
+                    propriedades: $propriedades,
+                    obrigatorios: [],
+                    executar: fn (array $a) => $this->executarNaLixeira($a, $naoEncontrei, $onde, $operacao),
+                    mensagemErro: 'Não consegui concluir a operação na lixeira. Tente novamente.',
+                    titulo: $titulo,
+                    sucesso: $sucesso,
+                    localizar: $localizar,
+                    rotulo: $rotulo,
+                    buscaPor: $buscaPor,
+                    colunaRotulo: $lixeira['coluna_rotulo'],
+                    // RF08 e "pai" na lixeira (decisão: recusar dizendo qual é o pai): a recusa aparece já no Revisar.
+                    conferir: function (array $a) use ($localizar, $servico, $motivo, $naoEncontrei, $onde): ?array {
+                        $id = (int) ($a['id'] ?? 0);
+                        $registro = $id >= 1 ? $localizar($id, null, (int) $a['tenant_id'])->first() : null;
+                        $frase = $registro === null ? "{$naoEncontrei} #{$id}{$onde}." : $servico->{$motivo}($registro);
+
+                        return $frase === null ? null : ['campo' => 'id', 'motivo' => $frase];
+                    },
+                    resumo: $lixeira['colunas'],
+                    reautenticar: $acao !== 'excluir',
+                    feito: $feito,
+                    onde: $onde,
+                    rotuloAcao: $botao,
+                );
+            }
+        }
+
+        return $tools;
+    }
+
+    /**
+     * Executor das tools da lixeira: chama o service pelo id da proposta e traduz o "não deu"
+     * em recusa com a frase dele (dependência, pai na lixeira, não arquivado, sem senha).
+     * Registro que sumiu, mudou de situação ou é de outro tenant: "Não encontrei…".
+     *
+     * @param  Closure(int, int): array  $operacao
+     */
+    private function executarNaLixeira(array $argumentos, string $naoEncontrei, string $onde, Closure $operacao): Model
+    {
+        $id = (int) ($argumentos['id'] ?? 0);
+
+        try {
+            $resultado = $operacao($id, (int) $argumentos['tenant_id']);
+        } catch (ModelNotFoundException) {
+            throw new ToolRecusadaException("{$naoEncontrei} #{$id}{$onde}.");
+        }
+
+        if (! isset($resultado['registro'])) {
+            throw new ToolRecusadaException($resultado['motivo'] ?? 'Não foi possível concluir a operação.');
+        }
+
+        return $resultado['registro'];
+    }
+
+    /**
+     * consultar_lixeira: o que está na lixeira e o que foi arquivado, do tenant, dos mais
+     * recentes para os mais antigos. Cada linha leva a ação que o papel atual pode abrir
+     * sem IA: "Restaurar" (na lixeira) ou "Excluir de vez" (arquivado).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function itensDaLixeira(array $lixeiras, array $filtros): array
+    {
+        $tipo = $filtros['tipo'] ?? null;
+        $situacao = $filtros['situacao'] ?? null;
+
+        // Filtro fora da lista (a IA não segue o enum à risca): nada, como numa consulta com filtro que não casa.
+        if (($tipo !== null && ! array_key_exists($tipo, $lixeiras)) || ! in_array($situacao, [null, 'lixeira', 'arquivado'], true)) {
+            return [];
+        }
+
+        $dias = (int) config('sentinel.retencao_lixeira_dias');
+        $itens = [];
+
+        foreach ($tipo === null ? $lixeiras : [$tipo => $lixeiras[$tipo]] as $sufixo => $lixeira) {
+            $registros = ($situacao === null ? $lixeira['modelo']::onlyTrashed() : $lixeira['modelo']::query()->naSituacao($situacao))
+                ->where('tenant_id', (int) $filtros['tenant_id'])
+                ->orderByDesc('deleted_at')
+                ->limit(self::LIMITE_LIXEIRA)
+                ->get();
+
+            foreach ($registros as $registro) {
+                $arquivado = $registro->arquivado_em !== null;
+                $acao = $arquivado ? "excluir_definitivo_{$sufixo}" : "restaurar_{$sufixo}";
+
+                $itens[] = [
+                    'tipo' => Str::ucfirst(FormularioTool::semArtigo($lixeira['rotulo'])),
+                    'id' => (int) $registro->getKey(),
+                    'nome' => $registro->getAttribute($lixeira['coluna_rotulo']),
+                    'situacao' => $arquivado ? 'Arquivado' : 'Na lixeira',
+                    'excluido_em' => $registro->deleted_at?->format('Y-m-d'),
+                    'restaurar_ate' => $arquivado ? null : $registro->deleted_at?->copy()->addDays($dias)->format('Y-m-d'),
+                    ...($this->podeEditar($acao) ? ['acao' => ['tool' => $acao, 'rotulo' => $arquivado ? 'Excluir de vez' : 'Restaurar']] : []),
+                    '_ordem' => $registro->deleted_at?->getTimestamp() ?? 0,
+                ];
+            }
+        }
+
+        usort($itens, fn (array $a, array $b) => $b['_ordem'] <=> $a['_ordem']);
+
+        return array_map(function (array $item) {
+            unset($item['_ordem']);
+
+            return $item;
+        }, array_slice($itens, 0, self::LIMITE_LIXEIRA));
     }
 
     /**
@@ -1285,6 +1585,7 @@ class AiAgentService
             rotulo: $rotulo,
             buscaPor: $buscaPor,
             colunaRotulo: $colunaRotulo,
+            feito: str_starts_with($rotulo, 'a ') ? 'alterada' : 'alterado',
         );
     }
 
@@ -1318,6 +1619,12 @@ class AiAgentService
         string $rotulo = '',
         string $buscaPor = '',
         string $colunaRotulo = '',
+        ?Closure $conferir = null,
+        array $resumo = [],
+        bool $reautenticar = false,
+        string $feito = 'alterado',
+        string $onde = '',
+        string $rotuloAcao = '',
     ): array {
         // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
         // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
@@ -1347,6 +1654,12 @@ class AiAgentService
             'rotulo' => $rotulo, // atualizar: "o cliente" (frases de "Não encontrei…")
             'busca_por' => $buscaPor, // atualizar: "nome" ou "número" (a busca por texto)
             'coluna_rotulo' => $colunaRotulo, // atualizar: coluna que nomeia o registro na lista de escolha
+            'conferir' => $conferir, // escrita: regra de negócio conferida já no /agente/revisar (antes do segurar)
+            'resumo' => $resumo, // lixeira: colunas do registro que o card mostra, só leitura (Bloco 4)
+            'reautenticar' => $reautenticar, // lixeira: a confirmação pede a senha de um admin (RF10)
+            'feito' => $feito, // "Informe qual cliente deve ser {feito}…"
+            'onde' => $onde, // lixeira: "Não encontrei o cliente… {onde}" (" na lixeira")
+            'rotulo_acao' => $rotuloAcao, // lixeira: botão da linha na lista de escolha ("Restaurar"); vazio = "Editar"
             'definicao' => [
                 'type' => 'function',
                 'function' => [
@@ -1412,9 +1725,9 @@ class AiAgentService
      * para o usuário: fica no log só com metadados — nunca argumentos nem a
      * mensagem da exceção, que numa QueryException traz o SQL com os valores (AI-003).
      *
-     * @param  string  $resultado  'cancelado' | 'expirado' | 'recusado'
+     * @param  string  $resultado  'cancelado' | 'expirado' | 'recusado' | 'negado' (senha de admin recusada, com $permitido false)
      */
-    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente'): void
+    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente', bool $permitido = true): void
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -1427,7 +1740,7 @@ class AiAgentService
                 [],
                 $resultado,
                 $mensagem,
-                true,
+                $permitido,
             ));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;

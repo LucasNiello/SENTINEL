@@ -4,11 +4,18 @@ namespace App\Services;
 
 use App\Models\Lancamento;
 use App\Services\Concerns\ExclusaoSegura;
+use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Collection;
 
 class LancamentoService
 {
-    use ExclusaoSegura;
+    use ExclusaoSegura, FiltroPorNome;
+
+    /** Lixeira (RF08/RF12): relações cujos registros impedem excluir — e, contando lixeira e arquivados, excluir de vez. */
+    private const DEPENDENTES = ['notasFiscais'];
+
+    /** Relações que precisam estar ativas para o registro voltar da lixeira (pai na lixeira: recusa, dizendo qual). */
+    private const PAIS = ['categoriaLancamento', 'cliente', 'fornecedor', 'funcionario'];
 
     /**
      * Contrato: criar_lancamento.
@@ -39,6 +46,21 @@ class LancamentoService
             ->when($status, fn ($query) => $query->where('status', $status))
             ->when($dataInicio, fn ($query) => $query->whereDate('data', '>=', $dataInicio))
             ->when($dataFim, fn ($query) => $query->whereDate('data', '<=', $dataFim))
+            ->get();
+    }
+
+    /**
+     * Lixeira pelo agente (Bloco 4): acha o lançamento por id ou por parte da descrição, só
+     * no tenant e na situação pedida ('ativo', 'lixeira' ou 'arquivado'). Até 6, para o
+     * agente saber se ficou ambíguo.
+     */
+    public function localizar(?int $id, ?string $busca, int $tenantId, string $situacao = 'ativo'): Collection
+    {
+        return Lancamento::query()
+            ->naSituacao($situacao)
+            ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $this->nomeContem($query, (string) $busca, 'descricao'))
+            ->limit(6)
             ->get();
     }
 
@@ -113,6 +135,24 @@ class LancamentoService
     }
 
     /**
+     * Conferência só de leitura, com as mesmas frases de atualizarStatus(): usada no
+     * /agente/revisar para a recusa aparecer antes do segurar. Devolve o campo do
+     * formulário que causou a recusa e a frase, ou null se dá para atualizar.
+     *
+     * @return array{campo: string, motivo: string}|null
+     */
+    public function motivoParaNaoAtualizarStatus(int $id, string $novoStatus, int $tenantId): ?array
+    {
+        $lancamento = Lancamento::query()->where('tenant_id', $tenantId)->find($id);
+
+        return match (true) {
+            $lancamento === null => ['campo' => 'id', 'motivo' => "Não encontrei o lançamento #{$id}."],
+            $lancamento->status === $novoStatus => ['campo' => 'novo_status', 'motivo' => "O lançamento #{$id} já está {$novoStatus}."],
+            default => null,
+        };
+    }
+
+    /**
      * @param  int[]  $ids
      * @return array{atualizados: int[], ignorados: int[]}
      */
@@ -153,7 +193,7 @@ class LancamentoService
     {
         $lancamento = Lancamento::where('tenant_id', $tenantId)->findOrFail($id);
 
-        return $this->excluirComBloqueio($lancamento, ['notasFiscais']);
+        return $this->excluirComBloqueio($lancamento, self::DEPENDENTES);
     }
 
     /**
@@ -164,5 +204,17 @@ class LancamentoService
         $lancamento = Lancamento::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($lancamento, $reautenticadoComoAdmin);
+    }
+
+    /**
+     * RF12: exclusão física manual, só de registro arquivado e com a senha de um admin.
+     *
+     * @return array{excluido: bool, motivo?: string}
+     */
+    public function excluirDefinitivo(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    {
+        $lancamento = Lancamento::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+
+        return $this->excluirDeVez($lancamento, $reautenticadoComoAdmin);
     }
 }

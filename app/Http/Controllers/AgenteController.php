@@ -6,8 +6,11 @@ use App\Services\AiAgentService;
 use App\Services\AuditoriaService;
 use App\Services\ConfirmacoesPendentes;
 use App\Services\ConversaAgente;
+use App\Services\ReautenticacaoAdmin;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class AgenteController extends Controller
@@ -16,6 +19,7 @@ class AgenteController extends Controller
         private AiAgentService $aiAgentService,
         private ConversaAgente $conversa,
         private ConfirmacoesPendentes $pendentes,
+        private ReautenticacaoAdmin $reautenticacao,
     ) {
     }
 
@@ -183,9 +187,23 @@ class AgenteController extends Controller
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
 
+        // RF10 (Bloco 4): restaurar e excluir de vez pedem a senha de um admin, digitada no card. Ela só
+        // existe nesta requisição: vai direto para a conferência, nunca para a sessão, o log ou a auditoria.
+        $autorizadoPor = null;
+
+        if ($this->aiAgentService->exigeReautenticacao($pendente['tool'])) {
+            $autorizacao = $this->reautenticar($request);
+
+            if (! isset($autorizacao['admin'])) {
+                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha']);
+            }
+
+            $autorizadoPor = $autorizacao['admin'];
+        }
+
         try {
             $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
-                ConfirmacoesPendentes::origem($pendente));
+                ConfirmacoesPendentes::origem($pendente), $autorizadoPor);
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -322,6 +340,53 @@ class AgenteController extends Controller
             'erro' => 422,
             default => 200,
         });
+    }
+
+    /**
+     * Confere o e-mail e a senha do admin que vieram no corpo do /agente/confirmar. Nenhum
+     * caminho vira 500 (APP_DEBUG=true no laboratório mostraria o corpo): qualquer falha é "invalido".
+     *
+     * @return array{admin: int}|array{falha: string}
+     */
+    private function reautenticar(Request $request): array
+    {
+        try {
+            return $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin'));
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // AI-003: só a classe e o local, nunca a mensagem da exceção (poderia trazer o que foi digitado).
+            Log::warning('AgenteController: falha na reautenticação', [
+                'correlation_id' => (string) Str::uuid(),
+                'excecao' => $e::class,
+                'local' => basename($e->getFile()).':'.$e->getLine(),
+            ]);
+
+            return ['falha' => 'invalido'];
+        }
+    }
+
+    /**
+     * Senha de admin recusada (ou em falta, ou tentativas demais): a proposta termina aqui, sem
+     * gravar — o desfecho dela é "negado", com quem estava logado e sem o e-mail digitado (ele
+     * poderia ser a senha digitada no campo errado). Para tentar de novo, abre-se outro card.
+     */
+    private function reautenticacaoRecusada(array $pendente, string $falha)
+    {
+        [$codigo, $status, $motivo, $mensagem] = match ($falha) {
+            'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de senha de administrador atingido.',
+                'Muitas tentativas com a senha errada. Aguarde alguns minutos. Nada foi gravado.'],
+            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e senha de administrador.',
+                'Informe o e-mail e a senha de um administrador. Nada foi gravado.'],
+            default => ['AI_REAUTH_FAILED', 403, 'Senha de administrador não conferiu.',
+                'E-mail ou senha de administrador inválidos. Nada foi gravado.'],
+        };
+
+        $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'negado', $motivo,
+            ConfirmacoesPendentes::origem($pendente), permitido: false);
+
+        return response()->json(['tipo' => 'erro', 'categoria' => $status === 429 ? 'rate_limit' : 'authorization_error',
+            'codigo' => $codigo, 'http_status' => $status, 'mensagem' => $mensagem], $status);
     }
 
     private function propostaIndisponivel()

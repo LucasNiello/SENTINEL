@@ -108,7 +108,7 @@ class AtualizarStatusLancamentoTest extends TestCase
             ->assertJsonPath('mensagem', "O lançamento #{$lancamento->id} já está pendente.");
 
         $log = AuditLog::query()->sole();
-        $this->assertSame('recusado', $log->resultado);
+        $this->assertSame('revisao_com_erro', $log->resultado);
         $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');
     }
 

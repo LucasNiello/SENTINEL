@@ -3,16 +3,21 @@
 namespace App\Services;
 
 use App\Models\User;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * RF10: confere a senha de um administrador antes de uma ação sensível
- * (restaurar da lixeira). Um operador pode chamar um admin para autorizar,
- * e um admin logado digita a própria senha.
+ * (restaurar da lixeira e excluir de vez). Um operador pode chamar um admin
+ * para autorizar, e um admin logado digita a própria senha.
  *
- * O resultado é o que alimenta restaurarDaLixeira(..., $reautenticadoComoAdmin).
- * A restauração ainda não é exposta pela interface nem por tool (Fase 4):
- * aqui fica só o mecanismo.
+ * Pelo agente (Bloco 4), a senha vem do card direto para o /agente/confirmar,
+ * que chama autorizar(): ela só existe em memória nesta requisição — nunca vai
+ * para a IA, a sessão, o log, a auditoria, o cache ou o histórico do agente.
  */
 class ReautenticacaoAdmin
 {
@@ -21,6 +26,15 @@ class ReautenticacaoAdmin
      * não é encontrado: a conferência custa o mesmo tempo que a de um admin real.
      */
     private const HASH_FICTICIO = '$2y$12$ezHBDHIf9Iqph0jkQPb3x.xurvG.vVzAgs.I82I7jHRKAqxIFXJgi';
+
+    /** Tentativas erradas por usuário logado + e-mail do admin, a cada JANELA_S. */
+    public const LIMITE_POR_ADMIN = 5;
+
+    /** Tentativas erradas por usuário logado, com qualquer e-mail, a cada JANELA_S. */
+    public const LIMITE_POR_USUARIO = 10;
+
+    /** Janela dos dois limites: 10 minutos. */
+    public const JANELA_S = 600;
 
     public function __construct(private ContextoUsuario $contexto)
     {
@@ -32,6 +46,63 @@ class ReautenticacaoAdmin
      * (via ContextoUsuario) — falha fechada.
      */
     public function confirmar(string $email, string $senha): bool
+    {
+        return $this->adminQueConfere($email, $senha) !== null;
+    }
+
+    /**
+     * Bloco 4: a reautenticação pelo card. Mesma conferência de confirmar(), com dois
+     * limites de tentativas ERRADAS por janela de 10 min: usuário logado + e-mail do
+     * admin (LIMITE_POR_ADMIN) e só o usuário logado, com qualquer e-mail
+     * (LIMITE_POR_USUARIO). Nunca lança, exceto a AuthenticationException de quem não
+     * está logado: qualquer outra falha vira "invalido", e o log leva só a classe da
+     * exceção e onde foi (nunca o e-mail nem a senha).
+     *
+     * @return array{admin: int}|array{falha: 'faltando'|'limite'|'invalido'}
+     */
+    public function autorizar(mixed $email, mixed $senha): array
+    {
+        $usuarioId = $this->contexto->usuario()->id;
+
+        if (! is_string($email) || ! is_string($senha) || trim($email) === '' || $senha === '') {
+            return ['falha' => 'faltando'];
+        }
+
+        try {
+            // O e-mail digitado entra na chave só como HMAC: se alguém digitar a senha no campo
+            // do e-mail, ela não fica legível no cache.
+            $porUsuario = "reautenticacao:usuario:{$usuarioId}";
+            $porAdmin = "reautenticacao:admin:{$usuarioId}:".hash_hmac('sha256', Str::lower(trim($email)), (string) config('app.key'));
+
+            if (RateLimiter::tooManyAttempts($porUsuario, self::LIMITE_POR_USUARIO)
+                || RateLimiter::tooManyAttempts($porAdmin, self::LIMITE_POR_ADMIN)) {
+                return ['falha' => 'limite'];
+            }
+
+            $admin = strlen($email) <= 255 && strlen($senha) <= 255 ? $this->adminQueConfere(trim($email), $senha) : null;
+
+            if ($admin === null) {
+                RateLimiter::hit($porUsuario, self::JANELA_S);
+                RateLimiter::hit($porAdmin, self::JANELA_S);
+
+                return ['falha' => 'invalido'];
+            }
+
+            return ['admin' => (int) $admin->id];
+        } catch (AuthenticationException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::warning('ReautenticacaoAdmin: falha ao conferir', [
+                'correlation_id' => (string) Str::uuid(),
+                'excecao' => $e::class,
+                'local' => basename($e->getFile()).':'.$e->getLine(),
+            ]);
+
+            return ['falha' => 'invalido'];
+        }
+    }
+
+    private function adminQueConfere(string $email, string $senha): ?User
     {
         $tenantId = $this->contexto->tenantId();
 
@@ -46,9 +117,9 @@ class ReautenticacaoAdmin
             // e-mail existe ou se é de um admin.
             Hash::check($senha, self::HASH_FICTICIO);
 
-            return false;
+            return null;
         }
 
-        return Hash::check($senha, $admin->password);
+        return Hash::check($senha, $admin->password) ? $admin : null;
     }
 }

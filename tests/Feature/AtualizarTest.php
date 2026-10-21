@@ -316,6 +316,36 @@ class AtualizarTest extends TestCase
         $this->comando('consultar_funcionarios')->assertOk()->assertJsonMissingPath('editar'); // atualizar_funcionario é só admin
     }
 
+    public function test_status_do_lancamento_recusa_no_revisar_antes_do_segurar(): void
+    {
+        $pendente = \App\Models\Lancamento::create(['descricao' => 'L', 'valor' => 1, 'data' => '2026-10-01', 'status' => 'pendente', 'tenant_id' => 1]);
+        $alheio = \App\Models\Lancamento::create(['descricao' => 'A', 'valor' => 1, 'data' => '2026-10-01', 'status' => 'pendente', 'tenant_id' => 2]);
+        $this->freezeTime();
+
+        $casos = [
+            [['id' => $pendente->id, 'novo_status' => 'pendente'], 'novo_status', "O lançamento #{$pendente->id} já está pendente."],
+            [['id' => 999, 'novo_status' => 'conciliado'], 'id', 'Não encontrei o lançamento #999.'],
+            [['id' => $alheio->id, 'novo_status' => 'conciliado'], 'id', "Não encontrei o lançamento #{$alheio->id}."],
+        ];
+        foreach ($casos as [$argumentos, $campo, $frase]) {
+            $proposta = $this->comando('atualizar_status_lancamento', $argumentos)->assertOk()->json('proposta');
+
+            $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []])
+                ->assertStatus(422)
+                ->assertJsonPath('mensagem', $frase)
+                ->assertJsonPath("erros.{$campo}", $frase)
+                ->assertJsonMissingPath('token');
+        }
+
+        // Defesa no segurar continua: mudou entre o Revisar e a confirmação, a execução recusa.
+        $proposta = $this->comando('atualizar_status_lancamento', ['id' => $pendente->id, 'novo_status' => 'conciliado'])->json('proposta');
+        $token = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []])->assertOk()->json('token');
+        $pendente->update(['status' => 'conciliado']);
+        $this->confirmar($token)->assertStatus(422)->assertJsonPath('mensagem', "O lançamento #{$pendente->id} já está conciliado.");
+
+        $this->assertSame('pendente', $alheio->fresh()->status);
+    }
+
     public function test_tela_tem_o_botao_editar_nas_linhas(): void
     {
         // Só confere o que a tela entrega; o clique no navegador fica para o teste manual.

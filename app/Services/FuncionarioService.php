@@ -12,6 +12,12 @@ class FuncionarioService
 {
     use ExclusaoSegura, FiltroPorNome;
 
+    /** Lixeira (RF08/RF12): relações cujos registros impedem excluir — e, contando lixeira e arquivados, excluir de vez. */
+    private const DEPENDENTES = ['lancamentos'];
+
+    /** Relações que precisam estar ativas para o registro voltar da lixeira (pai na lixeira: recusa, dizendo qual). */
+    private const PAIS = [];
+
     public function criar(array $dados): Funcionario
     {
         return Funcionario::create([
@@ -27,11 +33,13 @@ class FuncionarioService
 
     /**
      * Atualizar pelo agente: acha o registro por id ou por parte do nome, só no
-     * tenant e fora da lixeira (SoftDeletes). Até 6, para o agente saber se ficou ambíguo.
+     * tenant; por padrão fora da lixeira (SoftDeletes), e a lixeira do agente (Bloco 4) pede
+     * 'lixeira' ou 'arquivado'. Até 6, para o agente saber se ficou ambíguo.
      */
-    public function localizar(?int $id, ?string $busca, int $tenantId): Collection
+    public function localizar(?int $id, ?string $busca, int $tenantId, string $situacao = 'ativo'): Collection
     {
         return Funcionario::query()
+            ->naSituacao($situacao)
             ->where('tenant_id', $tenantId)
             ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $this->nomeContem($query, (string) $busca))
             ->limit(6)
@@ -68,7 +76,7 @@ class FuncionarioService
     {
         $funcionario = Funcionario::where('tenant_id', $tenantId)->findOrFail($id);
 
-        return $this->excluirComBloqueio($funcionario, ['lancamentos']);
+        return $this->excluirComBloqueio($funcionario, self::DEPENDENTES);
     }
 
     /**
@@ -79,5 +87,17 @@ class FuncionarioService
         $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
 
         return $this->restaurar($funcionario, $reautenticadoComoAdmin);
+    }
+
+    /**
+     * RF12: exclusão física manual, só de registro arquivado e com a senha de um admin.
+     *
+     * @return array{excluido: bool, motivo?: string}
+     */
+    public function excluirDefinitivo(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    {
+        $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+
+        return $this->excluirDeVez($funcionario, $reautenticadoComoAdmin);
     }
 }

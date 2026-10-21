@@ -76,6 +76,12 @@
         }
         .card-expirado-texto { margin-top: 0.75rem; }
         .card-campos { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 0.75rem; }
+        /* Bloco 4: o registro que a ação vai mover (só leitura) e a autorização do admin, separada do formulário. */
+        .card-registro { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0; }
+        .card-registro dt { font-weight: 500; }
+        .card-registro dd { margin: 0; overflow-wrap: anywhere; }
+        .card-autorizacao { border: 1px solid var(--color-borda-campo); border-radius: 6px; margin: 0; padding: 0.75rem; min-width: 0; display: grid; gap: 0.75rem; }
+        .card-autorizacao legend { font-weight: 600; padding: 0 0.25rem; }
         .card-etapa { margin: 0.75rem 0 0; color: var(--color-tinta-2); }
         .acoes { flex-wrap: wrap; }
 
@@ -231,12 +237,14 @@
 
         // As colunas vêm do servidor (catálogo de tools); textContent evita XSS com dados gravados no banco.
         // "editar" (RF02): nome da tool de atualizar; cada linha ganha um botão que abre o formulário sem IA.
+        // Linha com "acao" própria (Bloco 4, lixeira): {tool, rotulo} só daquela linha, já filtrada pelo papel no servidor.
         function adicionarTabela(linhas, colunasServidor, editar) {
             if (!linhas.length) {
                 adicionarMensagem('Nenhum registro encontrado.', 'msg--agente');
                 return;
             }
             const colunas = colunasServidor && colunasServidor.length ? colunasServidor : ['id', 'descricao', 'valor', 'status', 'data'];
+            const temAcao = editar || linhas.some((l) => l.acao && l.acao.tool);
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const trCabecalho = document.createElement('tr');
@@ -245,7 +253,7 @@
                 th.textContent = c;
                 trCabecalho.appendChild(th);
             });
-            if (editar) {
+            if (temAcao) {
                 const th = document.createElement('th');
                 th.textContent = 'Ação';
                 trCabecalho.appendChild(th);
@@ -259,15 +267,23 @@
                     td.textContent = l[c] ?? '';
                     tr.appendChild(td);
                 });
-                if (editar) {
+                if (temAcao) {
                     const td = document.createElement('td');
                     const botao = document.createElement('button');
                     botao.type = 'button';
                     botao.className = 'btn-editar-linha';
-                    botao.textContent = 'Editar';
-                    botao.setAttribute('aria-label', 'Editar o registro ' + l.id);
-                    botao.addEventListener('click', () => abrirFormulario(editar, l.id, botao));
-                    td.appendChild(botao);
+                    if (l.acao && l.acao.tool) {
+                        const acao = l.acao;
+                        botao.textContent = acao.rotulo;
+                        botao.setAttribute('aria-label', acao.rotulo + ' o registro ' + l.id);
+                        botao.addEventListener('click', () => abrirFormulario(acao.tool, l.id, botao));
+                        td.appendChild(botao);
+                    } else if (editar) {
+                        botao.textContent = 'Editar';
+                        botao.setAttribute('aria-label', 'Editar o registro ' + l.id);
+                        botao.addEventListener('click', () => abrirFormulario(editar, l.id, botao));
+                        td.appendChild(botao);
+                    }
                     tr.appendChild(td);
                 }
                 tbody.appendChild(tr);
@@ -516,7 +532,23 @@
             card.innerHTML = `
                 <strong class="card-titulo">Confirmação necessária: <span class="card-acao"></span></strong>
                 <div class="msg msg--erro card-resumo-erro" role="alert" hidden>Confira os campos destacados. Nada foi gravado.</div>
-                <form class="card-form" novalidate><fieldset class="card-campos"></fieldset></form>
+                <dl class="card-registro" hidden></dl>
+                <form class="card-form" novalidate>
+                    <fieldset class="card-campos"></fieldset>
+                    <fieldset class="card-autorizacao" hidden>
+                        <legend>Autorização de um administrador</legend>
+                        <p class="campo-info">Um administrador digita o e-mail e a senha dele aqui. A senha só vai junto com a confirmação e não fica guardada.</p>
+                        <div class="campo">
+                            <label class="rotulo-admin-email">E-mail do administrador</label>
+                            <input type="email" class="admin-email" autocomplete="off" maxlength="255">
+                        </div>
+                        <div class="campo">
+                            <label class="rotulo-admin-senha">Senha do administrador</label>
+                            <input type="password" class="admin-senha" autocomplete="new-password" maxlength="255">
+                        </div>
+                        <p class="campo-erro admin-erro" role="alert" hidden></p>
+                    </fieldset>
+                </form>
                 <p class="card-etapa" role="status"></p>
                 <div class="acoes">
                     <button type="button" class="btn-revisar">Revisar</button>
@@ -532,6 +564,19 @@
 
             const form = card.querySelector('.card-form');
             const campos = card.querySelector('.card-campos');
+            const registro = card.querySelector('.card-registro');
+            // Bloco 4: e-mail e senha do admin ficam FORA dos campos do formulário — não vão no Revisar,
+            // só no corpo do /agente/confirmar (e a senha é apagada daqui assim que sai).
+            const autorizacao = card.querySelector('.card-autorizacao');
+            const adminEmail = card.querySelector('.admin-email');
+            const adminSenha = card.querySelector('.admin-senha');
+            const adminErro = card.querySelector('.admin-erro');
+            adminEmail.id = prefixo + '-admin-email';
+            adminSenha.id = prefixo + '-admin-senha';
+            adminErro.id = prefixo + '-admin-erro';
+            card.querySelector('.rotulo-admin-email').htmlFor = adminEmail.id;
+            card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
+            autorizacao.hidden = !formulario.reautenticar;
             const resumoErro = card.querySelector('.card-resumo-erro');
             const etapa = card.querySelector('.card-etapa');
             const btnRevisar = card.querySelector('.btn-revisar');
@@ -549,12 +594,27 @@
                 formulario = novo;
                 campos.replaceChildren(...formulario.campos.map((campo) => montarCampo(campo, prefixo)));
                 aplicarCondicoes(form, formulario.campos);
-                resumoErro.hidden = !formulario.campos.some((campo) => campo.erro);
+                // Lixeira (Bloco 4): o registro que vai sair ou voltar, só para conferir.
+                const linhasRegistro = [];
+                (formulario.resumo || []).forEach((item) => {
+                    const dt = document.createElement('dt');
+                    dt.textContent = item.rotulo;
+                    const dd = document.createElement('dd');
+                    dd.textContent = item.valor === null || item.valor === undefined || item.valor === '' ? '—' : String(item.valor);
+                    linhasRegistro.push(dt, dd);
+                });
+                registro.replaceChildren(...linhasRegistro);
+                registro.hidden = !linhasRegistro.length;
+                // Recusa que não é de um campo (ex.: "existem lançamentos vinculados"): vai no topo, com a frase do servidor.
+                resumoErro.textContent = formulario.erro ? formulario.erro + ' Nada foi gravado.' : 'Confira os campos destacados. Nada foi gravado.';
+                resumoErro.hidden = !formulario.erro && !formulario.campos.some((campo) => campo.erro);
                 const primeiroComErro = form.querySelector('[aria-invalid="true"]');
                 if (primeiroComErro) primeiroComErro.focus();
             }
             preencherFormulario(formulario);
-            etapa.textContent = 'Confira os dados e clique em Revisar.';
+            etapa.textContent = formulario.reautenticar
+                ? 'Confira os dados, peça a um administrador o e-mail e a senha dele e clique em Revisar.'
+                : 'Confira os dados e clique em Revisar.';
             historico.appendChild(card);
 
             const pequeno = document.createElement('span');
@@ -602,6 +662,7 @@
                 pararTimers();
                 clearTimeout(rascunhoTimer);
                 if (rafId) cancelAnimationFrame(rafId);
+                adminSenha.value = '';
                 card.remove();
             }
 
@@ -616,6 +677,8 @@
                 label.textContent = 'Confirmar';
                 btnConfirmar.classList.remove('segurando');
                 campos.disabled = true;
+                autorizacao.disabled = true;
+                adminSenha.value = '';
                 [btnRevisar, btnConfirmar, btnEditar, btnCancelar].forEach((botao) => { botao.disabled = true; });
                 card.classList.add('card--expirado');
                 etapa.textContent = '';
@@ -658,11 +721,13 @@
                 token = novoToken;
                 tokenEmitidoEm = performance.now();
                 campos.disabled = true;
+                autorizacao.disabled = true;
                 resumoErro.hidden = true;
                 btnRevisar.hidden = true;
                 btnConfirmar.hidden = false;
                 btnConfirmar.disabled = false;
-                btnEditar.hidden = false;
+                // Sem campo nem senha para corrigir, "Editar" não teria o que editar.
+                btnEditar.hidden = !formulario.campos.length && !formulario.reautenticar;
                 etapa.textContent = 'Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.';
                 agendarExpiracao();
                 btnConfirmar.focus();
@@ -687,6 +752,7 @@
                 btnRevisar.hidden = false;
                 btnRevisar.disabled = true;
                 campos.disabled = false;
+                autorizacao.disabled = false;
                 aplicarCondicoes(form, formulario.campos);
                 etapa.textContent = 'Confira os dados e clique em Revisar.';
                 const primeiro = form.querySelector('input, select');
@@ -708,6 +774,18 @@
             }
 
             async function revisar() {
+                // A senha só é conferida na confirmação; aqui o card só não deixa seguir com ela em branco.
+                adminErro.hidden = true;
+                adminSenha.removeAttribute('aria-invalid');
+                if (formulario.reautenticar && (adminEmail.value.trim() === '' || adminSenha.value === '')) {
+                    adminErro.textContent = 'Informe o e-mail e a senha de um administrador.';
+                    adminErro.hidden = false;
+                    const vazio = adminEmail.value.trim() === '' ? adminEmail : adminSenha;
+                    vazio.setAttribute('aria-invalid', 'true');
+                    vazio.setAttribute('aria-describedby', adminErro.id);
+                    vazio.focus();
+                    return;
+                }
                 btnRevisar.disabled = true;
                 try {
                     const resp = await fetch('/agente/revisar', {
@@ -798,11 +876,16 @@
                 btnEditar.disabled = true;
                 btnCancelar.disabled = true;
                 try {
-                    // Só o token: os valores confirmados são os revisados, guardados no servidor.
+                    // Só o token: os valores confirmados são os revisados, guardados no servidor. Restaurar e
+                    // excluir de vez levam também o e-mail e a senha do admin, e a senha sai do card na hora.
+                    const corpo = formulario.reautenticar
+                        ? JSON.stringify({ token, email_admin: adminEmail.value, senha_admin: adminSenha.value })
+                        : JSON.stringify({ token });
+                    adminSenha.value = '';
                     const resp = await fetch('/agente/confirmar', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-                        body: JSON.stringify({ token }),
+                        body: corpo,
                     });
                     if (resp.status === 401 || resp.status === 419) {
                         window.location.href = '/login';
@@ -886,7 +969,10 @@
                         503: 'O serviço de IA está indisponível no momento. Tente novamente.',
                         504: 'O serviço de IA demorou demais para responder. Tente novamente.',
                     };
-                    adicionarMensagem(mensagens[resp.status] || 'Não foi possível processar o pedido.', 'msg--erro');
+                    // 422: a frase do servidor diz o que faltou ("Não encontrei o cliente com esse número na lixeira.");
+                    // é texto pensado para o usuário, sem detalhe técnico.
+                    const doServidor = resp.status === 422 && typeof dados.mensagem === 'string' ? dados.mensagem : null;
+                    adicionarMensagem(doServidor || mensagens[resp.status] || 'Não foi possível processar o pedido.', 'msg--erro');
                     return;
                 }
 

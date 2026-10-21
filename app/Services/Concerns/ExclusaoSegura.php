@@ -3,12 +3,16 @@
 namespace App\Services\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 
 /**
  * Mecânica de exclusão segura compartilhada pelos services de domínio
  * (RF08-RF12): bloqueio por dependência ativa, mover pra lixeira (soft
- * delete) e restaurar. O arquivamento por prazo expirado é feito pelo
- * comando ArquivarLixeiraExpirada, não por aqui.
+ * delete), restaurar e excluir de vez um registro arquivado. O arquivamento
+ * por prazo expirado é feito pelo comando ArquivarLixeiraExpirada, não por aqui.
+ *
+ * Quem usa declara DEPENDENTES (relações cujos registros impedem excluir) e PAIS
+ * (relações que precisam estar ativas para o registro voltar da lixeira).
  */
 trait ExclusaoSegura
 {
@@ -18,34 +22,38 @@ trait ExclusaoSegura
         'notasFiscais' => 'notas fiscais vinculadas',
     ];
 
+    /** Como cada "pai" aparece na frase de recusa da restauração. */
+    private const ROTULOS_PAI = [
+        'categoriaLancamento' => 'a categoria',
+        'cliente' => 'o cliente',
+        'fornecedor' => 'o fornecedor',
+        'funcionario' => 'o funcionário',
+        'lancamento' => 'o lançamento',
+    ];
+
     /**
      * @param  string[]  $relacoesQueBloqueiam  Nomes de relações Eloquent cuja
      *                                           existência impede a exclusão.
-     * @return array{bloqueado: bool, motivo?: string}
+     * @return array{bloqueado: bool, motivo?: string, registro?: Model}
      */
     protected function excluirComBloqueio(Model $registro, array $relacoesQueBloqueiam): array
     {
-        foreach ($relacoesQueBloqueiam as $relacao) {
-            if ($registro->{$relacao}()->exists()) {
-                $rotulo = self::ROTULOS_RELACAO[$relacao] ?? "registros em {$relacao}";
+        $motivo = $this->motivoDeBloqueio($registro, $relacoesQueBloqueiam);
 
-                return [
-                    'bloqueado' => true,
-                    'motivo' => "Não é possível excluir: existem {$rotulo} a este registro.",
-                ];
-            }
+        if ($motivo !== null) {
+            return ['bloqueado' => true, 'motivo' => $motivo];
         }
 
         $registro->delete();
 
-        return ['bloqueado' => false];
+        return ['bloqueado' => false, 'registro' => $registro];
     }
 
     /**
      * RF10: $reautenticadoComoAdmin é o resultado de ReautenticacaoAdmin::confirmar()
      * (senha de um admin do mesmo tenant), conferido por quem chama antes de restaurar.
      *
-     * @return array{restaurado: bool, motivo?: string}
+     * @return array{restaurado: bool, motivo?: string, registro?: Model}
      */
     protected function restaurar(Model $registro, bool $reautenticadoComoAdmin): array
     {
@@ -53,12 +61,111 @@ trait ExclusaoSegura
             return ['restaurado' => false, 'motivo' => 'Para restaurar, é preciso a senha de um administrador.'];
         }
 
-        if ($registro->arquivado_em !== null) {
-            return ['restaurado' => false, 'motivo' => 'Registro arquivado não pode ser restaurado por este fluxo.'];
+        $motivo = $this->motivoParaNaoRestaurar($registro);
+
+        if ($motivo !== null) {
+            return ['restaurado' => false, 'motivo' => $motivo];
         }
 
         $registro->restore();
 
-        return ['restaurado' => true];
+        return ['restaurado' => true, 'registro' => $registro];
+    }
+
+    /**
+     * RF12: exclusão física, sempre manual (nenhuma rotina chama isto), só de registro
+     * ARQUIVADO e com a senha de um admin. Dependente em qualquer estado (ativo, na
+     * lixeira ou arquivado) bloqueia: a chave estrangeira (restrictOnDelete) recusaria.
+     *
+     * @return array{excluido: bool, motivo?: string, registro?: Model}
+     */
+    protected function excluirDeVez(Model $registro, bool $reautenticadoComoAdmin): array
+    {
+        if (! $reautenticadoComoAdmin) {
+            return ['excluido' => false, 'motivo' => 'Para excluir de vez, é preciso a senha de um administrador.'];
+        }
+
+        $motivo = $this->motivoParaNaoExcluirDeVez($registro);
+
+        if ($motivo !== null) {
+            return ['excluido' => false, 'motivo' => $motivo];
+        }
+
+        try {
+            $registro->forceDelete();
+        } catch (QueryException) {
+            // Corrida: um dependente apareceu entre a conferência e a exclusão. A FK recusou; nada foi apagado.
+            return ['excluido' => false, 'motivo' => 'Não é possível excluir de vez: há registros vinculados a este.'];
+        }
+
+        return ['excluido' => true, 'registro' => $registro];
+    }
+
+    /** RF08, só leitura: o motivo de não poder ir para a lixeira, ou null. Usado também no /agente/revisar. */
+    public function motivoParaNaoExcluir(Model $registro): ?string
+    {
+        return $this->motivoDeBloqueio($registro, self::DEPENDENTES);
+    }
+
+    /**
+     * Só leitura: o motivo de não poder voltar da lixeira, ou null. Registro arquivado não
+     * volta; "pai" na lixeira ou arquivado também impede (o registro voltaria apontando para
+     * algo excluído), e a frase diz qual é o pai.
+     */
+    public function motivoParaNaoRestaurar(Model $registro): ?string
+    {
+        if ($registro->arquivado_em !== null) {
+            return 'Registro arquivado não pode ser restaurado por este fluxo.';
+        }
+
+        foreach (self::PAIS as $relacao) {
+            $pai = $registro->{$relacao}()->withTrashed()->first();
+
+            if ($pai === null || ! $pai->trashed()) {
+                continue;
+            }
+
+            $rotulo = self::ROTULOS_PAI[$relacao] ?? 'o registro vinculado';
+            $nome = $pai->nome ?? $pai->descricao ?? $pai->numero ?? null;
+            $quem = $rotulo.' #'.$pai->getKey().($nome !== null ? " ({$nome})" : '');
+
+            return $pai->arquivado_em !== null
+                ? "Não é possível restaurar: {$quem} está ".(str_starts_with($rotulo, 'a ') ? 'arquivada' : 'arquivado').'.'
+                : "Não é possível restaurar: {$quem} está na lixeira. Restaure primeiro {$rotulo}.";
+        }
+
+        return null;
+    }
+
+    /** RF12, só leitura: o motivo de não poder excluir de vez, ou null. */
+    public function motivoParaNaoExcluirDeVez(Model $registro): ?string
+    {
+        if (! $registro->trashed() || $registro->arquivado_em === null) {
+            return 'Só dá para excluir de vez um registro arquivado.';
+        }
+
+        foreach (self::DEPENDENTES as $relacao) {
+            if ($registro->{$relacao}()->withTrashed()->exists()) {
+                $rotulo = self::ROTULOS_RELACAO[$relacao] ?? 'registros vinculados';
+
+                return "Não é possível excluir de vez: existem {$rotulo} a este registro, mesmo na lixeira ou arquivados.";
+            }
+        }
+
+        return null;
+    }
+
+    /** @param  string[]  $relacoes */
+    private function motivoDeBloqueio(Model $registro, array $relacoes): ?string
+    {
+        foreach ($relacoes as $relacao) {
+            if ($registro->{$relacao}()->exists()) {
+                $rotulo = self::ROTULOS_RELACAO[$relacao] ?? "registros em {$relacao}";
+
+                return "Não é possível excluir: existem {$rotulo} a este registro.";
+            }
+        }
+
+        return null;
     }
 }
