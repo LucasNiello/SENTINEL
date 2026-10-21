@@ -88,6 +88,16 @@ class AiAgentService
     /** atualizar_status_lancamento não tem Form Request: estas regras desenham o formulário e validam o executor. */
     private const REGRAS_STATUS_LANCAMENTO = ['id' => 'required|numeric|integer|min:1', 'novo_status' => 'required|in:pendente,conciliado'];
 
+    /** Frases que atualizar_status_lancamento já tinha antes das regras do formulário. */
+    private const MENSAGENS_STATUS_LANCAMENTO = [
+        'id.required' => 'Informe qual lançamento deve ser atualizado.',
+        'id.numeric' => 'Informe qual lançamento deve ser atualizado.',
+        'id.integer' => 'Informe qual lançamento deve ser atualizado.',
+        'id.min' => 'Informe qual lançamento deve ser atualizado.',
+        'novo_status.required' => 'Informe o novo status: "pendente" ou "conciliado".',
+        'novo_status.in' => 'Status inválido: use "pendente" ou "conciliado".',
+    ];
+
     /** @var array<string, array<string, mixed>>|null */
     private ?array $catalogo = null;
 
@@ -465,6 +475,45 @@ class AiAgentService
         return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos], fn () => $this->executarTool($tool, $argumentos));
     }
 
+    /**
+     * /agente/revisar (Bloco 2b): a mesma governança da execução — RBAC, tenant do
+     * servidor e as regras da tool — sem gravar nada. Null quando a revisão passa;
+     * senão a resposta de recusa. RBAC negado e falha de validação ficam na
+     * auditoria (com o proposto da IA), como ficavam quando a validação era na confirmação.
+     */
+    public function revisar(string $tool, array $argumentos, array $propostos): ?array
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+
+        if ($definicao === null || $definicao['tipo'] !== 'escrita') {
+            return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
+                'http_status' => 422, 'mensagem' => 'Esta operação não é suportada pelo agente.'];
+        }
+
+        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos], function () use ($tool, $definicao, $argumentos) {
+            if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+                return $this->negar($tool, $definicao, $argumentos);
+            }
+
+            $argumentos['tenant_id'] = $this->contexto->tenantId();
+
+            try {
+                $this->validar($argumentos, $definicao['regras'], $definicao['mensagens']);
+            } catch (ToolRecusadaException $e) {
+                $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'recusado', $e->getMessage(), true);
+
+                return [
+                    'tipo' => 'erro',
+                    'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422,
+                    'mensagem' => $e->getMessage(),
+                    'erros' => $e->erros,
+                ];
+            }
+
+            return null;
+        });
+    }
+
     /** Classe de risco da tool (borda do card); tool fora do catálogo cai na mais severa. */
     public function risco(string $tool): string
     {
@@ -483,7 +532,12 @@ class AiAgentService
             return null;
         }
 
-        return $this->formularios->montar($definicao['titulo'], $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS, $this->contexto->tenantId());
+        // Decisão do Lucas (20/10): só o admin vê o salário no card, formatado em reais, para conferir o
+        // que vai confirmar. Só nesta resposta ao front: log, histórico e auditoria continuam mascarados.
+        $revelados = $this->contexto->papel() === 'admin' ? ['salario'] : [];
+
+        return $this->formularios->montar($definicao['titulo'], $definicao['regras'], $valores, $erros, self::ROTULOS_CAMPOS,
+            $this->contexto->tenantId(), $revelados);
     }
 
     /**
@@ -606,6 +660,7 @@ class AiAgentService
                 mensagemErro: 'Não consegui atualizar o status do lançamento. Tente novamente.',
                 // Sem Form Request próprio: as mesmas regras desenham o formulário e validam no executor.
                 regras: self::REGRAS_STATUS_LANCAMENTO,
+                mensagens: self::MENSAGENS_STATUS_LANCAMENTO,
                 titulo: 'Alterar o status do lançamento',
                 sucesso: 'Status do lançamento atualizado',
             ),
@@ -850,14 +905,7 @@ class AiAgentService
     private function atualizarStatusLancamento(array $argumentos): Lancamento
     {
         // As regras do formulário (RF04) valem aqui também, com as frases que esta tool já tinha.
-        $dados = $this->validar($argumentos, self::REGRAS_STATUS_LANCAMENTO, [
-            'id.required' => 'Informe qual lançamento deve ser atualizado.',
-            'id.numeric' => 'Informe qual lançamento deve ser atualizado.',
-            'id.integer' => 'Informe qual lançamento deve ser atualizado.',
-            'id.min' => 'Informe qual lançamento deve ser atualizado.',
-            'novo_status.required' => 'Informe o novo status: "pendente" ou "conciliado".',
-            'novo_status.in' => 'Status inválido: use "pendente" ou "conciliado".',
-        ]);
+        $dados = $this->validar($argumentos, self::REGRAS_STATUS_LANCAMENTO, self::MENSAGENS_STATUS_LANCAMENTO);
 
         $resultado = $this->lancamentoService->atualizarStatus(
             (int) $dados['id'],
@@ -913,6 +961,7 @@ class AiAgentService
             regras: $regras,
             titulo: $titulo,
             sucesso: $sucesso,
+            mensagens: $mensagens,
         );
     }
 
@@ -940,6 +989,7 @@ class AiAgentService
         array $regras = [],
         string $titulo = '',
         string $sucesso = '',
+        array $mensagens = [],
     ): array {
         // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
         // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
@@ -963,6 +1013,7 @@ class AiAgentService
             'regras' => $regras,
             'titulo' => $titulo,
             'sucesso' => $sucesso,
+            'mensagens' => $mensagens, // escrita: frases de validação desta tool (executor e /agente/revisar)
             'definicao' => [
                 'type' => 'function',
                 'function' => [

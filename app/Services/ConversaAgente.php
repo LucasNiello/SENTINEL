@@ -73,6 +73,10 @@ class ConversaAgente
         }
         $texto = preg_replace('/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/', '[documento omitido]', $texto);
         $texto = preg_replace('/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/', '[documento omitido]', $texto);
+        // Salário: o valor logo depois de "salário" ou "remuneração", até 30 caracteres adiante, com ou sem R$
+        // (aprovado pelo Lucas em 20/10). Limites conhecidos: "ganha 4500" (sem a palavra) e o segundo número de
+        // "entre 4000 e 5000" passam. "Vencimento" ficou de fora: num app financeiro é data de vencimento.
+        $texto = preg_replace('/\b(sal[aá]rios?|remunera[cç](?:[aã]o|[oõ]es))\b(\D{0,30}?)(?:R\$\s*)?\d(?:[\d.,]*\d)?/iu', '$1$2[valor omitido]', $texto);
         return mb_substr($texto, 0, 1000);
     }
 }

@@ -26,7 +26,9 @@ Route::middleware('auth')->group(function () {
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
         Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
+        Route::post('/agente/revisar', [AgenteController::class, 'revisar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/cancelar', [AgenteController::class, 'cancelar'])->middleware('throttle:agente-sem-ia');
+        Route::post('/agente/editar', [AgenteController::class, 'editar'])->middleware('throttle:agente-sem-ia');
     });
 });
 

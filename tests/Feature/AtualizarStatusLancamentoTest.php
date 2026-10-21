@@ -47,7 +47,7 @@ class AtualizarStatusLancamentoTest extends TestCase
             ->assertJsonPath('tipo', 'confirmacao_pendente')
             ->assertJsonPath('tool', 'atualizar_status_lancamento')
             ->assertJsonPath('argumentos.novo_status', 'conciliado')
-            ->assertJsonStructure(['token']);
+            ->assertJsonStructure(['proposta']);
 
         $this->assertSame('pendente', $lancamento->fresh()->status);
         $this->assertSame(0, AuditLog::count());

@@ -80,11 +80,24 @@ class AgenteTest extends TestCase
         $this->freezeTime();
         Http::fake(['*' => Http::response($this->respostaComTool('criar_lancamento', $argumentos))]);
 
-        return (string) $this->postJson('/agente/comando', ['mensagem' => 'crie um lançamento'])
+        $proposta = (string) $this->postJson('/agente/comando', ['mensagem' => 'crie um lançamento'])
             ->assertOk()
             ->assertJsonPath('tipo', 'confirmacao_pendente')
-            ->assertJsonStructure(['token'])
-            ->json('token');
+            ->assertJsonStructure(['proposta'])
+            ->json('proposta');
+
+        // Bloco 2b: o token de segurar sai do Revisar. Revisão recusada (dado inválido) devolve a
+        // proposta, e confirmar com ela é recusado — como confirmar dado inválido era antes.
+        $revisao = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []]);
+
+        if ($revisao->status() === 200) {
+            return (string) $revisao->json('token');
+        }
+
+        // A recusa tem que ser a do dado inválido (tratada, com frase), não outra qualquer.
+        $revisao->assertStatus(422)->assertJsonPath('tipo', 'erro')->assertJsonPath('codigo', 'AI_TOOL_REFUSED');
+
+        return $proposta;
     }
 
     public function test_confirmar_grava_o_lancamento_como_pendente(): void
@@ -269,7 +282,7 @@ class AgenteTest extends TestCase
             ->assertOk()
             ->assertJsonPath('tipo', 'confirmacao_pendente')
             ->assertJsonPath('tool', 'criar_lancamento')
-            ->assertJsonStructure(['token'])
+            ->assertJsonStructure(['proposta'])
             ->assertJsonPath('aviso', 'Havia 2 pedidos nesta mensagem e só o primeiro foi atendido. Peça os outros em seguida, um de cada vez.');
 
         $this->assertSame(0, Lancamento::count());

@@ -28,16 +28,22 @@ class FormularioTool
      * @param  array<string, mixed>  $valores  valores atuais (proposta da IA ou o que o humano editou)
      * @param  array<string, string>  $erros  primeira frase de erro por campo
      * @param  array<string, string>  $rotulos  como cada campo aparece nas frases ("o e-mail")
+     * @param  string[]  $revelados  campos sensíveis de dinheiro que este usuário pode ver, formatados em reais
      * @return array{titulo: string, campos: array<int, array<string, mixed>>}
      */
-    public function montar(string $titulo, array $regras, array $valores, array $erros, array $rotulos, int $tenantId): array
+    public function montar(string $titulo, array $regras, array $valores, array $erros, array $rotulos, int $tenantId, array $revelados = []): array
     {
         $campos = [];
 
         foreach (self::campos($regras) as $nome => $partes) {
             $valor = $valores[$nome] ?? null;
             $sensivel = in_array($nome, AuditoriaService::camposSensiveis(), true);
-            $mascara = $sensivel ? AuditoriaService::mascararCamposSensiveis([$nome => $valor])[$nome] : null;
+            $mascara = match (true) {
+                ! $sensivel => null,
+                // Dinheiro que este usuário pode conferir: em reais, só nesta resposta ao front.
+                in_array($nome, $revelados, true) && is_numeric($valor) => 'R$ '.number_format((float) $valor, 2, ',', '.'),
+                default => AuditoriaService::mascararCamposSensiveis([$nome => $valor])[$nome],
+            };
             $condicoes = self::condicoes($partes);
             $obrigatorio = in_array('required', $partes, true);
             $max = self::parametros($partes, 'max')[0] ?? null;
@@ -85,7 +91,7 @@ class FormularioTool
                 $campo['opcoes'] = $this->referencias($vinculo[0], $vinculo[1] ?? 'id', $tenantId, $valor);
 
                 // O vínculo proposto não existe neste tenant (ou está na lixeira): o campo avisa, em vez de sumir calado.
-                if (! blank($valor) && ! in_array((string) $valor, array_map(fn (array $opcao) => (string) $opcao['valor'], $campo['opcoes']), true)) {
+                if (is_scalar($valor) && ! blank($valor) && ! in_array((string) $valor, array_map(fn (array $opcao) => (string) $opcao['valor'], $campo['opcoes']), true)) {
                     $campo['erro'] ??= 'Não encontrei '.($rotulos[$nome] ?? $nome).' informado.';
                 }
             }
@@ -184,7 +190,10 @@ class FormularioTool
     private static function condicaoAtiva(array $condicoes, string $efeito, array $valores): bool
     {
         foreach ($condicoes as $condicao) {
-            if ($condicao['efeito'] === $efeito && (string) ($valores[$condicao['campo']] ?? '') === $condicao['valor']) {
+            $controle = $valores[$condicao['campo']] ?? '';
+
+            // Valor que não é texto (array forjado) nunca ativa condição: sem "Array to string" (B4).
+            if ($condicao['efeito'] === $efeito && is_scalar($controle) && (string) $controle === $condicao['valor']) {
                 return true;
             }
         }

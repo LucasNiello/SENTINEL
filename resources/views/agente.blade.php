@@ -121,8 +121,14 @@
             margin-top: 0.75rem;
         }
         .card-expirado-texto { margin-top: 0.75rem; }
+        .card-campos { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 0.75rem; }
+        .card-etapa { margin: 0.75rem 0 0; color: var(--color-tinta-2); }
+        .acoes { flex-wrap: wrap; }
+        [hidden] { display: none !important; }
 
-        /* Confirmar (segurar) e Cancelar (clique): mesmo formato e peso; Cancelar é neutro (seção 6). */
+        /* Revisar, Confirmar (segurar), Editar e Cancelar: mesmo formato e peso; Editar e Cancelar são neutros (seção 6). */
+        .btn-revisar,
+        .btn-editar,
         .btn-confirmar,
         .btn-cancelar {
             min-height: 44px;
@@ -161,9 +167,15 @@
         .btn-confirmar__label .pequeno { font-family: var(--fonte-mono); font-size: 12px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; }
         .btn-confirmar__label .grande { font-family: var(--fonte-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
 
+        .btn-editar,
         .btn-cancelar {
             border-color: var(--color-tinta-2);
             color: var(--color-tinta);
+        }
+        /* Revisar só valida (não grava): destaque da bancada, não a cor do risco. */
+        .btn-revisar {
+            border-color: var(--color-aco);
+            color: var(--color-aco);
         }
 
         /* Popup de resultado. Sem fade (bancada não anima); o de erro fica até o usuário fechar (seção 7). */
@@ -242,6 +254,8 @@
         const DURACAO_IDLE_MS = 10000;
         // Até 12 s o servidor ainda aceita a confirmação (VALIDADE_MAXIMA_S); só depois disso encerrar é "expirado".
         const VALIDADE_SERVIDOR_MS = 12000;
+        // Prazo do rascunho (formulário em edição), contado desde a proposta (PRAZO_RASCUNHO_S no servidor).
+        const PRAZO_RASCUNHO_MS = 300000;
         // Segurar só começa se ainda couber o hold (2 s) + margem antes do fim da janela: o servidor aceita até 12 s.
         const MINIMO_PARA_SEGURAR_MS = 2500;
         const RISCOS = ['leitura', 'escrita', 'exclusao'];
@@ -340,10 +354,11 @@
             }
         });
 
-        // Cancelar e fim da janela: o servidor tira a proposta da sessão e audita o desfecho. Se foi
+        // Cancelar e fim de prazo: o servidor tira a proposta da sessão e audita o desfecho. Se foi
         // cancelado ou expirado, quem decide é ele, pelo horário da proposta. Sem rede, a proposta
         // vence na sessão e a varredura do servidor a audita como expirada na requisição seguinte.
-        function encerrarSemGravar(token) {
+        // corpo: { token } na etapa de segurar, { proposta } ainda no formulário.
+        function encerrarSemGravar(corpo) {
             fetch('/agente/cancelar', {
                 method: 'POST',
                 headers: {
@@ -351,7 +366,7 @@
                     'Accept': 'application/json',
                     'X-CSRF-TOKEN': csrfToken,
                 },
-                body: JSON.stringify({ token }),
+                body: JSON.stringify(corpo),
                 keepalive: true,
             }).catch(() => {});
         }
@@ -491,13 +506,16 @@
             return valores;
         }
 
-        // RF04: o card de confirmação É o formulário. Com "substituir", o card volta no mesmo lugar
-        // (erro de validação: frase em cada campo e token novo).
-        function renderizarConfirmacaoPendente(dados, substituir) {
-            const formulario = dados.formulario || { titulo: 'Confirmar a ação', campos: [] };
-            const token = dados.token;
+        // RF04 + Bloco 2b: o card de confirmação É o formulário, em duas etapas.
+        // 1) Rascunho: o humano edita e clica Revisar; o servidor valida sem gravar. Prazo de 5 min desde a proposta.
+        // 2) Revisada: campos travados, sai o token de segurar e correm os prazos de sempre (10 s na tela, 12 s no servidor).
+        //    "Editar" volta à etapa 1 e o token morre; o prazo de 5 min não reinicia.
+        function renderizarConfirmacaoPendente(dados) {
+            let formulario = dados.formulario || { titulo: 'Confirmar a ação', campos: [] };
+            const proposta = dados.proposta;
             const risco = dados.risco;
             const prefixo = 'card-' + (++contadorCards);
+            let token = null;
 
             const card = document.createElement('section');
             // Risco desconhecido cai no mais severo (exclusao), nunca no mais brando.
@@ -505,40 +523,47 @@
             card.setAttribute('aria-label', 'Confirmação necessária: ' + formulario.titulo);
             card.innerHTML = `
                 <strong class="card-titulo">Confirmação necessária: <span class="card-acao"></span></strong>
-                <form class="card-form" novalidate></form>
+                <div class="msg msg--erro card-resumo-erro" role="alert" hidden>Confira os campos destacados. Nada foi gravado.</div>
+                <form class="card-form" novalidate><fieldset class="card-campos"></fieldset></form>
+                <p class="card-etapa" role="status"></p>
                 <div class="acoes">
-                    <button type="button" class="btn-confirmar">
+                    <button type="button" class="btn-revisar">Revisar</button>
+                    <button type="button" class="btn-confirmar" hidden>
                         <span class="btn-confirmar__fill"></span>
                         <span class="btn-confirmar__label">Confirmar</span>
                     </button>
+                    <button type="button" class="btn-editar" hidden>Editar</button>
                     <button type="button" class="btn-cancelar">Cancelar</button>
                 </div>
             `;
             card.querySelector('.card-acao').textContent = formulario.titulo;
 
             const form = card.querySelector('.card-form');
-            formulario.campos.forEach((campo) => form.appendChild(montarCampo(campo, prefixo)));
-            form.addEventListener('submit', (e) => e.preventDefault());
-            form.addEventListener('change', () => aplicarCondicoes(form, formulario.campos));
-            aplicarCondicoes(form, formulario.campos);
-
-            if (formulario.campos.some((campo) => campo.erro)) {
-                const resumo = document.createElement('div');
-                resumo.className = 'msg msg--erro';
-                resumo.setAttribute('role', 'alert');
-                resumo.textContent = 'Confira os campos destacados. Nada foi gravado.';
-                form.before(resumo);
-            }
-
-            if (substituir) substituir.replaceWith(card); else historico.appendChild(card);
-
-            const primeiroComErro = form.querySelector('[aria-invalid="true"]');
-            if (primeiroComErro) primeiroComErro.focus();
-
+            const campos = card.querySelector('.card-campos');
+            const resumoErro = card.querySelector('.card-resumo-erro');
+            const etapa = card.querySelector('.card-etapa');
+            const btnRevisar = card.querySelector('.btn-revisar');
             const btnConfirmar = card.querySelector('.btn-confirmar');
+            const btnEditar = card.querySelector('.btn-editar');
+            const btnCancelar = card.querySelector('.btn-cancelar');
             const fill = card.querySelector('.btn-confirmar__fill');
             const label = card.querySelector('.btn-confirmar__label');
-            const btnCancelar = card.querySelector('.btn-cancelar');
+
+            form.addEventListener('submit', (e) => e.preventDefault());
+            form.addEventListener('change', () => aplicarCondicoes(form, formulario.campos));
+
+            // Campos montados a partir do servidor; com erro de revisão, voltam com a frase de cada campo.
+            function preencherFormulario(novo) {
+                formulario = novo;
+                campos.replaceChildren(...formulario.campos.map((campo) => montarCampo(campo, prefixo)));
+                aplicarCondicoes(form, formulario.campos);
+                resumoErro.hidden = !formulario.campos.some((campo) => campo.erro);
+                const primeiroComErro = form.querySelector('[aria-invalid="true"]');
+                if (primeiroComErro) primeiroComErro.focus();
+            }
+            preencherFormulario(formulario);
+            etapa.textContent = 'Confira os dados e clique em Revisar.';
+            historico.appendChild(card);
 
             const pequeno = document.createElement('span');
             pequeno.className = 'pequeno';
@@ -560,10 +585,13 @@
             let idleTimer = null;
             let quaseEsgotadoTimer = null;
             let avisoTempo = null;
-            const criadoEm = performance.now();
+            let tokenEmitidoEm = 0;
+
+            // Prazo do rascunho: conta desde a proposta e não reinicia no "Editar".
+            const rascunhoTimer = setTimeout(expirarRascunho, PRAZO_RASCUNHO_MS);
 
             function restanteMs() {
-                return DURACAO_IDLE_MS - (performance.now() - criadoEm);
+                return DURACAO_IDLE_MS - (performance.now() - tokenEmitidoEm);
             }
 
             function pararTimers() {
@@ -571,18 +599,45 @@
                 clearTimeout(quaseEsgotadoTimer);
             }
 
-            // Janela ociosa contada desde o card. Segurar pausa os timers (M2); soltar sem completar retoma com o que resta.
+            // Janela ociosa contada desde a revisão. Segurar pausa os timers (M2); soltar sem completar retoma com o que resta.
             function agendarExpiracao() {
                 const restante = restanteMs();
                 idleTimer = setTimeout(expirarCard, Math.max(0, restante));
                 quaseEsgotadoTimer = setTimeout(bloquearPorTempo, Math.max(0, restante - MINIMO_PARA_SEGURAR_MS));
             }
-            agendarExpiracao();
 
             function encerrarCard() {
                 pararTimers();
+                clearTimeout(rascunhoTimer);
                 if (rafId) cancelAnimationFrame(rafId);
                 card.remove();
+            }
+
+            function desativarTudo(texto) {
+                pararTimers();
+                clearTimeout(rascunhoTimer);
+                if (avisoTempo) avisoTempo.remove();
+                avisoSoltou.hidden = true;
+                segurando = false;
+                if (rafId) cancelAnimationFrame(rafId);
+                fill.style.width = '0%';
+                label.textContent = 'Confirmar';
+                btnConfirmar.classList.remove('segurando');
+                campos.disabled = true;
+                [btnRevisar, btnConfirmar, btnEditar, btnCancelar].forEach((botao) => { botao.disabled = true; });
+                card.classList.add('card--expirado');
+                etapa.textContent = '';
+                const aviso = document.createElement('div');
+                aviso.className = 'msg msg--aviso card-expirado-texto';
+                aviso.textContent = texto;
+                card.appendChild(aviso);
+            }
+
+            // Rascunho venceu (5 min): o aviso ao servidor sai logo depois, quando ele já conta como expirado.
+            function expirarRascunho() {
+                desativarTudo('O prazo para revisar terminou. Nada foi gravado. Peça de novo.');
+                setTimeout(() => encerrarSemGravar({ proposta }), 500);
+                anunciar('prazo para revisar terminou, nada foi gravado');
             }
 
             // Menos de 2,5 s na janela: um hold novo terminaria fora do prazo do servidor. Desativa o Confirmar.
@@ -597,30 +652,112 @@
                 anunciar('tempo quase esgotado, peça de novo');
             }
 
-            // Expirou: o card não some calado — fica visível, marcado, com os botões desativados.
+            // Expirou a janela de segurar: o card não some calado — fica visível, marcado, com os botões desativados.
             function expirarCard() {
-                pararTimers();
+                const tokenVencido = token;
+                desativarTudo('Confirmação expirada. Nada foi gravado. Peça de novo.');
                 // O card fecha aos 10 s, mas o aviso ao servidor espera a validade dele passar: antes disso seria lido como cancelamento.
-                setTimeout(() => encerrarSemGravar(token), VALIDADE_SERVIDOR_MS - DURACAO_IDLE_MS + 500);
-                if (avisoTempo) avisoTempo.remove();
-                avisoSoltou.hidden = true;
-                segurando = false;
-                if (rafId) cancelAnimationFrame(rafId);
-                fill.style.width = '0%';
-                label.textContent = 'Confirmar';
-                btnConfirmar.classList.remove('segurando');
-                btnConfirmar.disabled = true;
-                btnCancelar.disabled = true;
-                card.classList.add('card--expirado');
-                const texto = document.createElement('div');
-                texto.className = 'msg msg--aviso card-expirado-texto';
-                texto.textContent = 'Confirmação expirada. Nada foi gravado. Peça de novo.';
-                card.appendChild(texto);
+                setTimeout(() => encerrarSemGravar({ token: tokenVencido }), VALIDADE_SERVIDOR_MS - DURACAO_IDLE_MS + 500);
                 anunciar('confirmação expirada, nada foi gravado');
             }
 
+            // Etapa 2: campos travados, segurar liberado e a janela de 10 s começa.
+            function entrarNoSegurar(novoToken) {
+                token = novoToken;
+                tokenEmitidoEm = performance.now();
+                campos.disabled = true;
+                resumoErro.hidden = true;
+                btnRevisar.hidden = true;
+                btnConfirmar.hidden = false;
+                btnConfirmar.disabled = false;
+                btnEditar.hidden = false;
+                etapa.textContent = 'Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.';
+                agendarExpiracao();
+                btnConfirmar.focus();
+                anunciar('dados conferidos, segure confirmar');
+            }
+
+            // "Editar": o token morre no servidor (sem auditoria) e o card volta à etapa 1. O Revisar só volta
+            // depois da resposta, para um Revisar rápido não disputar a sessão com o Editar.
+            async function voltarAoFormulario() {
+                pararTimers();
+                segurando = false;
+                if (rafId) cancelAnimationFrame(rafId);
+                const tokenAntigo = token;
+                token = null;
+                if (avisoTempo) avisoTempo.remove();
+                avisoSoltou.hidden = true;
+                fill.style.width = '0%';
+                label.textContent = 'Confirmar';
+                btnConfirmar.classList.remove('segurando');
+                btnConfirmar.hidden = true;
+                btnEditar.hidden = true;
+                btnRevisar.hidden = false;
+                btnRevisar.disabled = true;
+                campos.disabled = false;
+                aplicarCondicoes(form, formulario.campos);
+                etapa.textContent = 'Confira os dados e clique em Revisar.';
+                const primeiro = form.querySelector('input, select');
+                if (primeiro) primeiro.focus();
+                const resp = await fetch('/agente/editar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                    body: JSON.stringify({ token: tokenAntigo }),
+                }).catch(() => null);
+                if (!card.isConnected || card.classList.contains('card--expirado')) return;
+                // A proposta acabou no servidor (ex.: cancelada em outra aba ou vencida): o card não volta a valer.
+                if (resp && !resp.ok) {
+                    const dados = await resp.json().catch(() => ({}));
+                    encerrarCard();
+                    popupErro(dados.mensagem);
+                    return;
+                }
+                btnRevisar.disabled = false;
+            }
+
+            async function revisar() {
+                btnRevisar.disabled = true;
+                try {
+                    const resp = await fetch('/agente/revisar', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                        body: JSON.stringify({ proposta, valores: coletarValores(form, formulario.campos) }),
+                    });
+                    if (resp.status === 401 || resp.status === 419) {
+                        window.location.href = '/login';
+                        return;
+                    }
+                    const dados = await resp.json().catch(() => ({}));
+                    // Cancelado ou vencido enquanto a revisão ia e voltava: não mexe mais neste card.
+                    if (!card.isConnected || card.classList.contains('card--expirado')) return;
+                    if (resp.ok && dados.token) {
+                        entrarNoSegurar(dados.token);
+                        return;
+                    }
+                    if (dados.formulario) {
+                        // Erro de validação: o formulário volta com a frase de cada campo; a proposta segue em rascunho.
+                        preencherFormulario(dados.formulario);
+                        btnRevisar.disabled = false;
+                        anunciar('confira os campos destacados, nada foi gravado');
+                        return;
+                    }
+                    // Falha passageira (limite de pedidos, erro do servidor): a proposta segue; dá para revisar de novo.
+                    if (resp.status === 429 || resp.status >= 500) {
+                        btnRevisar.disabled = false;
+                        popupErro(dados.mensagem);
+                        return;
+                    }
+                    // Proposta negada, vencida ou indisponível: o servidor já deu (ou dará) o desfecho; o card sai.
+                    encerrarCard();
+                    popupErro(dados.mensagem);
+                } catch (e) {
+                    if (card.isConnected && !card.classList.contains('card--expirado')) btnRevisar.disabled = false;
+                    popupErro('Não foi possível revisar agora. Tente de novo.');
+                }
+            }
+
             function iniciarHold() {
-                if (segurando || btnConfirmar.disabled) return;
+                if (segurando || btnConfirmar.disabled || btnConfirmar.hidden) return;
                 if (restanteMs() < MINIMO_PARA_SEGURAR_MS) {
                     bloquearPorTempo();
                     return;
@@ -664,30 +801,22 @@
 
             async function confirmarAcao() {
                 pararTimers();
-                // Confirmação a caminho: Cancelar agora disputaria o mesmo token com ela.
+                // Confirmação a caminho: Cancelar ou Editar agora disputariam o mesmo token com ela.
                 btnConfirmar.disabled = true;
+                btnEditar.disabled = true;
                 btnCancelar.disabled = true;
                 try {
+                    // Só o token: os valores confirmados são os revisados, guardados no servidor.
                     const resp = await fetch('/agente/confirmar', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'X-CSRF-TOKEN': csrfToken,
-                        },
-                        body: JSON.stringify({ token, valores: coletarValores(form, formulario.campos) }),
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                        body: JSON.stringify({ token }),
                     });
                     if (resp.status === 401 || resp.status === 419) {
                         window.location.href = '/login';
                         return;
                     }
                     const dados = await resp.json().catch(() => ({}));
-                    if (dados.formulario && dados.token) {
-                        // Erro de validação: o card volta com a frase de cada campo e um token novo.
-                        renderizarConfirmacaoPendente(dados, card);
-                        anunciar('confira os campos destacados, nada foi gravado');
-                        return;
-                    }
                     encerrarCard();
                     if (!resp.ok || dados.tipo === 'erro') {
                         popupErro(dados.mensagem);
@@ -701,6 +830,9 @@
                     popupErro();
                 }
             }
+
+            btnRevisar.addEventListener('click', revisar);
+            btnEditar.addEventListener('click', voltarAoFormulario);
 
             btnConfirmar.addEventListener('mousedown', iniciarHold);
             btnConfirmar.addEventListener('touchstart', iniciarHold);
@@ -720,7 +852,7 @@
             });
 
             btnCancelar.addEventListener('click', () => {
-                encerrarSemGravar(token);
+                encerrarSemGravar(token ? { token } : { proposta });
                 encerrarCard();
                 popupCancelado();
             });

@@ -57,7 +57,7 @@ class AutenticacaoController extends Controller
         // porque a auditoria precisa do usuário), pela mesma regra de horário do /agente/cancelar.
         // A sessão é invalidada logo abaixo (R3).
         foreach ($pendentes->retirarTodas($request->session()) as $pendente) {
-            [$desfecho, $motivo] = $pendentes->decorrido($pendente) > ConfirmacoesPendentes::VALIDADE_MAXIMA_S
+            [$desfecho, $motivo] = $pendentes->expirou($pendente)
                 ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
                 : ['cancelado', 'Encerrada ao sair do sistema. Nada foi gravado.'];
 

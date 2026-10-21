@@ -22,8 +22,9 @@ class AgenteController extends Controller
     /**
      * Recebe o comando em linguagem natural do usuário e delega ao agente.
      *
-     * Quando o agente propõe uma escrita, a proposta fica guardada na sessão
-     * sob um token de uso único (RNF02) — é ele que autoriza o /confirmar.
+     * Quando o agente propõe uma escrita, a proposta fica guardada na sessão como
+     * rascunho (o formulário do card, prazo de 5 min). O token que autoriza o
+     * /confirmar só sai no /revisar (RNF02, Bloco 2b).
      */
     public function processar(Request $request)
     {
@@ -50,7 +51,7 @@ class AgenteController extends Controller
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             // A sessão guarda a proposta crua; o front só vê CPF/salário/documento mascarados (LGPD).
-            $resposta['token'] = $this->pendentes->guardar($request->session(), $resposta['tool'], $resposta['argumentos']);
+            $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos']);
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
         }
 
@@ -62,11 +63,82 @@ class AgenteController extends Controller
     }
 
     /**
+     * Bloco 2b: o humano revisa o formulário e o servidor valida sem gravar (RBAC,
+     * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
+     * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
+     * revisados ficam na sessão e sai o token de segurar — daí correm os prazos de
+     * sempre (2 a 12 s), e o /confirmar só usa estes valores.
+     *
+     * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.
+     */
+    public function revisar(Request $request)
+    {
+        $validador = Validator::make($request->all(), ['proposta' => 'required|string|uuid']);
+        $valores = $request->input('valores', []);
+
+        if (! is_array($valores)) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
+                'http_status' => 422, 'mensagem' => 'Os dados do formulário vieram num formato inválido. Tente de novo.'], 422);
+        }
+
+        $proposta = $validador->fails() ? null : $validador->validated()['proposta'];
+        $rascunho = $proposta === null ? null : $this->pendentes->rascunho($request->session(), $proposta);
+
+        if (! $rascunho) {
+            return $this->propostaIndisponivel();
+        }
+
+        // Rascunho vencido, ou token de segurar dele já vencido (a proposta expirou): a varredura,
+        // que roda depois desta ação, dá o desfecho "expirado". Revisar não ressuscita a proposta.
+        if ($this->pendentes->expirou($rascunho) || $this->pendentes->temTokenVencido($request->session(), $proposta)) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_EXPIRED',
+                'http_status' => 422, 'mensagem' => 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.'], 422);
+        }
+
+        $tool = $rascunho['tool'];
+        $revisados = $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores);
+
+        try {
+            $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho));
+            $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? []);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // Mesmo tratamento do /confirmar: log só com metadados (AI-003), resposta no contrato, nunca 500 cru.
+            $erro = $this->aiAgentService->erroTecnicoTool($e);
+
+            return response()->json($erro, $erro['http_status']);
+        }
+
+        if (($recusa['tipo'] ?? null) === 'negado') {
+            // Sem permissão a proposta não tem mais futuro: a negação (já auditada) é o desfecho dela.
+            $this->pendentes->concluir($proposta);
+            $this->pendentes->encerrar($request->session(), $proposta);
+
+            return response()->json($recusa, 403);
+        }
+
+        if ($recusa !== null) {
+            // O rascunho guarda o que já foi editado: na próxima revisão, sensível em branco mantém o editado.
+            $this->pendentes->atualizarRascunho($request->session(), $proposta, $rascunho, $revisados);
+
+            return response()->json([...$recusa, 'proposta' => $proposta, 'risco' => $this->aiAgentService->risco($tool),
+                'formulario' => $formulario], $recusa['http_status'] ?? 422);
+        }
+
+        return response()->json([
+            'tipo' => 'revisada',
+            'proposta' => $proposta,
+            'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
+            'risco' => $this->aiAgentService->risco($tool),
+        ]);
+    }
+
+    /**
      * Executa uma tool após confirmação humana no front.
      *
-     * Contrato: { "token": "<uuid recebido em confirmacao_pendente>", "valores"?: { campo: valor } }.
-     * A tool vem sempre da sessão, nunca do corpo. "valores" são as edições do formulário do
-     * card (RF04): passam pelo filtro das regras da tool e por RBAC, tenant e validação de novo.
+     * Contrato: { "token": "<uuid recebido no /agente/revisar>" }. Tool e valores vêm
+     * da proposta revisada na sessão, nunca do corpo (nem "valores" reenviados pelo navegador).
      */
     public function confirmar(Request $request)
     {
@@ -77,28 +149,32 @@ class AgenteController extends Controller
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
         }
 
-        $doFormulario = $request->has('valores');
-
-        if ($doFormulario && ! is_array($request->input('valores'))) {
-            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
-                'http_status' => 422, 'mensagem' => 'Os dados do formulário vieram num formato inválido. Tente de novo.'], 422);
-        }
-
         $token = $validador->validated()['token'];
-        $pendente = $this->pendentes->retirar($request->session(), $token); // uso único
+        $pendente = $this->pendentes->retirarRevisada($request->session(), $token); // uso único
 
         if (! $pendente) {
+            // Proposta ainda em rascunho: confirmar sem revisar é recusado, e o rascunho continua.
+            if ($this->pendentes->rascunho($request->session(), $token)) {
+                return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_CONFIRMATION_NOT_REVIEWED',
+                    'http_status' => 422, 'mensagem' => 'Revise a proposta antes de confirmar.'], 422);
+            }
+
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
         }
 
-        if (! $this->pendentes->concluir($token)) {
+        $proposta = ConfirmacoesPendentes::proposta($token, $pendente);
+
+        if (! $this->pendentes->concluir($proposta)) {
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Esta confirmação já foi usada.'], 409);
         }
 
+        // Desfecho da proposta: o rascunho dela também sai da sessão (R3).
+        $this->pendentes->encerrar($request->session(), $proposta);
         $decorrido = $this->pendentes->decorrido($pendente);
 
-        if ($decorrido < ConfirmacoesPendentes::ESPERA_MINIMA_S || $decorrido > ConfirmacoesPendentes::VALIDADE_MAXIMA_S) {
-            [$desfecho, $motivo] = $decorrido > ConfirmacoesPendentes::VALIDADE_MAXIMA_S
+        // Fora do prazo: antes da espera mínima, ou vencido (12 s do token ou os 5 min absolutos do rascunho).
+        if ($decorrido < ConfirmacoesPendentes::ESPERA_MINIMA_S || $this->pendentes->expirou($pendente)) {
+            [$desfecho, $motivo] = $this->pendentes->expirou($pendente)
                 ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
                 : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
             $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo);
@@ -106,27 +182,14 @@ class AgenteController extends Controller
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
 
-        $propostos = ConfirmacoesPendentes::propostos($pendente);
-        $argumentos = $doFormulario
-            ? $this->aiAgentService->aplicarValores($pendente['tool'], $pendente['argumentos'], $request->input('valores'))
-            : $pendente['argumentos'];
-
         try {
-            $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $argumentos, $propostos);
+            $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente));
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
             $resultado = $this->aiAgentService->erroTecnicoTool($e);
-        }
-
-        // RF04: erro de validação no formulário volta o próprio formulário, com a frase de cada campo e
-        // um token NOVO para a mesma tool (o anterior já foi consumido). Sem "valores", segue o contrato antigo.
-        if ($doFormulario && ! empty($resultado['erros'])) {
-            $resultado['token'] = $this->pendentes->guardar($request->session(), $pendente['tool'], $argumentos, $propostos);
-            $resultado['risco'] = $this->aiAgentService->risco($pendente['tool']);
-            $resultado['formulario'] = $this->aiAgentService->formulario($pendente['tool'], $argumentos, $resultado['erros']);
         }
 
         // O agente passa a saber que a escrita aconteceu: só a frase fixa do servidor, sem valores.
@@ -144,32 +207,71 @@ class AgenteController extends Controller
     }
 
     /**
-     * Encerra uma proposta sem gravar: Cancelar no card ou fim da janela da interface.
+     * "Editar" depois do Revisar: o token de segurar morre sem auditoria e o card
+     * volta ao formulário. O rascunho continua, com o prazo de 5 min contado desde a proposta.
      *
-     * Contrato: { "token": "<uuid>" }. Se foi "cancelado" ou "expirado", decide o
-     * servidor pelo horário da proposta, nunca pelo que o front manda, com o mesmo
-     * limite do /confirmar: enquanto a proposta ainda podia ser confirmada (até
-     * VALIDADE_MAXIMA_S), encerrá-la é cancelamento; depois, é expiração. O
-     * desfecho vai para a auditoria e a proposta sai da sessão.
+     * Contrato: { "token": "<uuid recebido no /agente/revisar>" }.
      */
-    public function cancelar(Request $request)
+    public function editar(Request $request)
     {
         $validador = Validator::make($request->all(), ['token' => 'required|string|uuid']);
         $token = $validador->fails() ? null : $validador->validated()['token'];
-        $pendente = $token === null ? null : $this->pendentes->retirar($request->session(), $token);
+        $pendente = $token === null ? null : $request->session()->get("confirmacoes.{$token}");
+
+        // Token já vencido: a proposta expirou. Fica para a varredura (depois desta ação) dar o "expirado";
+        // o Editar não pode apagar esse desfecho nem devolver a proposta ao formulário.
+        if (is_array($pendente) && $this->pendentes->expirou($pendente)) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_EXPIRED',
+                'http_status' => 422, 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.'], 422);
+        }
+
+        $proposta = $token === null ? null : $this->pendentes->invalidarToken($request->session(), $token);
+
+        if ($proposta === null) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_CONFIRMATION_INVALID',
+                'http_status' => 422, 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
+        }
+
+        if (! $this->pendentes->rascunho($request->session(), $proposta)) {
+            return $this->propostaIndisponivel();
+        }
+
+        return response()->json(['tipo' => 'rascunho', 'proposta' => $proposta]);
+    }
+
+    /**
+     * Encerra uma proposta sem gravar: Cancelar no card ou fim de um prazo.
+     *
+     * Contrato: { "token": "<uuid de segurar>" } ou { "proposta": "<uuid do rascunho>" }.
+     * Se foi "cancelado" ou "expirado", decide o servidor pelo horário, nunca pelo que
+     * o front manda, com o mesmo limite das outras rotas: até 12 s depois da revisão
+     * (token) ou até 5 min depois da proposta (rascunho), encerrar é cancelamento;
+     * depois, é expiração. O desfecho vai para a auditoria e a proposta sai da sessão.
+     */
+    public function cancelar(Request $request)
+    {
+        $validador = Validator::make($request->all(), [
+            'token' => 'required_without:proposta|nullable|string|uuid',
+            'proposta' => 'required_without:token|nullable|string|uuid',
+        ]);
+        $chave = $validador->fails() ? null : ($validador->validated()['token'] ?? $validador->validated()['proposta'] ?? null);
+        $pendente = $chave === null ? null : $this->pendentes->retirar($request->session(), $chave);
 
         if (! $pendente) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_CONFIRMATION_INVALID',
                 'http_status' => 422, 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
         }
 
+        $proposta = ConfirmacoesPendentes::proposta($chave, $pendente);
+
         // Mesma marca do /confirmar: se a proposta já foi confirmada por uma requisição concorrente, não há o que cancelar.
-        if (! $this->pendentes->concluir($token)) {
+        if (! $this->pendentes->concluir($proposta)) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_CONFIRMATION_USED',
                 'http_status' => 409, 'mensagem' => 'Esta confirmação já foi usada.'], 409);
         }
 
-        $expirou = $this->pendentes->decorrido($pendente) > ConfirmacoesPendentes::VALIDADE_MAXIMA_S;
+        $this->pendentes->encerrar($request->session(), $proposta);
+        $expirou = $this->pendentes->expirou($pendente);
         [$desfecho, $motivo] = $expirou
             ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
             : ['cancelado', 'Cancelado pelo usuário. Nada foi gravado.'];
@@ -178,5 +280,11 @@ class AgenteController extends Controller
         return response()->json($expirou
             ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
             : ['tipo' => 'cancelado', 'mensagem' => 'Cancelado. Nada foi gravado.']);
+    }
+
+    private function propostaIndisponivel()
+    {
+        return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_UNAVAILABLE',
+            'http_status' => 422, 'mensagem' => 'Esta proposta não está mais disponível. Nada foi gravado. Peça de novo.'], 422);
     }
 }

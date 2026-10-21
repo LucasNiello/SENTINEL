@@ -37,15 +37,33 @@ trait SimulaAgente
         return $this->postJson('/agente/comando', ['mensagem' => 'faça algo']);
     }
 
-    /** Passo 1 de toda escrita: o agente propõe a tool e o servidor devolve o token de confirmação (RNF02). */
+    /** Revisões recusadas (dado inválido, sem permissão): proposta => resposta do /agente/revisar. */
+    private array $revisoesRecusadas = [];
+
+    /**
+     * Passo 1 de toda escrita: o agente propõe a tool (rascunho) e o humano revisa sem
+     * editar (Bloco 2b); devolve o token de segurar (RNF02). Se a revisão for recusada,
+     * devolve a proposta — e o confirmar() abaixo devolve a resposta da revisão, porque
+     * no fluxo do Revisar é ali que o erro de validação aparece (mesma frase, mesma auditoria).
+     */
     private function propor(array $argumentos, string $tool = 'criar_lancamento'): string
     {
         $this->freezeTime();
 
-        return (string) $this->comando($tool, $argumentos)
+        $proposta = (string) $this->comando($tool, $argumentos)
             ->assertOk()
             ->assertJsonPath('tipo', 'confirmacao_pendente')
-            ->json('token');
+            ->json('proposta');
+
+        $revisao = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []]);
+
+        if ($revisao->status() !== 200) {
+            $this->revisoesRecusadas[$proposta] = $revisao;
+
+            return $proposta;
+        }
+
+        return (string) $revisao->json('token');
     }
 
     /** Passo 2: espera o hold (2 s) e confirma com o token. */
@@ -53,6 +71,6 @@ trait SimulaAgente
     {
         $this->travel(2)->seconds();
 
-        return $this->postJson('/agente/confirmar', ['token' => $token]);
+        return $this->revisoesRecusadas[$token] ?? $this->postJson('/agente/confirmar', ['token' => $token]);
     }
 }

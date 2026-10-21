@@ -178,9 +178,11 @@ class AgenteGovernancaTest extends TestCase
     {
         $this->logarComo('admin', 7);
 
-        $token = (string) $this->comando('criar_lancamento', ['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 999])
+        $proposta = (string) $this->comando('criar_lancamento', ['descricao' => 'X', 'valor' => 1, 'data' => '2026-09-21', 'tenant_id' => 999])
             ->assertJsonMissingPath('argumentos.tenant_id')
-            ->json('token');
+            ->json('proposta');
+        // Bloco 2b: o token de segurar sai do Revisar.
+        $token = (string) $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []])->json('token');
 
         $this->confirmar($token)->assertOk();
 
