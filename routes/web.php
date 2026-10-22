@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AgenteController;
+use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
@@ -20,6 +21,11 @@ Route::middleware('auth')->group(function () {
 
     // R3: em toda requisição ao agente, as propostas vencidas são auditadas como "expirado" e saem da sessão.
     Route::middleware(VarrerConfirmacoesVencidas::class)->group(function () {
+        // Etapa A1: consulta da auditoria em JSON (só admin e só o tenant do usuário — conferido no service).
+        // Com teto por usuário: cada tentativa negada também vira uma linha na auditoria.
+        Route::get('/auditoria/registros', [AuditoriaController::class, 'registros'])->middleware('throttle:auditoria');
+        Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
+
         Route::get('/agente', function () {
             return view('agente');
         });

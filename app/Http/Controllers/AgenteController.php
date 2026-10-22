@@ -182,7 +182,8 @@ class AgenteController extends Controller
             [$desfecho, $motivo] = $this->pendentes->expirou($pendente)
                 ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
                 : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
-            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente));
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
+                entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
 
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
@@ -298,7 +299,8 @@ class AgenteController extends Controller
         [$desfecho, $motivo] = $expirou
             ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
             : ['cancelado', 'Cancelado pelo usuário. Nada foi gravado.'];
-        $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente));
+        $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
+            entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
 
         return response()->json($expirou
             ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
@@ -388,7 +390,7 @@ class AgenteController extends Controller
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'negado', $motivo,
             ConfirmacoesPendentes::origem($pendente), permitido: false,
             // Qual registro era o alvo (só o id; o card aberto sem IA não tem "proposto").
-            entidadeId: is_numeric($pendente['argumentos']['id'] ?? null) ? (int) $pendente['argumentos']['id'] : null);
+            entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
 
         return response()->json(['tipo' => 'erro', 'categoria' => $status === 429 ? 'rate_limit' : 'authorization_error',
             'codigo' => $codigo, 'http_status' => $status, 'mensagem' => $mensagem], $status);

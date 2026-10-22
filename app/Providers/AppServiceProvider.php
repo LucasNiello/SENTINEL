@@ -54,6 +54,14 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
+        // Etapa A1: consulta da auditoria, balde próprio (navegar nela não trava o card do agente, e vice-versa).
+        RateLimiter::for('auditoria', function (Request $request) {
+            return Limit::perMinute(60)->by('auditoria:'.$request->user()->id)->response(
+                fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
+                    'http_status' => 429, 'mensagem' => 'Muitos pedidos em pouco tempo. Aguarde um minuto.'], 429, $headers),
+            );
+        });
+
         // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
         // volta à sessão como "valor antigo" num redirecionamento de erro de validação.
         TrimStrings::except(['senha_admin']);

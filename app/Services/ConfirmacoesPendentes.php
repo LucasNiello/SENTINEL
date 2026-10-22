@@ -190,6 +190,17 @@ class ConfirmacoesPendentes
     }
 
     /**
+     * O registro que a proposta ia alterar (atualizar e lixeira): o id que o SERVIDOR resolveu e
+     * guardou nos argumentos. Vai para a auditoria em todo desfecho sem execução; cadastro não tem.
+     */
+    public static function entidadeId(array $pendente): ?int
+    {
+        $id = $pendente['argumentos']['id'] ?? null;
+
+        return is_numeric($id) && (int) $id >= 1 ? (int) $id : null;
+    }
+
+    /**
      * M1: duas requisições simultâneas leem a mesma sessão e as duas "retiram" a
      * mesma pendência. O add é atômico no store (chave única no driver database),
      * então só a primeira dá o desfecho da proposta (confirmar, cancelar ou
