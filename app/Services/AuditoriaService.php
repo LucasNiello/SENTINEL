@@ -64,6 +64,7 @@ class AuditoriaService
         // recebidos no construtor, para valer em qualquer instância deste service.
         $detalhes = app(DetalhesAuditoria::class)->atuais();
         $propostos = $detalhes['parametros_propostos'] ?? null;
+        $anteriores = $detalhes['valores_anteriores'] ?? null;
 
         return AuditLog::create([
             'user_id' => $this->contexto->usuario()->id,
@@ -75,6 +76,7 @@ class AuditoriaService
             'entidade_id' => $entidadeId,
             'parametros' => $parametros,
             'parametros_propostos' => is_array($propostos) ? self::mascararCamposSensiveis($propostos) : null,
+            'valores_anteriores' => is_array($anteriores) ? self::mascararCamposSensiveis($anteriores) : null,
             'tempo_ia_ms' => $detalhes['tempo_ia_ms'] ?? null,
             'resultado' => $resultado,
             'mensagem' => $mensagem === null ? null : Str::limit($mensagem, 250, ''),

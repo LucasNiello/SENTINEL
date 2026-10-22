@@ -62,6 +62,14 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
+        // Etapa A3: exportar tira dados do sistema — teto curto e balde próprio, por usuário.
+        RateLimiter::for('exportar', function (Request $request) {
+            return Limit::perMinute(5)->by('exportar:'.$request->user()->id)->response(
+                fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
+                    'http_status' => 429, 'mensagem' => 'Muitas exportações em pouco tempo. Aguarde um minuto.'], 429, $headers),
+            );
+        });
+
         // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
         // volta à sessão como "valor antigo" num redirecionamento de erro de validação.
         TrimStrings::except(['senha_admin']);

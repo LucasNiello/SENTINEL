@@ -100,6 +100,8 @@ class ConsultaAuditoria
             'autorizado_por' => $log->autorizado_por === null ? null
                 : User::query()->where('tenant_id', $log->tenant_id)->whereKey($log->autorizado_por)->value('name'),
             'proposto' => $desconhecida && $log->parametros_propostos !== null ? AuditoriaService::REDIGIDO : $this->mascarar($log->parametros_propostos),
+            // A2: o "antes" dos campos que a atualização mudou (nulo fora de atualização).
+            'anterior' => $this->mascarar($log->valores_anteriores),
             'confirmado' => $desconhecida ? AuditoriaService::REDIGIDO
                 : $this->mascarar(Arr::except((array) $log->parametros, ['tenant_id'])),
         ];

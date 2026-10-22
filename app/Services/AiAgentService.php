@@ -310,7 +310,15 @@ class AiAgentService
         }
 
         try {
-            return $this->comAviso($this->executarTool($tool, $argumentos), $aviso);
+            $resposta = $this->executarTool($tool, $argumentos);
+
+            // A3 (RF02): tabela de consulta pode ser exportada. Os argumentos voltam para o controller
+            // guardar no servidor; ele tira esta chave antes de responder (o front só recebe um id).
+            if (($resposta['tipo'] ?? null) === 'resultado_leitura' && ($definicao['tipo'] ?? null) === 'leitura' && $definicao['colunas'] !== []) {
+                $resposta['consulta'] = $argumentos;
+            }
+
+            return $this->comAviso($resposta, $aviso);
         } catch (InvalidArgumentException $e) {
             return $this->comAviso([
                 'tipo' => 'erro',
@@ -404,7 +412,14 @@ class AiAgentService
         $definicao = $this->catalogo()[$tool] ?? null;
 
         if ($definicao === null) {
-            $this->auditar($tool, 'desconhecida', null, null, $argumentos, 'negado', 'Tool fora do catálogo.', false);
+            // LGPD: sem esquema, não há como saber qual valor é pessoal (o CPF pode vir em qualquer chave).
+            // Fica só o nome de cada argumento, nunca o valor — e nome com dígito ou fora do formato de
+            // identificador (onde caberia um CPF ou e-mail) também é redigido, assim como o nome da tool.
+            // O proposto (se a confirmação abriu escopo com ele) também não vai: sem esquema, nada de valores.
+            $identificador = fn ($nome, string $redigido) => is_string($nome) && preg_match('/^[a-z_]{1,40}$/D', $nome) === 1 ? $nome : $redigido;
+            $chaves = array_slice(array_map(fn ($chave) => $identificador($chave, '[chave redigida]'), array_keys($argumentos)), 0, 20);
+            $this->detalhesAuditoria->com(['parametros_propostos' => null], fn () => $this->auditar($identificador($tool, '[tool redigida]'), 'desconhecida',
+                null, null, array_fill_keys($chaves, AuditoriaService::REDIGIDO), 'negado', 'Tool fora do catálogo.', false));
 
             throw new InvalidArgumentException("Tool desconhecida: {$tool}");
         }
@@ -428,7 +443,9 @@ class AiAgentService
         $argumentos['tenant_id'] = $this->contexto->tenantId();
 
         try {
-            $resultado = DB::transaction(function () use ($tool, $definicao, $argumentos) {
+            // Escopo próprio: o que o executor anotar (ex.: valores_anteriores) vale só para a auditoria
+            // de sucesso abaixo e some se a execução falhar.
+            $resultado = $this->detalhesAuditoria->com([], fn () => DB::transaction(function () use ($tool, $definicao, $argumentos) {
                 $retorno = $definicao['executar']($argumentos);
 
                 $this->auditar(
@@ -443,7 +460,7 @@ class AiAgentService
                 );
 
                 return $retorno;
-            });
+            }));
         } catch (ToolRecusadaException $e) {
             // Regra de negócio: a mensagem já é uma frase amigável escrita para o usuário.
             $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'recusado', $e->getMessage(), true);
@@ -664,6 +681,61 @@ class AiAgentService
             'origem' => $origem,
             ...($autorizadoPor === null ? [] : ['autorizado_por' => $autorizadoPor]),
         ], fn () => $this->executarTool($tool, $argumentos));
+    }
+
+    /**
+     * Exportar (A3, RF02): reexecuta uma consulta guardada no servidor com as regras de AGORA —
+     * mesma whitelist, RBAC (papel mínimo da tabela), tenant do usuário, colunas e máscara LGPD da
+     * tabela na tela. Nega e audita como qualquer tool; o sucesso fica na auditoria como "exportar".
+     *
+     * @return array{tipo: 'exportacao', colunas: string[], linhas: array<int, array<string, mixed>>}|array<string, mixed>
+     */
+    public function exportar(string $tool, array $argumentos): array
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+
+        if ($definicao === null || $definicao['tipo'] !== 'leitura' || $definicao['colunas'] === []) {
+            return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
+                'http_status' => 422, 'mensagem' => 'Esta tabela não pode ser exportada.'];
+        }
+
+        $definicao['acao'] = 'exportar';
+        unset($argumentos['tenant_id']);
+
+        return $this->detalhesAuditoria->com(['origem' => 'agente'], function () use ($tool, $definicao, $argumentos) {
+            if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+                return $this->negar($tool, $definicao, $argumentos);
+            }
+
+            $argumentos['tenant_id'] = $this->contexto->tenantId();
+
+            try {
+                $linhas = collect(($definicao['executar'])($argumentos))
+                    ->map(function ($linha) use ($definicao) {
+                        $dados = AuditoriaService::mascararCamposSensiveis(Arr::only($linha instanceof Model ? $linha->toArray() : (array) $linha, $definicao['colunas']));
+
+                        return array_map(fn (string $coluna) => $dados[$coluna] ?? null, array_combine($definicao['colunas'], $definicao['colunas']));
+                    })->values()->all();
+
+                // Sem auditoria, sem arquivo: se gravar o registro falhar, a exportação também falha.
+                $this->auditar($tool, 'exportar', $definicao['entidade'], null, $argumentos, 'sucesso',
+                    count($linhas).' linha(s) exportada(s) em CSV.', true);
+            } catch (Throwable $e) {
+                Log::error('AiAgentService: falha ao exportar', [
+                    'tool' => $tool,
+                    'excecao' => $e::class,
+                    'local' => basename($e->getFile()).':'.$e->getLine(),
+                    'correlation_id' => $correlacao = (string) Str::uuid(),
+                    'categoria' => 'tool_error',
+                ]);
+                $this->auditar($tool, 'exportar', $definicao['entidade'], null, $argumentos, 'erro', 'Falha ao exportar.', true);
+
+                return ['tipo' => 'erro', 'categoria' => 'tool_error', 'codigo' => 'AI_TOOL_ERROR', 'correlation_id' => $correlacao,
+                    'http_status' => 500, 'mensagem' => 'Não consegui exportar esta tabela agora. Tente novamente.'];
+            }
+
+            return ['tipo' => 'exportacao', 'colunas' => $definicao['colunas'], 'linhas' => $linhas];
+        });
     }
 
     /**
@@ -1470,7 +1542,6 @@ class AiAgentService
     {
         // As regras do formulário (RF04) valem aqui também, com as frases que esta tool já tinha.
         $dados = $this->validar($argumentos, self::REGRAS_STATUS_LANCAMENTO, self::MENSAGENS_STATUS_LANCAMENTO);
-
         $resultado = $this->lancamentoService->atualizarStatus(
             (int) $dados['id'],
             $dados['novo_status'],
@@ -1480,6 +1551,10 @@ class AiAgentService
         if (! $resultado['atualizado']) {
             throw new ToolRecusadaException($resultado['motivo']);
         }
+
+        // A2: o service só muda o lançamento cujo status conferido era o OUTRO valor, então num sucesso o
+        // "antes" é exatamente esse outro — o mesmo que ele conferiu, sem uma segunda leitura que divergisse.
+        $this->detalhesAuditoria->anotar('valores_anteriores', ['status' => $dados['novo_status'] === 'conciliado' ? 'pendente' : 'conciliado']);
 
         return $resultado['lancamento'];
     }
@@ -1583,7 +1658,11 @@ class AiAgentService
                 }
 
                 try {
-                    return $atualizar($id, $dados, (int) $a['tenant_id']);
+                    $registro = $atualizar($id, $dados, (int) $a['tenant_id']);
+                    // A2: o "antes" só dos campos que mudaram (o update() do model guarda em getPrevious()).
+                    $this->detalhesAuditoria->anotar('valores_anteriores', Arr::except($registro->getPrevious(), ['updated_at']));
+
+                    return $registro;
                 } catch (ModelNotFoundException) {
                     // Apagado, foi para a lixeira ou é de outro tenant: para o usuário, não existe.
                     throw new ToolRecusadaException('Não encontrei '.$rotulo.' #'.$id.'.');
@@ -1745,7 +1824,8 @@ class AiAgentService
         $definicao = $this->catalogo()[$tool] ?? null;
 
         try {
-            $this->detalhesAuditoria->com(['parametros_propostos' => $argumentosPropostos, 'origem' => $origem], fn () => $this->auditar(
+            // Tool que saiu do catálogo com a proposta na sessão: sem esquema, o proposto não é gravado.
+            $this->detalhesAuditoria->com(['parametros_propostos' => $definicao === null ? null : $argumentosPropostos, 'origem' => $origem], fn () => $this->auditar(
                 $tool,
                 $definicao['acao'] ?? 'desconhecida',
                 $definicao['entidade'] ?? null,

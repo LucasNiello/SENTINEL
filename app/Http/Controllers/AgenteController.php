@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Services\AiAgentService;
 use App\Services\AuditoriaService;
 use App\Services\ConfirmacoesPendentes;
+use App\Services\ConsultasExportaveis;
 use App\Services\ConversaAgente;
+use App\Services\PlanilhaCsv;
 use App\Services\ReautenticacaoAdmin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -20,7 +22,46 @@ class AgenteController extends Controller
         private ConversaAgente $conversa,
         private ConfirmacoesPendentes $pendentes,
         private ReautenticacaoAdmin $reautenticacao,
+        private ConsultasExportaveis $exportaveis,
     ) {
+    }
+
+    /**
+     * A3 (RF02): baixa em CSV uma tabela de consulta do agente. O servidor reexecuta a consulta
+     * guardada na sessão (RBAC, tenant e máscara de agora); do corpo só vem o id dela.
+     *
+     * Contrato: { "consulta": "<uuid recebido na resposta da consulta, campo exportar>" }.
+     */
+    public function exportar(Request $request)
+    {
+        $validador = Validator::make($request->all(), ['consulta' => 'required|string|uuid']);
+        $consulta = $validador->fails() ? null : $this->exportaveis->ler($request->session(), $validador->validated()['consulta']);
+
+        if ($consulta === null) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_EXPORT_UNAVAILABLE', 'http_status' => 422,
+                'mensagem' => 'Esta tabela não está mais disponível para exportar. Faça a consulta de novo.'], 422);
+        }
+
+        try {
+            $resultado = $this->aiAgentService->exportar($consulta['tool'], $consulta['argumentos']);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $resultado = $this->aiAgentService->erroTecnicoTool($e);
+        }
+
+        if (($resultado['tipo'] ?? null) !== 'exportacao') {
+            return response()->json($resultado, $resultado['http_status'] ?? (($resultado['tipo'] ?? null) === 'negado' ? 403 : 422));
+        }
+
+        $arquivo = Str::after($consulta['tool'], 'consultar_').'-'.now()->format('Y-m-d-His').'.csv';
+
+        return response(PlanilhaCsv::gerar($resultado['colunas'], $resultado['linhas']), 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="'.$arquivo.'"',
+            'Cache-Control' => 'no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     /**
@@ -52,6 +93,12 @@ class AgenteController extends Controller
             $resposta = $this->aiAgentService->erroTecnicoTool($e);
         }
         $this->conversa->guardar($request->session(), $mensagem, $resposta);
+
+        // A3: a consulta (tool + argumentos) fica na sessão; o front só recebe o id para o Exportar.
+        if (isset($resposta['consulta'])) {
+            $resposta['exportar'] = $this->exportaveis->guardar($request->session(), $resposta['tool'], $resposta['consulta']);
+            unset($resposta['consulta']);
+        }
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             // A sessão guarda a proposta crua; o front só vê CPF/salário/documento mascarados (LGPD).
