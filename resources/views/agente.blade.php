@@ -613,7 +613,7 @@
             }
             preencherFormulario(formulario);
             etapa.textContent = formulario.reautenticar
-                ? 'Confira os dados, peça a um administrador o e-mail e a senha dele e clique em Revisar.'
+                ? 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.'
                 : 'Confira os dados e clique em Revisar.';
             historico.appendChild(card);
 

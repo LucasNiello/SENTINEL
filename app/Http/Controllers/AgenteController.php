@@ -189,9 +189,12 @@ class AgenteController extends Controller
 
         // RF10 (Bloco 4): restaurar e excluir de vez pedem a senha de um admin, digitada no card. Ela só
         // existe nesta requisição: vai direto para a conferência, nunca para a sessão, o log ou a auditoria.
+        // Ordem: primeiro o que não envolve segredo (proposta revisada e no prazo, acima; papel e tenant,
+        // aqui). Sem permissão, a senha nem é conferida nem gasta tentativa: a execução abaixo nega pelo
+        // papel, com a mesma resposta para senha certa ou errada (o card não serve de verificador de senha).
         $autorizadoPor = null;
 
-        if ($this->aiAgentService->exigeReautenticacao($pendente['tool'])) {
+        if ($this->aiAgentService->exigeReautenticacao($pendente['tool']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
             $autorizacao = $this->reautenticar($request);
 
             if (! isset($autorizacao['admin'])) {
@@ -383,7 +386,9 @@ class AgenteController extends Controller
         };
 
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'negado', $motivo,
-            ConfirmacoesPendentes::origem($pendente), permitido: false);
+            ConfirmacoesPendentes::origem($pendente), permitido: false,
+            // Qual registro era o alvo (só o id; o card aberto sem IA não tem "proposto").
+            entidadeId: is_numeric($pendente['argumentos']['id'] ?? null) ? (int) $pendente['argumentos']['id'] : null);
 
         return response()->json(['tipo' => 'erro', 'categoria' => $status === 429 ? 'rate_limit' : 'authorization_error',
             'codigo' => $codigo, 'http_status' => $status, 'mensagem' => $mensagem], $status);

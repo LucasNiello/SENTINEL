@@ -217,6 +217,7 @@ class LixeiraTest extends TestCase
         $this->assertNull(Cliente::find($cliente->id), 'continua na lixeira');
         $log = AuditLog::query()->sole();
         $this->assertSame(['negado', false, null], [$log->resultado, $log->permitido, $log->autorizado_por]);
+        $this->assertSame($cliente->id, $log->entidade_id, 'a auditoria diz qual registro era o alvo');
         $this->assertSame('Senha de administrador não conferiu.', $log->mensagem);
         // A proposta terminou: o mesmo token não serve para tentar de novo.
         $this->confirmarComSenha($token)->assertStatus(422)->assertJsonPath('mensagem', 'Confirmação inválida ou já utilizada.');
@@ -380,21 +381,72 @@ class LixeiraTest extends TestCase
 
         $this->revisar($proposta)
             ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Não é possível excluir de vez: existem lançamentos vinculados a este registro, mesmo na lixeira ou arquivados.');
+            ->assertJsonPath('mensagem', 'Não é possível excluir de vez: existem lançamentos vinculados a este registro, incluindo itens na lixeira ou arquivados.');
 
         $this->assertTrue(DB::table('clientes')->where('id', $cliente->id)->exists());
     }
 
-    public function test_service_nao_exclui_de_vez_sem_senha_nem_o_que_esta_so_na_lixeira(): void
+    public function test_service_so_exclui_de_vez_arquivado_e_autorizado_por_admin_do_tenant(): void
     {
+        $admin = $this->supervisor();
+        $operador = $this->supervisor(1, 'operador@sentinel.local', 'operador');
+        $adminDeOutroTenant = $this->supervisor(2, 'admin.t2@sentinel.local');
         $nota = NotaFiscal::create(['numero' => 'NF-1', 'tipo' => 'entrada', 'valor' => 1, 'data_emissao' => '2026-01-01', 'tenant_id' => 1]);
         $servico = app(\App\Services\NotaFiscalService::class);
         $this->naLixeira($nota);
 
-        $this->assertSame('Só dá para excluir de vez um registro arquivado.', $servico->excluirDefinitivo($nota->id, 1, true)['motivo']);
+        $this->assertSame('Só dá para excluir de vez um registro arquivado.', $servico->excluirDefinitivo($nota->id, 1, $admin->id)['motivo']);
         $nota->arquivar();
-        $this->assertFalse($servico->excluirDefinitivo($nota->id, 1, false)['excluido']);
+        // Não basta quem chama dizer que houve senha: o service confere quem autorizou.
+        foreach ([null, $operador->id, $adminDeOutroTenant->id, 999] as $autorizadoPor) {
+            $this->assertSame('Para excluir de vez, é preciso a senha de um administrador.',
+                $servico->excluirDefinitivo($nota->id, 1, $autorizadoPor)['motivo'], (string) $autorizadoPor);
+        }
         $this->assertTrue(DB::table('notas_fiscais')->where('id', $nota->id)->exists());
+
+        $this->assertTrue($servico->excluirDefinitivo($nota->id, 1, $admin->id)['excluido']);
+        $this->assertFalse(DB::table('notas_fiscais')->where('id', $nota->id)->exists());
+    }
+
+    public function test_excluir_de_vez_e_card_de_outro_tenant_tratam_como_inexistente(): void
+    {
+        $alheio = $this->arquivado($this->cliente('Alheio', tenant: 2));
+        $alheioNaLixeira = $this->naLixeira($this->cliente('Alheio 2', tenant: 2));
+
+        $this->comando('excluir_definitivo_cliente', ['id' => $alheio->id])
+            ->assertStatus(422)
+            ->assertJsonPath('mensagem', 'Não encontrei o cliente com esse número entre os arquivados.');
+        $this->postJson('/agente/formulario', ['tool' => 'excluir_definitivo_cliente', 'id' => $alheio->id])
+            ->assertStatus(422)
+            ->assertJsonMissingPath('formulario');
+        $this->postJson('/agente/formulario', ['tool' => 'restaurar_cliente', 'id' => $alheioNaLixeira->id])
+            ->assertStatus(422)
+            ->assertJsonMissingPath('formulario');
+
+        $this->assertTrue(DB::table('clientes')->where('id', $alheio->id)->exists());
+    }
+
+    public function test_excluir_limpa_marca_de_arquivado_que_sobrou(): void
+    {
+        // Estado que uma corrida antiga com o arquivamento podia deixar: ativo, mas com a marca de arquivado.
+        $cliente = $this->cliente();
+        DB::table('clientes')->where('id', $cliente->id)->update(['arquivado_em' => now()]);
+
+        $this->confirmar($this->propor(['id' => $cliente->id], 'excluir_cliente'))->assertOk();
+
+        $this->assertTrue(Cliente::naLixeira()->whereKey($cliente->id)->exists(), 'vai para a lixeira (restaurável), não direto para arquivado');
+    }
+
+    public function test_arquivamento_nao_marca_registro_restaurado_depois_da_lista(): void
+    {
+        $vencido = $this->naLixeira($this->cliente('Vencido'));
+        DB::table('clientes')->where('id', $vencido->id)->update(['deleted_at' => now()->subDays((int) config('sentinel.retencao_lixeira_dias') + 1)]);
+        // Corrida: alguém restaura o registro logo depois de o comando montar a lista.
+        Cliente::retrieved(fn (Cliente $c) => DB::table('clientes')->where('id', $c->id)->update(['deleted_at' => null]));
+
+        Artisan::call('sentinel:arquivar-expirados');
+
+        $this->assertNull(DB::table('clientes')->where('id', $vencido->id)->value('arquivado_em'));
     }
 
     public function test_exclusao_fisica_nunca_e_automatica(): void

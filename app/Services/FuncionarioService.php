@@ -84,20 +84,21 @@ class FuncionarioService
      */
     public function restaurarDaLixeira(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
     {
-        $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+        $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
 
         return $this->restaurar($funcionario, $reautenticadoComoAdmin);
     }
 
     /**
-     * RF12: exclusão física manual, só de registro arquivado e com a senha de um admin.
+     * RF12: exclusão física manual, só de registro arquivado e autorizada por um admin do tenant
+     * ($autorizadoPor: quem teve a senha conferida).
      *
      * @return array{excluido: bool, motivo?: string}
      */
-    public function excluirDefinitivo(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    public function excluirDefinitivo(int $id, int $tenantId, ?int $autorizadoPor): array
     {
-        $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+        $funcionario = Funcionario::onlyTrashed()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
 
-        return $this->excluirDeVez($funcionario, $reautenticadoComoAdmin);
+        return $this->excluirDeVez($funcionario, $autorizadoPor);
     }
 }

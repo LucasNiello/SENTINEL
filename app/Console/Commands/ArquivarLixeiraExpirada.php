@@ -42,8 +42,13 @@ class ArquivarLixeiraExpirada extends Command
                 ->get();
 
             foreach ($registros as $registro) {
-                $registro->arquivar();
-                $total++;
+                // Condicional no próprio UPDATE: se o registro foi restaurado depois da lista acima,
+                // ele não ganha a marca de arquivado (senão, na próxima exclusão, pularia o prazo da lixeira).
+                $total += $modelo::onlyTrashed()
+                    ->whereKey($registro->getKey())
+                    ->whereNull('arquivado_em')
+                    ->where('deleted_at', '<=', $limite)
+                    ->update(['arquivado_em' => now()]);
             }
         }
 

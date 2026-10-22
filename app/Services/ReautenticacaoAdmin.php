@@ -74,19 +74,26 @@ class ReautenticacaoAdmin
             $porUsuario = "reautenticacao:usuario:{$usuarioId}";
             $porAdmin = "reautenticacao:admin:{$usuarioId}:".hash_hmac('sha256', Str::lower(trim($email)), (string) config('app.key'));
 
-            if (RateLimiter::tooManyAttempts($porUsuario, self::LIMITE_POR_USUARIO)
-                || RateLimiter::tooManyAttempts($porAdmin, self::LIMITE_POR_ADMIN)) {
+            // A tentativa conta ANTES de conferir a senha (incremento atômico no cache): pedidos em
+            // paralelo não passam todos pela conferência antes de o primeiro erro ser contado.
+            $tentativasDoUsuario = RateLimiter::hit($porUsuario, self::JANELA_S);
+            $tentativasNoAdmin = RateLimiter::hit($porAdmin, self::JANELA_S);
+
+            if ($tentativasDoUsuario > self::LIMITE_POR_USUARIO || $tentativasNoAdmin > self::LIMITE_POR_ADMIN) {
+                // Barrada sem conferir senha: não é tentativa errada, então não fica nos contadores.
+                $this->devolverTentativa($porUsuario, $porAdmin);
+
                 return ['falha' => 'limite'];
             }
 
             $admin = strlen($email) <= 255 && strlen($senha) <= 255 ? $this->adminQueConfere(trim($email), $senha) : null;
 
             if ($admin === null) {
-                RateLimiter::hit($porUsuario, self::JANELA_S);
-                RateLimiter::hit($porAdmin, self::JANELA_S);
-
                 return ['falha' => 'invalido'];
             }
+
+            // Acerto não conta: a tentativa volta.
+            $this->devolverTentativa($porUsuario, $porAdmin);
 
             return ['admin' => (int) $admin->id];
         } catch (AuthenticationException $e) {
@@ -99,6 +106,16 @@ class ReautenticacaoAdmin
             ]);
 
             return ['falha' => 'invalido'];
+        }
+    }
+
+    /** Desfaz a tentativa contada; se a janela venceu no meio do pedido, o contador recomeçou e não vai abaixo de zero. */
+    private function devolverTentativa(string ...$chaves): void
+    {
+        foreach ($chaves as $chave) {
+            if (RateLimiter::attempts($chave) > 0) {
+                RateLimiter::decrement($chave, self::JANELA_S);
+            }
         }
     }
 

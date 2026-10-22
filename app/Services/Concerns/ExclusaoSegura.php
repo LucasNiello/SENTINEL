@@ -2,8 +2,11 @@
 
 namespace App\Services\Concerns;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Mecânica de exclusão segura compartilhada pelos services de domínio
@@ -44,6 +47,12 @@ trait ExclusaoSegura
             return ['bloqueado' => true, 'motivo' => $motivo];
         }
 
+        // Uma marca de arquivado que sobrou (ex.: o arquivamento rodou enquanto o registro era restaurado)
+        // faria ele cair direto em "arquivado" e pular o prazo da lixeira (RF09/RF11).
+        if ($registro->arquivado_em !== null) {
+            $registro->forceFill(['arquivado_em' => null])->save(); // o delete() do SoftDeletes só grava deleted_at
+        }
+
         $registro->delete();
 
         return ['bloqueado' => false, 'registro' => $registro];
@@ -51,7 +60,8 @@ trait ExclusaoSegura
 
     /**
      * RF10: $reautenticadoComoAdmin é o resultado de ReautenticacaoAdmin::confirmar()
-     * (senha de um admin do mesmo tenant), conferido por quem chama antes de restaurar.
+     * (senha de um admin do mesmo tenant), conferido por quem chama antes de restaurar. Os services
+     * buscam o registro com lockForUpdate: o arquivamento não o muda entre a conferência e a gravação.
      *
      * @return array{restaurado: bool, motivo?: string, registro?: Model}
      */
@@ -76,12 +86,17 @@ trait ExclusaoSegura
      * RF12: exclusão física, sempre manual (nenhuma rotina chama isto), só de registro
      * ARQUIVADO e com a senha de um admin. Dependente em qualquer estado (ativo, na
      * lixeira ou arquivado) bloqueia: a chave estrangeira (restrictOnDelete) recusaria.
+     * $autorizadoPor: o admin cuja senha foi conferida (ReautenticacaoAdmin); o service confere de novo
+     * que ele é admin do tenant do registro — não basta quem chama dizer "sim".
      *
      * @return array{excluido: bool, motivo?: string, registro?: Model}
      */
-    protected function excluirDeVez(Model $registro, bool $reautenticadoComoAdmin): array
+    protected function excluirDeVez(Model $registro, ?int $autorizadoPor): array
     {
-        if (! $reautenticadoComoAdmin) {
+        $adminDoTenant = $autorizadoPor !== null && User::query()->whereKey($autorizadoPor)
+            ->where('papel', 'admin')->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
+
+        if (! $adminDoTenant) {
             return ['excluido' => false, 'motivo' => 'Para excluir de vez, é preciso a senha de um administrador.'];
         }
 
@@ -93,9 +108,16 @@ trait ExclusaoSegura
 
         try {
             $registro->forceDelete();
-        } catch (QueryException) {
-            // Corrida: um dependente apareceu entre a conferência e a exclusão. A FK recusou; nada foi apagado.
-            return ['excluido' => false, 'motivo' => 'Não é possível excluir de vez: há registros vinculados a este.'];
+        } catch (QueryException $e) {
+            // Em geral, um dependente que apareceu entre a conferência e a exclusão (a FK recusou). Nada foi
+            // apagado. No log, só metadados: a mensagem de uma QueryException traz o SQL com os valores (AI-003).
+            Log::warning('ExclusaoSegura: o banco recusou a exclusão definitiva', [
+                'correlation_id' => (string) Str::uuid(),
+                'codigo' => $e->getCode(),
+                'entidade' => class_basename($registro),
+            ]);
+
+            return ['excluido' => false, 'motivo' => 'Não foi possível excluir de vez agora: pode haver registros vinculados a este. Nada foi apagado.'];
         }
 
         return ['excluido' => true, 'registro' => $registro];
@@ -115,7 +137,7 @@ trait ExclusaoSegura
     public function motivoParaNaoRestaurar(Model $registro): ?string
     {
         if ($registro->arquivado_em !== null) {
-            return 'Registro arquivado não pode ser restaurado por este fluxo.';
+            return 'Este registro já foi arquivado e não pode mais ser restaurado.';
         }
 
         foreach (self::PAIS as $relacao) {
@@ -148,7 +170,7 @@ trait ExclusaoSegura
             if ($registro->{$relacao}()->withTrashed()->exists()) {
                 $rotulo = self::ROTULOS_RELACAO[$relacao] ?? 'registros vinculados';
 
-                return "Não é possível excluir de vez: existem {$rotulo} a este registro, mesmo na lixeira ou arquivados.";
+                return "Não é possível excluir de vez: existem {$rotulo} a este registro, incluindo itens na lixeira ou arquivados.";
             }
         }
 

@@ -513,6 +513,19 @@ class AiAgentService
         return $atualizar !== null && $this->papelAtualPermite($atualizar['papel_minimo']);
     }
 
+    /**
+     * Tudo o que não envolve segredo: a tool existe, o usuário tem tenant e o papel atual chega
+     * no mínimo dela. O /agente/confirmar só confere a senha de admin se isto passar — senão o
+     * card viraria um verificador de senha para quem nem pode executar a ação.
+     */
+    public function podeExecutar(string $tool): bool
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+        $this->contexto->tenantId(); // sem tenant: AuthenticationException (falha fechada), antes de qualquer senha
+
+        return $definicao !== null && $this->papelAtualPermite($definicao['papel_minimo']);
+    }
+
     /** A tool pede a senha de um administrador no card (Bloco 4: restaurar e excluir de vez). */
     public function exigeReautenticacao(string $tool): bool
     {
@@ -1270,7 +1283,7 @@ class AiAgentService
                     "Restaurar {$nome}", Str::ucfirst($nome)." restaurad{$o} da lixeira", 'Restaurar', "restaurad{$o}",
                     "Restaura {$rotulo} que está na lixeira, achado pelo id ou por {$buscaPor}. Exige a senha de um administrador, digitada no card de confirmação (nunca no chat). Ação de escrita — exige confirmação humana antes de ser executada."],
                 ["excluir_definitivo_{$sufixo}", 'exclusao', 'excluir_definitivo', 'admin', 'arquivado', ' entre os arquivados', 'motivoParaNaoExcluirDeVez',
-                    fn (int $id, int $t) => $servico->excluirDefinitivo($id, $t, $this->autorizadoPor() !== null),
+                    fn (int $id, int $t) => $servico->excluirDefinitivo($id, $t, $this->autorizadoPor()),
                     "Excluir de vez: {$nome}", Str::ucfirst($nome)." excluíd{$o} de vez", 'Excluir de vez', "excluíd{$o} de vez",
                     "Exclui de vez, sem volta, {$rotulo} que já foi arquivado (passou do prazo da lixeira), achado pelo id ou por {$buscaPor}. Só administrador; exige a senha de um administrador, digitada no card de confirmação (nunca no chat). Ação de exclusão — exige confirmação humana antes de ser executada."],
             ] as [$tool, $risco, $acao, $papel, $situacao, $onde, $motivo, $operacao, $titulo, $sucesso, $botao, $feito, $descricao]) {
@@ -1727,7 +1740,7 @@ class AiAgentService
      *
      * @param  string  $resultado  'cancelado' | 'expirado' | 'recusado' | 'negado' (senha de admin recusada, com $permitido false)
      */
-    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente', bool $permitido = true): void
+    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente', bool $permitido = true, ?int $entidadeId = null): void
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -1736,7 +1749,7 @@ class AiAgentService
                 $tool,
                 $definicao['acao'] ?? 'desconhecida',
                 $definicao['entidade'] ?? null,
-                null,
+                $entidadeId,
                 [],
                 $resultado,
                 $mensagem,

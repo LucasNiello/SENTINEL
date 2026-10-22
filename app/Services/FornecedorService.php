@@ -82,20 +82,21 @@ class FornecedorService
      */
     public function restaurarDaLixeira(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
     {
-        $fornecedor = Fornecedor::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+        $fornecedor = Fornecedor::onlyTrashed()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
 
         return $this->restaurar($fornecedor, $reautenticadoComoAdmin);
     }
 
     /**
-     * RF12: exclusão física manual, só de registro arquivado e com a senha de um admin.
+     * RF12: exclusão física manual, só de registro arquivado e autorizada por um admin do tenant
+     * ($autorizadoPor: quem teve a senha conferida).
      *
      * @return array{excluido: bool, motivo?: string}
      */
-    public function excluirDefinitivo(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    public function excluirDefinitivo(int $id, int $tenantId, ?int $autorizadoPor): array
     {
-        $fornecedor = Fornecedor::onlyTrashed()->where('tenant_id', $tenantId)->findOrFail($id);
+        $fornecedor = Fornecedor::onlyTrashed()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
 
-        return $this->excluirDeVez($fornecedor, $reautenticadoComoAdmin);
+        return $this->excluirDeVez($fornecedor, $autorizadoPor);
     }
 }
