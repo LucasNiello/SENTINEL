@@ -56,6 +56,8 @@
         const botaoBuscar = document.getElementById('botao-buscar');
         const botaoNovo = document.getElementById('botao-novo');
         const indicadorCarregando = document.getElementById('carregando');
+        // Frase de sucesso da última gravação: volta a aparecer depois que a lista é recarregada.
+        let mensagemDepoisDeRecarregar = '';
 
         function entidadeAtual() {
             return ENTIDADES[seletorEntidade ? seletorEntidade.value : Object.keys(ENTIDADES)[0]];
@@ -128,6 +130,7 @@
                 if (resp.ok && dados.tipo === 'resultado_leitura') {
                     adicionarTabela(dados.resultado || [], dados.colunas, dados.editar, dados.exportar);
                     anunciar((dados.resultado || []).length + ' registro(s) encontrado(s)');
+                    if (mensagemDepoisDeRecarregar) adicionarMensagem(mensagemDepoisDeRecarregar, 'msg--agente');
                 } else {
                     adicionarMensagem(dados.mensagem || 'Não consegui fazer a consulta. Tente de novo.', 'msg--erro');
                 }
@@ -135,8 +138,16 @@
             } catch (err) {
                 adicionarMensagem('Falha ao contatar o servidor.', 'msg--erro');
             } finally {
+                mensagemDepoisDeRecarregar = '';
                 definirCarregando(false);
             }
+        });
+
+        // Lixeira: depois de restaurar ou excluir de vez, a linha sai da lista (sem "não encontrei" no segundo clique).
+        document.addEventListener('sentinel:gravado', (e) => {
+            if (entidadeAtual().consultar !== 'consultar_lixeira') return;
+            mensagemDepoisDeRecarregar = e.detail.mensagem;
+            formConsulta.requestSubmit();
         });
 
         botaoNovo.addEventListener('click', () => abrirFormulario(entidadeAtual().criar, null, botaoNovo));

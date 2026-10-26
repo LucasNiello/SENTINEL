@@ -35,7 +35,7 @@ class TelasTest extends TestCase
         $this->get('/agente')->assertOk()->assertSee('href="/lixeira"', false)->assertSee('href="/auditoria"', false);
     }
 
-    public function test_telas_exigem_login(): void
+    public function teste_telas_exige_login(): void
     {
         foreach (['/cadastros', '/lixeira', '/auditoria'] as $url) {
             $this->get($url)->assertRedirect('/login');
@@ -68,7 +68,9 @@ class TelasTest extends TestCase
         $this->get('/lixeira')->assertForbidden();
 
         $this->logarComo('operador', 1);
-        $entidades = $this->get('/lixeira')->assertOk()->assertSee('<h1>Lixeira</h1>', false)->viewData('entidades');
+        $entidades = $this->get('/lixeira')->assertOk()->assertSee('<h1>Lixeira</h1>', false)
+            ->assertSee("document.addEventListener('sentinel:gravado'", false) // recarrega a lista depois de restaurar
+            ->viewData('entidades');
         $this->assertSame('consultar_lixeira', $entidades['lixeira']['consultar']);
         $this->assertNull($entidades['lixeira']['criar']);
     }

@@ -63,7 +63,7 @@ class AutenticacaoController extends Controller
 
             try {
                 $aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo,
-                    ConfirmacoesPendentes::origem($pendente), entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
+                    ConfirmacoesPendentes::origem($pendente), entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
             } catch (AuthenticationException) {
                 // Usuário sem papel ou tenant: não dá para auditar em nome dele, mas sair nunca pode falhar.
             }

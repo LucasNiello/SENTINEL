@@ -922,6 +922,8 @@
                         // Frase do servidor: o que gravou e o que ficou vazio.
                         if (dados.mensagem) adicionarMensagem(dados.mensagem, 'msg--agente');
                         popupConfirmado();
+                        // Avisa a tela (ex.: a Lixeira recarrega a lista depois de restaurar ou excluir de vez).
+                        document.dispatchEvent(new CustomEvent('sentinel:gravado', { detail: { tool: dados.tool || null, mensagem: dados.mensagem || '' } }));
                     }
                 } catch (e) {
                     encerrarCard();

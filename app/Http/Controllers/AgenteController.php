@@ -102,9 +102,10 @@ class AgenteController extends Controller
 
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             // A sessão guarda a proposta crua; o front só vê CPF/salário/documento mascarados (LGPD).
-            $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null);
+            $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null,
+                tempoIaMs: $resposta['tempo_ia_ms'] ?? null);
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
-            unset($resposta['propostos']);
+            unset($resposta['propostos'], $resposta['tempo_ia_ms']);
         }
 
         return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
@@ -151,7 +152,8 @@ class AgenteController extends Controller
         $revisados = $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores);
 
         try {
-            $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho), ConfirmacoesPendentes::origem($rascunho));
+            $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho), ConfirmacoesPendentes::origem($rascunho),
+                ConfirmacoesPendentes::tempoIa($rascunho));
             $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? []);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
@@ -230,7 +232,7 @@ class AgenteController extends Controller
                 ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
                 : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
             $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
-                entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
+                entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
@@ -254,7 +256,7 @@ class AgenteController extends Controller
 
         try {
             $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
-                ConfirmacoesPendentes::origem($pendente), $autorizadoPor);
+                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente));
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -347,7 +349,7 @@ class AgenteController extends Controller
             ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
             : ['cancelado', 'Cancelado pelo usuário. Nada foi gravado.'];
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
-            entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
+            entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
         return response()->json($expirou
             ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
@@ -474,7 +476,7 @@ class AgenteController extends Controller
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'negado', $motivo,
             ConfirmacoesPendentes::origem($pendente), permitido: false,
             // Qual registro era o alvo (só o id; o card aberto sem IA não tem "proposto").
-            entidadeId: ConfirmacoesPendentes::entidadeId($pendente));
+            entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
         return response()->json(['tipo' => 'erro', 'categoria' => $status === 429 ? 'rate_limit' : 'authorization_error',
             'codigo' => $codigo, 'http_status' => $status, 'mensagem' => $mensagem], $status);

@@ -145,6 +145,10 @@ class AiAgentService
             return $this->falha('provider_configuration_error', 'AI_PROVIDER_UNAVAILABLE', 503);
         }
 
+        // B1 (RNF04): tempo da chamada à IA, do envio até a resposta (ou a falha) do provedor.
+        $inicio = hrtime(true);
+        $decorrido = fn () => (int) round((hrtime(true) - $inicio) / 1e6);
+
         try {
             $resposta = Http::withHeaders(['api-key' => $apiKey])
                 ->timeout(30)
@@ -172,9 +176,22 @@ class AiAgentService
                 || ($e instanceof ConnectionException && preg_match('/^cURL error 28:/', $e->getMessage()) === 1);
 
             return $this->falha($timeout ? 'provider_timeout' : 'provider_connection_error',
-                $timeout ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE', $timeout ? 504 : 503, [], $e);
+                $timeout ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE', $timeout ? 504 : 503, ['tempo_ia_ms' => $decorrido()], $e);
         }
 
+        $tempoIaMs = $decorrido();
+
+        // Tudo o que esta resposta auditar (leitura, negado, tool fora do catálogo) leva o tempo da IA.
+        return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs));
+    }
+
+    /**
+     * O que fazer com a resposta do provedor (continuação do processar(), já com o tempo da IA
+     * no escopo da auditoria). Falha e resposta só de texto não têm linha na auditoria: o tempo
+     * vai só para o log, sem conteúdo.
+     */
+    private function interpretar(\Illuminate\Http\Client\Response $resposta, int $tempoIaMs): array
+    {
         if (! $resposta->successful()) {
             $status = $resposta->status();
             $categoria = match ($status) {
@@ -191,7 +208,7 @@ class AiAgentService
             };
 
             return $this->falha($categoria, $localStatus === 504 ? 'AI_PROVIDER_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE',
-                $localStatus, ['status' => $status]);
+                $localStatus, ['status' => $status, 'tempo_ia_ms' => $tempoIaMs]);
         }
 
         // N1: o corpo da Azure é dado externo. Fora do formato esperado (message que não é objeto, choices
@@ -228,6 +245,9 @@ class AiAgentService
             if ($conteudo !== null && ! is_string($conteudo)) {
                 return $this->respostaForaDoFormato($resposta->status());
             }
+
+            // Só o tempo: nada do texto (pode trazer dado pessoal) vai para o log.
+            Log::info('AiAgentService: resposta em texto', ['tempo_ia_ms' => $tempoIaMs]);
 
             return [
                 'tipo' => 'texto',
@@ -306,6 +326,8 @@ class AiAgentService
                 'argumentos' => $argumentos,
                 'propostos' => $propostosPelaIa,
                 'formulario' => $this->formulario($tool, $argumentos),
+                // Vai com a proposta para a sessão: o desfecho (confirmado, cancelado...) é auditado depois. O controller tira antes de responder.
+                'tempo_ia_ms' => $tempoIaMs,
             ], $aviso);
         }
 
@@ -367,6 +389,11 @@ class AiAgentService
     {
         $correlacao = (string) Str::uuid();
         $contexto = ['correlation_id' => $correlacao, 'categoria' => $categoria, 'provider' => 'azure', ...$metadados];
+        // B1 (RNF04): dentro do interpretar() (resposta truncada, filtrada ou fora do formato) o tempo vem do escopo.
+        $tempoIaMs = $contexto['tempo_ia_ms'] ?? $this->detalhesAuditoria->atuais()['tempo_ia_ms'] ?? null;
+        if ($tempoIaMs !== null) {
+            $contexto['tempo_ia_ms'] = $tempoIaMs;
+        }
         if ($e !== null) {
             $contexto += ['classe' => $e::class, 'codigo' => $e->getCode(), 'arquivo' => basename($e->getFile()), 'linha' => $e->getLine()];
         }
@@ -674,11 +701,12 @@ class AiAgentService
      * $autorizadoPor: o admin cuja senha o /agente/confirmar acabou de conferir (RF10);
      * fica na auditoria ao lado de quem estava logado e libera as tools que pedem senha.
      */
-    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null): array
+    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null, ?int $tempoIaMs = null): array
     {
         return $this->detalhesAuditoria->com([
             'parametros_propostos' => $propostos,
             'origem' => $origem,
+            'tempo_ia_ms' => $tempoIaMs,
             ...($autorizadoPor === null ? [] : ['autorizado_por' => $autorizadoPor]),
         ], fn () => $this->executarTool($tool, $argumentos));
     }
@@ -788,7 +816,7 @@ class AiAgentService
      * senão a resposta de recusa. RBAC negado e falha de validação ficam na
      * auditoria (com o proposto da IA), como ficavam quando a validação era na confirmação.
      */
-    public function revisar(string $tool, array $argumentos, array $propostos, string $origem = 'agente'): ?array
+    public function revisar(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $tempoIaMs = null): ?array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -797,7 +825,7 @@ class AiAgentService
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada pelo agente.'];
         }
 
-        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem], function () use ($tool, $definicao, $argumentos) {
+        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem, 'tempo_ia_ms' => $tempoIaMs], function () use ($tool, $definicao, $argumentos) {
             if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
                 return $this->negar($tool, $definicao, $argumentos);
             }
@@ -1863,13 +1891,13 @@ class AiAgentService
      *
      * @param  string  $resultado  'cancelado' | 'expirado' | 'recusado' | 'negado' (senha de admin recusada, com $permitido false)
      */
-    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente', bool $permitido = true, ?int $entidadeId = null): void
+    public function auditarDesfecho(string $tool, array $argumentosPropostos, string $resultado, string $mensagem, string $origem = 'agente', bool $permitido = true, ?int $entidadeId = null, ?int $tempoIaMs = null): void
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
         try {
             // Tool que saiu do catálogo com a proposta na sessão: sem esquema, o proposto não é gravado.
-            $this->detalhesAuditoria->com(['parametros_propostos' => $definicao === null ? null : $argumentosPropostos, 'origem' => $origem], fn () => $this->auditar(
+            $this->detalhesAuditoria->com(['parametros_propostos' => $definicao === null ? null : $argumentosPropostos, 'origem' => $origem, 'tempo_ia_ms' => $tempoIaMs], fn () => $this->auditar(
                 $tool,
                 $definicao['acao'] ?? 'desconhecida',
                 $definicao['entidade'] ?? null,
