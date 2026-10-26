@@ -353,6 +353,6 @@ class AtualizarTest extends TestCase
             ->assertOk()
             ->assertSee("fetch('/agente/formulario'", false)
             ->assertSee("botao.textContent = 'Editar';", false)
-            ->assertSee('adicionarTabela(dados.resultado || [], dados.colunas, dados.editar);', false);
+            ->assertSee('adicionarTabela(dados.resultado || [], dados.colunas, dados.editar, dados.exportar);', false);
     }
 }

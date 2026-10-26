@@ -29,9 +29,9 @@ class CascaTest extends TestCase
             ->assertSee('<span class="sr-only">Papel: </span>Operador', false)
             ->assertSee('aria-label="Principal"', false)
             ->assertSee('<a href="/agente"  aria-current="page" >Agente</a>', false)
-            ->assertSee('Cadastros <span class="tag">em breve</span>', false)
-            ->assertSee('Lixeira <span class="tag">em breve</span>', false)
-            ->assertDontSee('Auditoria <span class="tag">', false)
+            ->assertSee('<a href="/cadastros" >Cadastros</a>', false)
+            ->assertSee('<a href="/lixeira" >Lixeira</a>', false)
+            ->assertDontSee('href="/auditoria"', false)->assertDontSee('em breve')
             ->assertSee('<form method="POST" action="/logout">', false)
             ->assertSee('Pular para o conteúdo')
             ->assertSee('<main id="conteudo" tabindex="-1">', false);
@@ -44,7 +44,7 @@ class CascaTest extends TestCase
         $this->get('/agente')
             ->assertOk()
             ->assertSee('<span class="sr-only">Papel: </span>Administrador', false)
-            ->assertSee('Auditoria <span class="tag">em breve</span>', false);
+            ->assertSee('<a href="/auditoria" >Auditoria</a>', false);
     }
 
     public function test_campo_de_comando_tem_rotulo_e_campos_tem_contraste_de_borda(): void

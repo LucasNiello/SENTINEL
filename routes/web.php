@@ -3,6 +3,7 @@
 use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
+use App\Http\Controllers\TelasController;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
 
@@ -29,6 +30,11 @@ Route::middleware('auth')->group(function () {
         Route::get('/agente', function () {
             return view('agente');
         });
+
+        // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
+        Route::get('/cadastros', [TelasController::class, 'cadastros']);
+        Route::get('/lixeira', [TelasController::class, 'lixeira']);
+        Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
         Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);

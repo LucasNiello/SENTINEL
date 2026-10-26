@@ -158,10 +158,13 @@
     @if ($usuario)
         <nav class="menu" aria-label="Principal">
             <a href="/agente" @if (request()->is('agente')) aria-current="page" @endif>Agente</a>
-            <span class="em-breve">Cadastros <span class="tag">em breve</span></span>
-            <span class="em-breve">Lixeira <span class="tag">em breve</span></span>
+            <a href="/cadastros" @if (request()->is('cadastros')) aria-current="page" @endif>Cadastros</a>
+            {{-- Só esconde o link; a tela e as rotas JSON conferem o papel no servidor. --}}
+            @if (in_array($papel, ['operador', 'admin'], true))
+                <a href="/lixeira" @if (request()->is('lixeira')) aria-current="page" @endif>Lixeira</a>
+            @endif
             @if ($papel === 'admin')
-                <span class="em-breve">Auditoria <span class="tag">em breve</span></span>
+                <a href="/auditoria" @if (request()->is('auditoria')) aria-current="page" @endif>Auditoria</a>
             @endif
         </nav>
     @endif
