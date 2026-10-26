@@ -36,6 +36,8 @@ Route::middleware('auth')->group(function () {
         Route::post('/agente/cancelar', [AgenteController::class, 'cancelar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/editar', [AgenteController::class, 'editar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/formulario', [AgenteController::class, 'formulario'])->middleware('throttle:agente-sem-ia');
+        // B2 (RF05/RNF05): modo manual, lista e busca sem IA.
+        Route::post('/agente/consultar', [AgenteController::class, 'consultar'])->middleware('throttle:agente-sem-ia');
         // A3 (RF02): CSV de uma tabela de consulta, reexecutada no servidor.
         Route::post('/agente/exportar', [AgenteController::class, 'exportar'])->middleware('throttle:exportar');
     });

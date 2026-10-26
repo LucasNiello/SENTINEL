@@ -25,12 +25,14 @@ class ConsultasExportaveis
     {
     }
 
-    public function guardar(Session $sessao, string $tool, array $argumentos): string
+    /** $origem: por onde a consulta entrou (agente ou manual); a auditoria do Exportar repete. */
+    public function guardar(Session $sessao, string $tool, array $argumentos, string $origem = 'agente'): string
     {
         $id = (string) Str::uuid();
         $consultas = array_slice([...$sessao->get(self::CHAVE, []), $id => [
             'tool' => $tool,
             'argumentos' => $argumentos,
+            'origem' => $origem,
             'usuario' => $this->contexto->usuario()->getKey(),
             'em' => now()->getTimestamp(),
         ]], -self::MAXIMO, preserve_keys: true);

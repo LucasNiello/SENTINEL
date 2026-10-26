@@ -690,7 +690,7 @@ class AiAgentService
      *
      * @return array{tipo: 'exportacao', colunas: string[], linhas: array<int, array<string, mixed>>}|array<string, mixed>
      */
-    public function exportar(string $tool, array $argumentos): array
+    public function exportar(string $tool, array $argumentos, string $origem = 'agente'): array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -702,7 +702,7 @@ class AiAgentService
         $definicao['acao'] = 'exportar';
         unset($argumentos['tenant_id']);
 
-        return $this->detalhesAuditoria->com(['origem' => 'agente'], function () use ($tool, $definicao, $argumentos) {
+        return $this->detalhesAuditoria->com(['origem' => $origem], function () use ($tool, $definicao, $argumentos) {
             if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
                 return $this->negar($tool, $definicao, $argumentos);
             }
@@ -735,6 +735,50 @@ class AiAgentService
             }
 
             return ['tipo' => 'exportacao', 'colunas' => $definicao['colunas'], 'linhas' => $linhas];
+        });
+    }
+
+    /**
+     * Modo manual (B2, RF05/RNF05): a mesma consulta da tool, SEM chamar a IA — para quando a
+     * Azure está fora do ar ou o usuário prefere a tela. Só tool de leitura do catálogo; os
+     * filtros são conferidos contra o esquema da própria tool (nenhuma chave a mais, enum e data
+     * no formato) e a execução é o executarTool de sempre: RBAC, tenant, colunas, máscara LGPD e
+     * auditoria (origem "manual").
+     */
+    public function consultarManual(string $tool, array $filtros): array
+    {
+        $definicao = $this->catalogo()[$tool] ?? null;
+
+        if ($definicao === null || $definicao['tipo'] !== 'leitura' || $definicao['colunas'] === []) {
+            return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
+                'http_status' => 422, 'mensagem' => 'Esta consulta não está disponível.'];
+        }
+
+        $propriedades = $definicao['definicao']['function']['parameters']['properties'];
+        $regras = array_map(fn (array $p) => match (true) {
+            isset($p['enum']) => ['nullable', 'string', Rule::in($p['enum'])],
+            ($p['format'] ?? null) === 'date' => ['nullable', 'date_format:Y-m-d'],
+            $p['type'] === 'integer' => ['nullable', 'integer', 'min:1'],
+            default => ['nullable', 'string', 'max:100'],
+        }, $propriedades);
+        $validador = Validator::make($filtros, $regras);
+
+        if (array_diff(array_keys($filtros), array_keys($propriedades)) !== [] || $validador->fails()) {
+            return ['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
+                'http_status' => 422, 'mensagem' => 'Algum filtro está inválido. Confira e tente de novo.'];
+        }
+
+        $argumentos = array_filter($validador->validated(), fn ($valor) => $valor !== null && $valor !== '');
+
+        return $this->detalhesAuditoria->com(['origem' => 'manual'], function () use ($tool, $argumentos) {
+            $resposta = $this->executarTool($tool, $argumentos);
+
+            // Igual ao agente (A3): o controller guarda a consulta no servidor e o front só recebe o id do Exportar.
+            if (($resposta['tipo'] ?? null) === 'resultado_leitura') {
+                $resposta['consulta'] = $argumentos;
+            }
+
+            return $resposta;
         });
     }
 

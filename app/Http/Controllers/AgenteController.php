@@ -43,7 +43,7 @@ class AgenteController extends Controller
         }
 
         try {
-            $resultado = $this->aiAgentService->exportar($consulta['tool'], $consulta['argumentos']);
+            $resultado = $this->aiAgentService->exportar($consulta['tool'], $consulta['argumentos'], ($consulta['origem'] ?? null) === 'manual' ? 'manual' : 'agente');
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -352,6 +352,43 @@ class AgenteController extends Controller
         return response()->json($expirou
             ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
             : ['tipo' => 'cancelado', 'mensagem' => 'Cancelado. Nada foi gravado.']);
+    }
+
+    /**
+     * B2 (RF05/RNF05): modo manual — lista e busca SEM chamar a IA. O servidor confere a tool
+     * (só leitura do catálogo) e os filtros; RBAC, tenant e máscara são os da tool.
+     *
+     * Contrato: { "tool": "consultar_clientes", "filtros"?: { "nome": "Silva" } }.
+     */
+    public function consultar(Request $request)
+    {
+        $validador = Validator::make($request->all(), ['tool' => 'required|string|max:64', 'filtros' => 'nullable|array|max:5']);
+
+        if ($validador->fails()) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
+                'http_status' => 422, 'mensagem' => 'Não consegui fazer essa consulta. Tente de novo.'], 422);
+        }
+
+        $dados = $validador->validated();
+
+        try {
+            $resposta = $this->aiAgentService->consultarManual($dados['tool'], $dados['filtros'] ?? []);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $resposta = $this->aiAgentService->erroTecnicoTool($e);
+        }
+
+        if (isset($resposta['consulta'])) {
+            $resposta['exportar'] = $this->exportaveis->guardar($request->session(), $resposta['tool'], $resposta['consulta'], 'manual');
+            unset($resposta['consulta']);
+        }
+
+        return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
+            'negado' => 403,
+            'erro' => 422,
+            default => 200,
+        });
     }
 
     /**
