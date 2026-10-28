@@ -29,6 +29,7 @@ $log=Join-Path $root 'storage\logs\sentinel-bootstrap.log'
 $script:stage='Detectando ambiente'
 $secrets=New-Object 'Collections.Generic.List[string]'
 $tmp=$null; $lockHandle=$null; $exitCode=1; $state=@{}
+$avisos=New-Object 'Collections.Generic.List[string]'
 function Write-Utf8($path,$value) { [IO.File]::WriteAllText($path,$value,$utf8) }
 function Protect-Directory($path) {
     $acl=New-Object Security.AccessControl.DirectorySecurity
@@ -46,6 +47,7 @@ function Redact([string]$text) {
 function Log([string]$text) { [IO.File]::AppendAllText($log,('{0:s} [{1}] {2}' -f (Get-Date),$stage,(Redact $text))+"`r`n",$utf8) }
 function Step($name) { $script:stage=$name; Write-Host "`n[...] $name"; Log 'Inicio' }
 function Ok($text) { Write-Host "[OK] $text" -ForegroundColor Green; Log $text }
+function Aviso($text) { Write-Host "[AVISO] $text" -ForegroundColor Yellow; Log $text; $avisos.Add($text) }
 function Run($exe,[string[]]$arguments,[switch]$AllowFailure) {
     if ([IO.Path]::GetFileName($exe) -eq 'winget.exe') {
         # Some machines have a stalled App Installer/source. Bound our own child only.
@@ -191,10 +193,21 @@ function Ensure-Php {
         $content+="`r`nextension=`"$($dll.Replace('\','/'))`"`r`n"
     }
     $content=Set-TempoMaximo $content
+    if ($content -ne $original) {
+        # Laragon compartilhado: copia o original uma unica vez e registra no log cada linha alterada.
+        $backup="$ini.bak-sentinel"; if (!(Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $ini -Destination $backup; Log "Copia do php.ini original: $backup" }
+        Compare-Object @($original -split '\r?\n') @($content -split '\r?\n') -CaseSensitive | Where-Object { $_.InputObject } | ForEach-Object { Log ('php.ini {0} {1}' -f $(if ($_.SideIndicator -eq '=>') { '+' } else { '-' }),$_.InputObject) }
+    }
     if ($content -ne $original) { Write-Utf8 $ini $content }
     $modules=(Run $php @('-m')).Text -split '\r?\n'
     foreach ($ext in ($required | Select-Object -Unique)) { if ($modules -inotcontains $ext) { throw "PHP nao carregou $ext. Confira $ini e suas DLLs." } }
     $null=Run $php @('--ini'); Ok ((Run $php @('-v')).Text.Split("`n")[0])
+    # So confere e avisa: estes valores do php.ini nao sao alterados pelo instalador.
+    $valores=((Run $php @('-r',"echo PHP_VERSION,'|',ini_get('session.upload_progress.enabled'),'|',ini_get('curl.cainfo'),'|',ini_get('openssl.cafile');")).Text.Trim().Split("`n")[-1]) -split '\|'
+    if ([version]$valores[0] -lt [version]'8.4.27') { Aviso "PHP $($valores[0]) e anterior a 8.4.27 (correcoes de seguranca). No Laragon: menu PHP > Version > 8.4.27 ou mais nova; depois execute instalar.bat novamente." }
+    if ($valores[1] -notin @('','0','off')) { Aviso "session.upload_progress.enabled esta ligado. Em $ini, defina session.upload_progress.enabled = 0 e execute instalar.bat novamente." }
+    if (!$valores[2] -or !(Test-Path -LiteralPath $valores[2] -PathType Leaf)) { Aviso "curl.cainfo sem certificado: a chamada a Azure falha (erro SSL). Em $ini, defina curl.cainfo apontando para um cacert.pem (no Laragon: C:\laragon\etc\ssl\cacert.pem)." }
+    if (!$valores[3] -or !(Test-Path -LiteralPath $valores[3] -PathType Leaf)) { Aviso "openssl.cafile sem certificado: downloads HTTPS feitos pelo PHP podem falhar. Em $ini, defina openssl.cafile com o mesmo cacert.pem do curl.cainfo." }
 }
 function Ensure-Composer {
     Step 'Composer'; $script:composer=$null
@@ -400,6 +413,7 @@ try {
         try { $saved=Get-Content -LiteralPath (Join-Path $local 'state.json') -Raw | ConvertFrom-Json; foreach ($p in $saved.PSObject.Properties) { $state[$p.Name]=$p.Value } } catch { Log 'Estado ilegivel; verificacoes completas serao repetidas.' }
     }
     if (!(Test-Path composer.lock)) { throw 'composer.lock ausente. Restaure o arquivo versionado.' }
+    $envNovo=!(Test-Path .env)
     if (!(Test-Path .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
     foreach ($line in [IO.File]::ReadAllLines((Join-Path $root '.env'))) {
         if ($line -match '^\s*[^#=]*(?:KEY|PASSWORD|TOKEN|SECRET)[^=]*=(.+)$') { $secrets.Add($Matches[1].Trim().Trim('"',"'")) }
@@ -420,9 +434,13 @@ try {
     Write-Utf8 $helper (($self -split '(?m)^# PHP_PAYLOAD\r?$',2)[1]); Load-Env
     Step '.env e Azure Foundry'
     if ($cfg.APP_ENV -and $cfg.APP_ENV -ne 'local') { throw 'Inicializador exclusivo do ambiente local. APP_ENV existente foi preservado.' }
-    $defaults=@{APP_NAME='Sentinel'; APP_ENV='local'; APP_DEBUG='true'; APP_URL='http://127.0.0.1:8000'; DB_HOST='127.0.0.1'; DB_PORT='3306'; DB_DATABASE='sentinel'; DB_USERNAME='root'; SESSION_DRIVER='database'; SESSION_LIFETIME='120'; SESSION_ENCRYPT='false'; SESSION_PATH='/'; SESSION_DOMAIN='null'; BROADCAST_CONNECTION='log'; FILESYSTEM_DISK='local'; QUEUE_CONNECTION='database'; CACHE_STORE='database'; AZURE_FOUNDRY_ENDPOINT='https://sentinel-foundry-tcc26.openai.azure.com'; AZURE_FOUNDRY_DEPLOYMENT='gpt-4.1-mini'}
+    $defaults=@{APP_NAME='Sentinel'; APP_ENV='local'; APP_DEBUG='false'; APP_URL='http://127.0.0.1:8000'; DB_HOST='127.0.0.1'; DB_PORT='3306'; DB_DATABASE='sentinel'; DB_USERNAME='root'; SESSION_DRIVER='database'; SESSION_LIFETIME='120'; SESSION_ENCRYPT='true'; SESSION_PATH='/'; SESSION_DOMAIN='null'; BROADCAST_CONNECTION='log'; FILESYSTEM_DISK='local'; QUEUE_CONNECTION='database'; CACHE_STORE='database'; AZURE_FOUNDRY_ENDPOINT='https://sentinel-foundry-tcc26.openai.azure.com'; AZURE_FOUNDRY_DEPLOYMENT='gpt-4.1-mini'}
     $updates=@{}; foreach ($key in $defaults.Keys) { if (!$cfg[$key]) { $updates[$key]=$defaults[$key] } }
     $updates.DB_CONNECTION='mysql'; if ($cfg.DB_URL) { $updates.DB_URL='' }; Set-Env $updates
+    # .env recem-criado recebe os valores seguros (o .env.example traz APP_DEBUG=true); existente nunca e sobrescrito.
+    $seguros=@{APP_DEBUG='false'; SESSION_ENCRYPT='true'}
+    if ($envNovo) { Set-Env $seguros }
+    else { foreach ($key in $seguros.Keys) { if ($cfg[$key] -ne $seguros[$key]) { Aviso "$key=$($cfg[$key]) no .env existente; para a apresentacao use $key=$($seguros[$key]). O instalador nao alterou o .env." } } }
     if (!$cfg.AZURE_FOUNDRY_API_KEY -or $cfg.AZURE_FOUNDRY_API_KEY -match '^(your_|sua_|<|changeme)') {
         $key=$env:SENTINEL_AZURE_FOUNDRY_API_KEY; if (!$key) { $key=Secret-Input 'Azure Foundry API key (entrada oculta, salva somente no .env)' }
         if (!$key) { throw 'Azure Foundry API key nao informada.' }; Set-Env @{AZURE_FOUNDRY_API_KEY=$key}
@@ -454,7 +472,7 @@ try {
     if (Test-Path package.json) {
         $npmHash=Fingerprint @('package.json','package-lock.json'); $deps=Run $npm @('ls','--depth=0','--json') -AllowFailure
         if (!(Test-Path node_modules) -or $deps.Code -ne 0 -or ($state.npm -and $state.npm -ne $npmHash)) {
-            if (Test-Path package-lock.json) { $null=Run $npm @('ci','--no-audit','--no-fund') } else { $null=Run $npm @('install','--no-audit','--no-fund') }
+            if (!(Test-Path package-lock.json)) { throw 'package-lock.json ausente. Restaure o arquivo versionado.' }; $null=Run $npm @('ci','--no-audit','--no-fund')
         }
         $state.npm=Fingerprint @('package.json','package-lock.json'); Save-State
         $assets=Fingerprint @('resources','vite.config.js','package.json','package-lock.json','.env')
@@ -476,6 +494,21 @@ try {
         $tests=Run $php @('artisan','test','--no-ansi'); Write-Host (Redact (($tests.Text -split '\r?\n' | Select-String 'Tests:|Duration:|"assertions"') -join "`n"))
         $state.tests=$testHash; Save-State
     } else { Ok 'Testes ja aprovados para estes arquivos' }
+    Step 'Agendador (RF11)'
+    # Na entrada do usuario, sem admin: o arquivamento e idempotente e nao depende da maquina ligada a meia-noite.
+    $tarefa='SENTINEL-arquivar-expirados'
+    $acao='\"'+$php+'\" \"'+(Join-Path $root 'artisan')+'\" sentinel:arquivar-expirados'
+    $manual="schtasks /Create /SC ONLOGON /TN `"$tarefa`" /TR `"$acao`" /F"
+    if ((Run 'schtasks.exe' @('/Query','/TN',$tarefa) -AllowFailure).Code -eq 0) { Ok "Tarefa $tarefa ja existe" }
+    else {
+        $resposta='N'; if (!$env:SENTINEL_NONINTERACTIVE) { $resposta=Read-Host "Criar a tarefa '$tarefa' (arquiva a lixeira expirada a cada entrada no Windows)? (S/N)" }
+        $criada=$false
+        if ($resposta -match '^\s*[sS]') {
+            if ((Run 'schtasks.exe' @('/Create','/SC','ONLOGON','/TN',$tarefa,'/TR',$acao,'/F') -AllowFailure).Code -eq 0) { $criada=$true; Ok "Tarefa $tarefa criada" }
+            else { Aviso 'O Windows recusou criar a tarefa (detalhes no log).' }
+        }
+        if (!$criada) { Aviso "Para criar a tarefa do RF11 depois, no Prompt de Comando (cmd): $manual" }
+    }
     Step 'Iniciando SENTINEL'
     if (!(Own-Server $port)) {
         $launch=@{FilePath=$php; WorkingDirectory=$root; ArgumentList="`"$root\artisan`" serve --host=127.0.0.1 --port=$port --tries=1"; WindowStyle='Hidden'; PassThru=$true}
@@ -492,6 +525,21 @@ try {
     foreach ($path in @('/','/login','/agente')) { if (!(Http-Ok ($url+$path))) { throw "HTTP $path falhou. Consulte o log Laravel." }; Ok "GET $path" }
     Ok 'Health check /up: HTTP 200'; Write-Host "`nServidor: $url"
     if ($env:SENTINEL_NO_BROWSER -ne '1') { Write-Host 'Abrindo navegador...'; Start-Process $url }; Ok 'SENTINEL pronto'; $exitCode=0
+    # Demonstracao: nunca roda sozinha; a senha e digitada oculta e nao vai para o historico do PowerShell.
+    Write-Host "`nDados de demonstracao (opcional): no PowerShell, na pasta $root, rode:"
+    Write-Host (@'
+$s = Read-Host "Senha da demo" -AsSecureString
+$b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+try {
+    $env:DEMO_SENHA = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
+    & "{php}" artisan db:seed --class=DemonstracaoSeeder
+} finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b)
+    Remove-Item Env:DEMO_SENHA -ErrorAction SilentlyContinue
+    Remove-Variable s, b
+}
+'@).Replace('{php}',$php)
+    if ($avisos.Count) { Write-Host "`nAvisos ($($avisos.Count)):" -ForegroundColor Yellow; foreach ($aviso in $avisos) { Write-Host " - $aviso" -ForegroundColor Yellow } }
 } catch {
     $message=Redact $_.Exception.Message
     Write-Host "`nERRO na etapa: $stage`nCausa: $message`nSugestao: consulte $log e execute instalar.bat novamente." -ForegroundColor Red
