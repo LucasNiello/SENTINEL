@@ -80,6 +80,10 @@
         .card-registro { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0; }
         .card-registro dt { font-weight: 500; }
         .card-registro dd { margin: 0; overflow-wrap: anywhere; }
+        /* RF03: plano do lote, item a item (só leitura). Números em mono; item recusado com a frase, não só a cor. */
+        .card-lote td.num { font-family: var(--fonte-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .card-lote tr.item-erro td { background: var(--color-erro-faixa); }
+        .card-lote .item-erro-texto { display: block; color: var(--color-erro); font-weight: 500; }
         .card-autorizacao { border: 1px solid var(--color-borda-campo); border-radius: 6px; margin: 0; padding: 0.75rem; min-width: 0; display: grid; gap: 0.75rem; }
         .card-autorizacao legend { font-weight: 600; padding: 0 0.25rem; }
         .card-etapa { margin: 0.75rem 0 0; color: var(--color-tinta-2); }
@@ -556,6 +560,7 @@
                 <strong class="card-titulo">Confirmação necessária: <span class="card-acao"></span></strong>
                 <div class="msg msg--erro card-resumo-erro" role="alert" hidden>Confira os campos destacados. Nada foi gravado.</div>
                 <dl class="card-registro" hidden></dl>
+                <div class="tabela-rolagem card-lote" hidden></div>
                 <form class="card-form" novalidate>
                     <fieldset class="card-campos"></fieldset>
                     <fieldset class="card-autorizacao" hidden>
@@ -588,6 +593,7 @@
             const form = card.querySelector('.card-form');
             const campos = card.querySelector('.card-campos');
             const registro = card.querySelector('.card-registro');
+            const lote = card.querySelector('.card-lote');
             // Bloco 4: e-mail e senha do admin ficam FORA dos campos do formulário — não vão no Revisar,
             // só no corpo do /agente/confirmar (e a senha é apagada daqui assim que sai).
             const autorizacao = card.querySelector('.card-autorizacao');
@@ -628,12 +634,55 @@
                 });
                 registro.replaceChildren(...linhasRegistro);
                 registro.hidden = !linhasRegistro.length;
+                montarLote(formulario.itens || []);
                 // Recusa que não é de um campo (ex.: "existem lançamentos vinculados"): vai no topo, com a frase do servidor.
                 resumoErro.textContent = formulario.erro ? formulario.erro + ' Nada foi gravado.' : 'Confira os campos destacados. Nada foi gravado.';
                 resumoErro.hidden = !formulario.erro && !formulario.campos.some((campo) => campo.erro);
                 const primeiroComErro = form.querySelector('[aria-invalid="true"]');
                 if (primeiroComErro) primeiroComErro.focus();
             }
+            // RF03: a lista do lote vem pronta do servidor (do banco, pelos ids da sessão); aqui só vira tabela, via textContent.
+            function montarLote(itens) {
+                lote.hidden = !itens.length;
+                if (!itens.length) {
+                    lote.replaceChildren();
+                    return;
+                }
+                const table = document.createElement('table');
+                const cabecalho = document.createElement('tr');
+                ['Nº', 'Descrição', 'Data', 'Valor', 'Status'].forEach((titulo) => {
+                    const th = document.createElement('th');
+                    th.scope = 'col';
+                    th.textContent = titulo;
+                    cabecalho.appendChild(th);
+                });
+                const thead = document.createElement('thead');
+                thead.appendChild(cabecalho);
+                const tbody = document.createElement('tbody');
+                itens.forEach((item) => {
+                    const tr = document.createElement('tr');
+                    if (item.erro) tr.className = 'item-erro';
+                    [['#' + item.id, true], [item.descricao, false], [item.data, true], [item.valor, true]].forEach(([texto, num]) => {
+                        const td = document.createElement('td');
+                        if (num) td.className = 'num';
+                        td.textContent = texto ?? '—';
+                        tr.appendChild(td);
+                    });
+                    const status = document.createElement('td');
+                    status.textContent = item.antes + ' → ' + item.depois;
+                    if (item.erro) {
+                        const motivo = document.createElement('span');
+                        motivo.className = 'item-erro-texto';
+                        motivo.textContent = '✕ ' + item.erro;
+                        status.appendChild(motivo);
+                    }
+                    tr.appendChild(status);
+                    tbody.appendChild(tr);
+                });
+                table.append(thead, tbody);
+                lote.replaceChildren(table);
+            }
+
             preencherFormulario(formulario);
             etapa.textContent = formulario.reautenticar
                 ? 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.'
@@ -830,6 +879,13 @@
                     if (dados.formulario) {
                         // Erro de validação: o formulário volta com a frase de cada campo; a proposta segue em rascunho.
                         preencherFormulario(dados.formulario);
+                        // RF03: item do lote que mudou não volta a valer; revisar de novo só falharia. Fica o Cancelar.
+                        if ((dados.formulario.itens || []).some((item) => item.erro)) {
+                            btnRevisar.hidden = true;
+                            etapa.textContent = 'Peça de novo para montar outro plano, ou clique em Cancelar.';
+                            anunciar('o lote mudou, nada foi gravado');
+                            return;
+                        }
                         btnRevisar.disabled = false;
                         anunciar('confira os campos destacados, nada foi gravado');
                         return;

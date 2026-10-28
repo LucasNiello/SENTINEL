@@ -104,6 +104,26 @@ class AiAgentService
         'novo_status.in' => 'Status inválido: use "pendente" ou "conciliado".',
     ];
 
+    /** RF03: teto de itens de um plano de conciliação em lote. Acima disso, recusa (nunca trunca). */
+    private const LIMITE_LOTE = 25;
+
+    /** conciliar_lancamentos_em_lote: o filtro do lote (o status é fixo, pendente -> conciliado). */
+    private const REGRAS_LOTE_LANCAMENTOS = [
+        'data_inicio' => 'required|date_format:Y-m-d',
+        'data_fim' => 'required|date_format:Y-m-d|after_or_equal:data_inicio',
+        'categoria_lancamento_id' => 'nullable|integer|min:1',
+    ];
+
+    private const MENSAGENS_LOTE_LANCAMENTOS = [
+        'data_inicio.required' => 'Informe o período: data de início e data de fim.',
+        'data_inicio.date_format' => 'Data de início inválida: use o formato AAAA-MM-DD.',
+        'data_fim.required' => 'Informe o período: data de início e data de fim.',
+        'data_fim.date_format' => 'Data de fim inválida: use o formato AAAA-MM-DD.',
+        'data_fim.after_or_equal' => 'A data de fim não pode ser anterior à data de início.',
+        'categoria_lancamento_id.integer' => 'Categoria inválida.',
+        'categoria_lancamento_id.min' => 'Categoria inválida.',
+    ];
+
     /** Até quantos itens a consulta da lixeira devolve (os excluídos mais recentes). */
     private const LIMITE_LIXEIRA = 50;
 
@@ -316,6 +336,19 @@ class AiAgentService
                 $argumentos = $localizado['argumentos'];
             }
 
+            // RF03: o servidor resolve o filtro do lote UMA vez; os ids ficam no rascunho e o Confirmar só executa eles.
+            $loteIds = null;
+
+            if ($tool === 'conciliar_lancamentos_em_lote') {
+                $resolvido = $this->resolverLote($argumentos);
+
+                if (isset($resolvido['resposta'])) {
+                    return $this->comAviso($resolvido['resposta'], $aviso);
+                }
+
+                $loteIds = $resolvido['ids'];
+            }
+
             // RF04: a proposta já chega como formulário (o próprio card de confirmação). Os argumentos
             // voltam crus para o controller guardar na sessão; ele mascara antes de responder ao front.
             // "propostos" é o que a IA pediu de fato (na atualização: id/busca + só os campos que mudam).
@@ -325,9 +358,11 @@ class AiAgentService
                 'risco' => $definicao['risco'],
                 'argumentos' => $argumentos,
                 'propostos' => $propostosPelaIa,
-                'formulario' => $this->formulario($tool, $argumentos),
+                'formulario' => $this->formulario($tool, $argumentos, [], $loteIds),
                 // Vai com a proposta para a sessão: o desfecho (confirmado, cancelado...) é auditado depois. O controller tira antes de responder.
                 'tempo_ia_ms' => $tempoIaMs,
+                // RF03: ids resolvidos pelo servidor; o controller guarda no rascunho e tira antes de responder.
+                ...($loteIds === null ? [] : ['lote_ids' => $loteIds]),
             ], $aviso);
         }
 
@@ -475,6 +510,11 @@ class AiAgentService
             $resultado = $this->detalhesAuditoria->com([], fn () => DB::transaction(function () use ($tool, $definicao, $argumentos) {
                 $retorno = $definicao['executar']($argumentos);
 
+                // RF03: o lote já auditou uma linha por item (com lote_id) dentro do executor.
+                if ($tool === 'conciliar_lancamentos_em_lote') {
+                    return $retorno;
+                }
+
                 $this->auditar(
                     $tool,
                     $definicao['acao'],
@@ -490,7 +530,9 @@ class AiAgentService
             }));
         } catch (ToolRecusadaException $e) {
             // Regra de negócio: a mensagem já é uma frase amigável escrita para o usuário.
-            $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $argumentos, 'recusado', $e->getMessage(), true);
+            // RF03: lote recusado = uma linha só, com os ids (já nos argumentos) e o motivo de cada item que mudou.
+            $parametros = $tool === 'conciliar_lancamentos_em_lote' && $e->erros !== [] ? [...$argumentos, 'motivos' => $e->erros] : $argumentos;
+            $this->auditar($tool, $definicao['acao'], $definicao['entidade'], null, $parametros, 'recusado', $e->getMessage(), true);
 
             return [
                 'tipo' => 'erro',
@@ -533,7 +575,9 @@ class AiAgentService
                 'tipo' => 'resultado_escrita',
                 'tool' => $tool,
                 // Frase fixa do servidor, sem valores e sem chamar a IA de novo: o que gravou e o que ficou vazio.
-                'mensagem' => $this->fraseDeSucesso($definicao, $argumentos),
+                'mensagem' => $tool === 'conciliar_lancamentos_em_lote'
+                    ? $resultado['conciliados'].($resultado['conciliados'] === 1 ? ' lançamento conciliado.' : ' lançamentos conciliados.')
+                    : $this->fraseDeSucesso($definicao, $argumentos),
                 // O registro gravado volta ao front com a mesma máscara LGPD da auditoria.
                 'resultado' => $resultado instanceof Model ? AuditoriaService::mascararCamposSensiveis($resultado->toArray()) : $resultado,
             ];
@@ -633,6 +677,43 @@ class AiAgentService
     }
 
     /**
+     * RF03: resolve o filtro de conciliar_lancamentos_em_lote no tenant. Devolve ['ids' => [...]]
+     * (1 a LIMITE_LOTE) ou ['resposta' => ...] sem nada na sessão: filtro inválido, nenhum
+     * pendente ou mais pendentes que o teto (recusa pedindo filtro menor; nunca trunca).
+     */
+    private function resolverLote(array $argumentos): array
+    {
+        $texto = fn (string $mensagem) => ['resposta' => ['tipo' => 'texto', 'mensagem' => $mensagem]];
+        $validador = Validator::make($argumentos, self::REGRAS_LOTE_LANCAMENTOS, self::MENSAGENS_LOTE_LANCAMENTOS);
+
+        if ($validador->fails()) {
+            return ['resposta' => [
+                'tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422,
+                'mensagem' => $validador->errors()->first(),
+            ]];
+        }
+
+        $filtro = $validador->validated();
+        $ids = $this->lancamentoService->idsPendentesNoPeriodo(
+            $filtro['data_inicio'],
+            $filtro['data_fim'],
+            isset($filtro['categoria_lancamento_id']) ? (int) $filtro['categoria_lancamento_id'] : null,
+            $this->contexto->tenantId(),
+            self::LIMITE_LOTE + 1,
+        );
+
+        if ($ids === []) {
+            return $texto('Não há lançamentos pendentes nesse período'.(isset($filtro['categoria_lancamento_id']) ? ' e categoria' : '').'. Nada a conciliar.');
+        }
+
+        if (count($ids) > self::LIMITE_LOTE) {
+            return $texto('Esse filtro tem mais de '.self::LIMITE_LOTE.' lançamentos pendentes. Restrinja o período ou informe uma categoria para conciliar até '.self::LIMITE_LOTE.' por vez.');
+        }
+
+        return ['ids' => $ids];
+    }
+
+    /**
      * Valores atuais do registro nos campos do formulário (datas em AAAA-MM-DD), por
      * cima deles o que veio informado (da IA) e, por fim, o id resolvido pelo servidor.
      */
@@ -663,7 +744,9 @@ class AiAgentService
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
-        if ($definicao === null || $definicao['tipo'] !== 'escrita' || ($definicao['regras'] === [] && $definicao['resumo'] === [])) {
+        // RF03: o lote só nasce de um pedido ao agente (o servidor resolve o filtro); não há formulário em branco dele.
+        if ($definicao === null || $definicao['tipo'] !== 'escrita' || ($definicao['regras'] === [] && $definicao['resumo'] === [])
+            || $tool === 'conciliar_lancamentos_em_lote') {
             return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada.'];
         }
@@ -701,8 +784,14 @@ class AiAgentService
      * $autorizadoPor: o admin cuja senha o /agente/confirmar acabou de conferir (RF10);
      * fica na auditoria ao lado de quem estava logado e libera as tools que pedem senha.
      */
-    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null, ?int $tempoIaMs = null): array
+    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null, ?int $tempoIaMs = null, ?array $loteIds = null): array
     {
+        // RF03: os ids do lote vêm só da proposta guardada na sessão (o controller passa); nada do navegador.
+        unset($argumentos['ids']);
+        if ($tool === 'conciliar_lancamentos_em_lote' && $loteIds !== null) {
+            $argumentos['ids'] = $loteIds;
+        }
+
         return $this->detalhesAuditoria->com([
             'parametros_propostos' => $propostos,
             'origem' => $origem,
@@ -816,7 +905,7 @@ class AiAgentService
      * senão a resposta de recusa. RBAC negado e falha de validação ficam na
      * auditoria (com o proposto da IA), como ficavam quando a validação era na confirmação.
      */
-    public function revisar(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $tempoIaMs = null): ?array
+    public function revisar(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $tempoIaMs = null, ?array $loteIds = null): ?array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -825,7 +914,7 @@ class AiAgentService
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada pelo agente.'];
         }
 
-        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem, 'tempo_ia_ms' => $tempoIaMs], function () use ($tool, $definicao, $argumentos) {
+        return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem, 'tempo_ia_ms' => $tempoIaMs], function () use ($tool, $definicao, $argumentos, $loteIds) {
             if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
                 return $this->negar($tool, $definicao, $argumentos);
             }
@@ -838,6 +927,26 @@ class AiAgentService
                 $recusa = $definicao['conferir'] === null ? null : ($definicao['conferir'])($argumentos);
                 if ($recusa !== null) {
                     throw new ToolRecusadaException($recusa['motivo'], [$recusa['campo'] => $recusa['motivo']]);
+                }
+
+                // RF03: revalida CADA item do lote (tenant, existe, ainda pendente); um falhou, o plano volta inteiro.
+                if ($tool === 'conciliar_lancamentos_em_lote') {
+                    if ($loteIds === null) {
+                        throw new ToolRecusadaException('Não encontrei a lista do lote. Nada foi gravado. Peça de novo.');
+                    }
+
+                    $motivos = $this->lancamentoService->motivosParaNaoConciliarLote($loteIds,
+                        $this->lancamentoService->doLote($loteIds, $argumentos['tenant_id']));
+
+                    if ($motivos !== []) {
+                        $frase = $this->fraseDoLote($motivos, 'Peça de novo para montar outro plano.');
+                        $erros = ['_lote' => $frase];
+                        foreach ($motivos as $id => $motivo) {
+                            $erros["lote_{$id}"] = $motivo;
+                        }
+
+                        throw new ToolRecusadaException($frase, $erros);
+                    }
                 }
             } catch (ToolRecusadaException $e) {
                 // Não é desfecho: a proposta segue em rascunho para o humano corrigir. Resultado não-final.
@@ -865,12 +974,16 @@ class AiAgentService
      * Formulário do card (RF04) a partir das regras da tool, com os valores dados e,
      * se houver, a frase de erro de cada campo. Null para tool sem formulário.
      */
-    public function formulario(string $tool, array $valores, array $erros = []): ?array
+    public function formulario(string $tool, array $valores, array $erros = [], ?array $loteIds = null): ?array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
         if ($definicao === null || ($definicao['regras'] === [] && $definicao['resumo'] === [])) {
             return null;
+        }
+
+        if ($tool === 'conciliar_lancamentos_em_lote') {
+            return $this->planoDoLote($definicao, $valores, $loteIds ?? [], $erros);
         }
 
         // Decisão do Lucas (20/10): só o admin vê o salário no card, formatado em reais, para conferir o
@@ -898,6 +1011,54 @@ class AiAgentService
         }
 
         return $formulario;
+    }
+
+    /**
+     * RF03: o card do lote. Nenhum campo editável: o filtro aparece só para leitura e a lista
+     * sai do BANCO a partir dos ids da sessão (nada da IA entra nela). Item com motivo de
+     * recusa (Revisar) volta marcado; item que sumiu aparece só com o número.
+     *
+     * @param  int[]  $ids
+     */
+    private function planoDoLote(array $definicao, array $filtro, array $ids, array $erros): array
+    {
+        $lancamentos = $this->lancamentoService->doLote($ids, $this->contexto->tenantId());
+        $reais = fn ($valor) => 'R$ '.number_format((float) $valor, 2, ',', '.');
+        $categoria = isset($filtro['categoria_lancamento_id'])
+            ? CategoriaLancamento::query()->where('tenant_id', $this->contexto->tenantId())->find($filtro['categoria_lancamento_id'])
+            : null;
+
+        // AAAA-MM-DD (ou data do Eloquent) -> DD/MM/AAAA.
+        $formatar = fn ($data) => $data instanceof \DateTimeInterface ? $data->format('d/m/Y')
+            : (is_string($data) && preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $data, $m) ? "{$m[3]}/{$m[2]}/{$m[1]}" : '—');
+
+        $itens = array_map(function (int $id) use ($lancamentos, $erros, $reais, $formatar) {
+            $lancamento = $lancamentos->get($id);
+
+            return [
+                'id' => $id,
+                'descricao' => $lancamento?->descricao ?? '—',
+                'valor' => $lancamento === null ? '—' : $reais($lancamento->valor),
+                'data' => $formatar($lancamento?->data),
+                'antes' => $lancamento?->status ?? '—',
+                'depois' => 'conciliado',
+                'erro' => $erros["lote_{$id}"] ?? null,
+            ];
+        }, $ids);
+
+        return [
+            'titulo' => $definicao['titulo'],
+            'campos' => [],
+            'resumo' => [
+                ['rotulo' => 'Período', 'valor' => $formatar($filtro['data_inicio'] ?? '').' a '.$formatar($filtro['data_fim'] ?? '')],
+                ['rotulo' => 'Categoria', 'valor' => isset($filtro['categoria_lancamento_id']) ? ($categoria?->nome ?? '#'.$filtro['categoria_lancamento_id']) : 'Todas'],
+                ['rotulo' => 'Lançamentos', 'valor' => (string) count($ids)],
+                ['rotulo' => 'Valor total', 'valor' => $reais($lancamentos->sum('valor'))],
+            ],
+            'itens' => $itens,
+            // A frase do topo vem do Revisar ("_lote": quantos itens mudaram); cada item traz a sua.
+            ...($erros === [] ? [] : ['erro' => $erros['_lote'] ?? reset($erros)]),
+        ];
     }
 
     /**
@@ -936,6 +1097,11 @@ class AiAgentService
      */
     public function aplicarValores(string $tool, array $proposta, array $valores): array
     {
+        // RF03: o lote não tem campo editável; o que o navegador mandar é ignorado (vale o da sessão).
+        if ($tool === 'conciliar_lancamentos_em_lote') {
+            return $proposta;
+        }
+
         $regras = $this->catalogo()[$tool]['regras'] ?? [];
 
         foreach (array_keys(FormularioTool::campos($regras)) as $campo) {
@@ -1053,6 +1219,27 @@ class AiAgentService
                 conferir: fn (array $a) => $this->lancamentoService->motivoParaNaoAtualizarStatus((int) $a['id'], (string) $a['novo_status'], (int) $a['tenant_id']),
                 titulo: 'Alterar o status do lançamento',
                 sucesso: 'Status do lançamento atualizado',
+            ),
+            $this->definirTool(
+                nome: 'conciliar_lancamentos_em_lote',
+                descricao: 'Concilia de uma vez os lançamentos PENDENTES de um período (e, opcionalmente, de uma categoria): pendente -> conciliado. Até '.self::LIMITE_LOTE.' lançamentos por vez. Ação de escrita — exige confirmação humana antes de ser executada.',
+                tipo: 'escrita',
+                risco: 'escrita',
+                acao: 'atualizar',
+                entidade: 'Lancamento',
+                papelMinimo: 'operador',
+                propriedades: [
+                    'data_inicio' => ['type' => 'string', 'format' => 'date'],
+                    'data_fim' => ['type' => 'string', 'format' => 'date'],
+                    'categoria_lancamento_id' => ['type' => 'integer', 'description' => 'Id da categoria (opcional).'],
+                ],
+                obrigatorios: ['data_inicio', 'data_fim'],
+                executar: fn (array $a) => $this->conciliarLancamentosEmLote($a),
+                mensagemErro: 'Não consegui conciliar os lançamentos. Nada foi gravado.',
+                regras: self::REGRAS_LOTE_LANCAMENTOS,
+                mensagens: self::MENSAGENS_LOTE_LANCAMENTOS,
+                titulo: 'Conciliar lançamentos em lote',
+                sucesso: 'Lançamentos conciliados',
             ),
             $this->definirTool(
                 nome: 'consultar_clientes',
@@ -1603,6 +1790,56 @@ class AiAgentService
                 return Rule::exists($tabela, $coluna)->where('tenant_id', $tenantId)->whereNull('deleted_at');
             }, explode('|', $regra));
         }, $regras);
+    }
+
+    /**
+     * Executor de conciliar_lancamentos_em_lote (RF03). Roda dentro da transação do executarTool():
+     * concilia exatamente os ids congelados no rascunho (nunca refaz o filtro), com os registros
+     * travados e reconferidos; se algum mudou desde o Revisar, recusa e nada grava. Uma linha de
+     * auditoria por item, todas com o mesmo lote_id; a auditoria geral do executarTool() não roda.
+     *
+     * @return array{lote_id: string, conciliados: int}
+     */
+    private function conciliarLancamentosEmLote(array $argumentos): array
+    {
+        $filtro = $this->validar($argumentos, self::REGRAS_LOTE_LANCAMENTOS, self::MENSAGENS_LOTE_LANCAMENTOS);
+        $ids = $argumentos['ids'] ?? null;
+
+        if (! is_array($ids) || $ids === [] || count($ids) > self::LIMITE_LOTE) {
+            throw new ToolRecusadaException('Não encontrei a lista do lote. Nada foi gravado. Peça de novo.');
+        }
+
+        $resultado = $this->lancamentoService->conciliarLote($ids, $argumentos['tenant_id']);
+
+        if ($resultado['motivos'] !== []) {
+            $erros = [];
+            foreach ($resultado['motivos'] as $id => $motivo) {
+                $erros["lote_{$id}"] = $motivo;
+            }
+
+            throw new ToolRecusadaException($this->fraseDoLote($resultado['motivos'], 'Nada foi gravado.'), $erros);
+        }
+
+        $loteId = (string) Str::uuid();
+
+        foreach ($resultado['conciliados'] as $id) {
+            $this->detalhesAuditoria->com(['lote_id' => $loteId, 'valores_anteriores' => ['status' => 'pendente']], fn () => $this->auditar(
+                'conciliar_lancamentos_em_lote', 'atualizar', 'Lancamento', $id,
+                [...$filtro, 'id' => $id, 'novo_status' => 'conciliado'], 'sucesso', null, true,
+            ));
+        }
+
+        return ['lote_id' => $loteId, 'conciliados' => count($resultado['conciliados'])];
+    }
+
+    /** RF03: frase do topo do card quando itens do lote não podem ser conciliados. */
+    private function fraseDoLote(array $motivos, string $final): string
+    {
+        $inicio = count($motivos) === 1
+            ? reset($motivos)
+            : count($motivos).' lançamentos do lote mudaram (ex.: '.reset($motivos).')';
+
+        return rtrim($inicio, '.').'. O lote não foi conciliado. '.$final;
     }
 
     /**

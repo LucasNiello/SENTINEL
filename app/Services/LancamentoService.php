@@ -50,6 +50,94 @@ class LancamentoService
     }
 
     /**
+     * RF03: ids dos lançamentos PENDENTES e ativos do período (e da categoria, se informada),
+     * só no tenant, em ordem de data. Traz até $limite; quem chama pede um a mais para saber
+     * se o filtro passou do teto (nunca trunca em silêncio).
+     *
+     * @return array<int, int>
+     */
+    public function idsPendentesNoPeriodo(string $dataInicio, string $dataFim, ?int $categoriaId, int $tenantId, int $limite): array
+    {
+        return Lancamento::query()
+            ->naSituacao('ativo')
+            ->where('tenant_id', $tenantId)
+            ->where('status', 'pendente')
+            ->whereDate('data', '>=', $dataInicio)
+            ->whereDate('data', '<=', $dataFim)
+            ->when($categoriaId, fn ($query) => $query->where('categoria_lancamento_id', $categoriaId))
+            ->orderBy('data')->orderBy('id')
+            ->limit($limite)
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
+     * RF03: os lançamentos do lote (ativos, no tenant), na ordem dos ids. Id que sumiu ou saiu
+     * do tenant fica de fora; quem chama compara com a lista e aponta o item.
+     *
+     * @param  int[]  $ids
+     * @return Collection<int, Lancamento>
+     */
+    public function doLote(array $ids, int $tenantId, bool $travar = false): Collection
+    {
+        return Lancamento::query()
+            ->naSituacao('ativo')
+            ->where('tenant_id', $tenantId)
+            ->whereIn('id', $ids)
+            ->when($travar, fn ($query) => $query->lockForUpdate())
+            ->get()
+            ->keyBy('id');
+    }
+
+    /**
+     * RF03: por que cada item do lote não pode ser conciliado ([id => frase]); vazio = todos podem.
+     * A mesma conferência vale no Revisar (sem trava) e no Confirmar (com os registros travados).
+     *
+     * @param  int[]  $ids
+     * @param  Collection<int, Lancamento>  $lancamentos  resultado de doLote()
+     * @return array<int, string>
+     */
+    public function motivosParaNaoConciliarLote(array $ids, Collection $lancamentos): array
+    {
+        $motivos = [];
+
+        foreach ($ids as $id) {
+            $lancamento = $lancamentos->get($id);
+
+            if ($lancamento === null) {
+                $motivos[$id] = "O lançamento #{$id} não existe mais.";
+            } elseif ($lancamento->status !== 'pendente') {
+                $motivos[$id] = "O lançamento #{$id} não está mais pendente.";
+            }
+        }
+
+        return $motivos;
+    }
+
+    /**
+     * RF03: concilia o lote inteiro ou nada. Trava os registros (lockForUpdate), reconfere
+     * tenant e status de CADA um e só então grava; com qualquer motivo, não grava nenhum.
+     * Deve rodar dentro da transação de quem chama (a trava vale até o commit).
+     *
+     * @param  int[]  $ids
+     * @return array{conciliados: int[], motivos: array<int, string>}
+     */
+    public function conciliarLote(array $ids, int $tenantId): array
+    {
+        $lancamentos = $this->doLote($ids, $tenantId, travar: true);
+        $motivos = $this->motivosParaNaoConciliarLote($ids, $lancamentos);
+
+        if ($motivos !== []) {
+            return ['conciliados' => [], 'motivos' => $motivos];
+        }
+
+        foreach ($ids as $id) {
+            $lancamentos->get($id)->update(['status' => 'conciliado']);
+        }
+
+        return ['conciliados' => array_values($ids), 'motivos' => []];
+    }
+
+    /**
      * Lixeira pelo agente (Bloco 4): acha o lançamento por id ou por parte da descrição, só
      * no tenant e na situação pedida ('ativo', 'lixeira' ou 'arquivado'). Até 6, para o
      * agente saber se ficou ambíguo.

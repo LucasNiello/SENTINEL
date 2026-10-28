@@ -74,6 +74,8 @@ class AuditoriaService
             'acao' => $acao,
             'entidade_tipo' => $entidadeTipo,
             'entidade_id' => $entidadeId,
+            // RF03: liga as linhas de um mesmo lote (uma por item); nulo fora de lote.
+            'lote_id' => $detalhes['lote_id'] ?? null,
             'parametros' => $parametros,
             'parametros_propostos' => is_array($propostos) ? self::mascararCamposSensiveis($propostos) : null,
             'valores_anteriores' => is_array($anteriores) ? self::mascararCamposSensiveis($anteriores) : null,

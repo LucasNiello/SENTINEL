@@ -46,7 +46,7 @@ class ConfirmacoesPendentes
     public const PRAZO_RASCUNHO_S = 300;
 
     /** Guarda o que a IA propôs como rascunho e devolve o id da proposta. */
-    public function guardarRascunho(Session $sessao, string $tool, array $argumentos, ?array $propostos = null, string $origem = 'agente', ?int $tempoIaMs = null): string
+    public function guardarRascunho(Session $sessao, string $tool, array $argumentos, ?array $propostos = null, string $origem = 'agente', ?int $tempoIaMs = null, ?array $loteIds = null): string
     {
         $proposta = (string) Str::uuid();
 
@@ -60,6 +60,8 @@ class ConfirmacoesPendentes
             'origem' => $origem,
             // B1 (RNF04): quanto a IA levou para propor; vai para a auditoria do desfecho.
             ...($tempoIaMs === null ? [] : ['tempo_ia_ms' => $tempoIaMs]),
+            // RF03: os ids que o servidor resolveu do filtro do lote, congelados; o Confirmar executa só eles.
+            ...($loteIds === null ? [] : ['lote_ids' => array_values(array_map('intval', $loteIds))]),
             'criado_em' => self::agora(),
         ]);
 
@@ -90,6 +92,8 @@ class ConfirmacoesPendentes
             'argumentos' => $revisados,
             'propostos' => self::propostos($rascunho),
             ...(self::tempoIa($rascunho) === null ? [] : ['tempo_ia_ms' => self::tempoIa($rascunho)]),
+            // Vem do rascunho (servidor), nunca dos valores revisados que o navegador mandou.
+            ...(self::loteIds($rascunho) === null ? [] : ['lote_ids' => self::loteIds($rascunho)]),
             'proposta' => $proposta,
             'origem' => self::origem($rascunho),
             // Os 5 min do rascunho são absolutos: o token também vence quando eles acabam (expirou()).
@@ -198,6 +202,14 @@ class ConfirmacoesPendentes
         $tempo = $pendente['tempo_ia_ms'] ?? null;
 
         return is_int($tempo) && $tempo >= 0 ? $tempo : null;
+    }
+
+    /** RF03: os ids congelados do lote; null quando a proposta não é de lote. */
+    public static function loteIds(array $pendente): ?array
+    {
+        $ids = $pendente['lote_ids'] ?? null;
+
+        return is_array($ids) && $ids !== [] ? $ids : null;
     }
 
     /**

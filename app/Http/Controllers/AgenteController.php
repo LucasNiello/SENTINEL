@@ -103,9 +103,9 @@ class AgenteController extends Controller
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             // A sessão guarda a proposta crua; o front só vê CPF/salário/documento mascarados (LGPD).
             $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null,
-                tempoIaMs: $resposta['tempo_ia_ms'] ?? null);
+                tempoIaMs: $resposta['tempo_ia_ms'] ?? null, loteIds: $resposta['lote_ids'] ?? null);
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
-            unset($resposta['propostos'], $resposta['tempo_ia_ms']);
+            unset($resposta['propostos'], $resposta['tempo_ia_ms'], $resposta['lote_ids']);
         }
 
         return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
@@ -153,8 +153,8 @@ class AgenteController extends Controller
 
         try {
             $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho), ConfirmacoesPendentes::origem($rascunho),
-                ConfirmacoesPendentes::tempoIa($rascunho));
-            $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? []);
+                ConfirmacoesPendentes::tempoIa($rascunho), ConfirmacoesPendentes::loteIds($rascunho));
+            $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? [], ConfirmacoesPendentes::loteIds($rascunho));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -256,7 +256,7 @@ class AgenteController extends Controller
 
         try {
             $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
-                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente));
+                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente), ConfirmacoesPendentes::loteIds($pendente));
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
