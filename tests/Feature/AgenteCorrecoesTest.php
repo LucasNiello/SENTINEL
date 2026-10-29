@@ -117,7 +117,7 @@ class AgenteCorrecoesTest extends TestCase
         $messages = $requests[1][0]['messages'];
         $this->assertSame('cadastre um cliente', $messages[1]['content']);
         $this->assertSame('Qual o nome?', $messages[2]['content']);
-        $this->assertSame('Mercado Central', $messages[3]['content']);
+        $this->assertSame(['role' => 'user', 'content' => 'Mercado Central'], $messages[array_key_last($messages)]);
         $this->assertSame(0, \App\Models\Cliente::count());
         $this->assertStringNotContainsString('token', json_encode(session('agente_conversa')));
     }

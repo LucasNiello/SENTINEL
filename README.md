@@ -1,5 +1,17 @@
 # SENTINEL
 
+## Ambiente e testes
+
+Use PHP 8.4.27 ou superior em CLI, Composer, Artisan e servidor HTTP. O lock de
+dependências exige PHP 8.4.1, mas a homologação usa o mínimo 8.4.27. No Apache com
+mod_php, use a distribuição Thread Safe. Configure um CA bundle válido em
+`curl.cainfo` e `openssl.cafile`, mantendo a verificação TLS ativa.
+
+Execute `composer check-platform-reqs` antes de instalar e testar. A regressão é
+`php artisan test --compact`: o bootstrap do PHPUnit isola os caches e força
+SQLite em memória, mesmo quando o processo pai usa configuração local em cache.
+O TestCase interrompe a execução antes de RefreshDatabase se detectar outro banco.
+
 ## Usuários de desenvolvimento
 
 No ambiente `APP_ENV=local`, execute `php artisan sentinel:preparar-acesso`

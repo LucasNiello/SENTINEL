@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\ConsultaAuditoria;
+use App\Services\PlanilhaCsv;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -21,6 +22,16 @@ class AuditoriaController extends Controller
 
     /** GET /auditoria/registros?de=&ate=&usuario=&tool=&resultado=&grupo=&pagina= */
     public function registros(Request $request)
+    {
+        return $this->responder($request, false);
+    }
+
+    public function exportar(Request $request)
+    {
+        return $this->responder($request, true);
+    }
+
+    private function responder(Request $request, bool $exportar)
     {
         $validador = Validator::make($request->query(), [
             'de' => 'nullable|string|date_format:Y-m-d',
@@ -45,7 +56,20 @@ class AuditoriaController extends Controller
         }
 
         try {
-            return response()->json($this->consulta->listar(array_filter($validador->validated(), fn ($valor) => $valor !== null && $valor !== '')));
+            $filtros = array_filter($validador->validated(), fn ($valor) => $valor !== null && $valor !== '');
+            if ($exportar) {
+                $linhas = $this->consulta->exportar($filtros);
+                $colunas = ['ID', 'Data', 'Usuário', 'Papel', 'Ação', 'Entidade', 'Registro', 'Resultado', 'Origem', 'Lote'];
+
+                return response(PlanilhaCsv::gerar($colunas, $linhas), 200, [
+                    'Content-Type' => 'text/csv; charset=UTF-8',
+                    'Content-Disposition' => 'attachment; filename="auditoria-'.now()->format('Y-m-d-His').'.csv"',
+                    'Cache-Control' => 'no-store',
+                    'X-Content-Type-Options' => 'nosniff',
+                ]);
+            }
+
+            return response()->json($this->consulta->listar($filtros));
         } catch (AuthorizationException) {
             return $this->semPermissao();
         }

@@ -25,6 +25,7 @@ Route::middleware('auth')->group(function () {
         // Etapa A1: consulta da auditoria em JSON (só admin e só o tenant do usuário — conferido no service).
         // Com teto por usuário: cada tentativa negada também vira uma linha na auditoria.
         Route::get('/auditoria/registros', [AuditoriaController::class, 'registros'])->middleware('throttle:auditoria');
+        Route::get('/auditoria/exportar', [AuditoriaController::class, 'exportar'])->middleware('throttle:exportar');
         Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
 
         Route::get('/agente', function () {

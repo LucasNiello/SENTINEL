@@ -102,7 +102,7 @@
             } finally {
                 clearTimeout(timeout);
                 definirCarregando(false);
-                campoMensagem.focus();
+                if (!document.activeElement.closest('.card-confirmacao')) campoMensagem.focus();
             }
         });
     </script>

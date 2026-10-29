@@ -8,8 +8,9 @@ use Illuminate\Contracts\Session\Session;
 class ConversaAgente
 {
     private const CHAVE = 'agente_conversa';
-    private const MAX_MENSAGENS = 16; // oito pares user/assistant
+    private const MAX_MENSAGENS = 16; // contexto limitado, sem marcadores internos enviados à IA
     private const MAX_CARACTERES = 8000;
+    private const AVISO_PROPOSTA = 'Proposta pendente de confirmação humana. Nenhuma escrita foi executada.';
 
     public function __construct(private ContextoUsuario $contexto) {}
 
@@ -25,36 +26,48 @@ class ConversaAgente
             $sessao->forget(self::CHAVE);
             return [];
         }
-        return $dados['mensagens'] ?? [];
+        // É um marcador da interface, não uma resposta da IA. Reenviá-lo como
+        // fala do assistente induz o modelo a copiá-lo no próximo cadastro,
+        // sem chamar uma tool e, portanto, sem produzir um formulário.
+        // Preservar o pedido do usuário mantém o contexto de complementação.
+        $internosLegados = [
+            self::AVISO_PROPOSTA,
+            'A consulta foi concluída. Os dados não são guardados no histórico.',
+            'Não há lançamentos pendentes nesse período. Nada a conciliar.',
+        ];
+        return array_values(array_filter($dados['mensagens'] ?? [], fn ($m) =>
+            ! ($m['interno'] ?? false)
+            && ! (($m['role'] ?? null) === 'assistant' && in_array($m['content'] ?? null, $internosLegados, true))));
     }
 
     public function guardar(Session $sessao, string $mensagem, array $resposta): void
     {
         $texto = match ($resposta['tipo'] ?? null) {
             'texto' => $resposta['mensagem'] ?? '',
-            'confirmacao_pendente' => 'Proposta pendente de confirmação humana. Nenhuma escrita foi executada.',
+            'confirmacao_pendente' => self::AVISO_PROPOSTA,
             'resultado_leitura' => 'A consulta foi concluída. Os dados não são guardados no histórico.',
             default => null,
         };
         if ($texto === null) return;
-        $this->acrescentar($sessao, $mensagem, $texto);
+        $interno = isset($resposta['tool']) || in_array($resposta['tipo'] ?? null, ['confirmacao_pendente', 'resultado_leitura'], true);
+        $this->acrescentar($sessao, $mensagem, $texto, $interno);
     }
 
     /**
      * Escrita confirmada no card: o agente passa a saber que ela aconteceu. Entra como
-     * um par (a confirmação do humano + a frase fixa do servidor, sem valores), para o
-     * histórico continuar em pares user/assistant.
+     * a confirmação do humano e a frase fixa do servidor, sem valores do registro.
      */
     public function registrarResultado(Session $sessao, string $frase): void
     {
         $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase);
     }
 
-    private function acrescentar(Session $sessao, string $mensagem, string $texto): void
+    private function acrescentar(Session $sessao, string $mensagem, string $texto, bool $interno = false): void
     {
         $historico = $this->ler($sessao);
         $historico[] = ['role' => 'user', 'content' => $this->sanitizar($mensagem)];
         $historico[] = ['role' => 'assistant', 'content' => $this->sanitizar($texto)];
+        if ($interno) $historico[array_key_last($historico)]['interno'] = true;
         $historico = array_slice($historico, -self::MAX_MENSAGENS);
         while (count($historico) > 2 && array_sum(array_map(fn ($m) => mb_strlen($m['content']), $historico)) > self::MAX_CARACTERES) {
             array_splice($historico, 0, 2);

@@ -78,6 +78,31 @@ class ConsultaAuditoria
         ];
     }
 
+    /** Mesmos filtros/tenant da lista, todas as páginas; sem parâmetros ou salários. */
+    public function exportar(array $filtros): array
+    {
+        $this->autorizar('exportar');
+        $linhas = $this->consulta($filtros)->get()->map(fn (AuditLog $log) => [
+            'ID' => $log->id,
+            'Data' => $log->created_at?->format('Y-m-d H:i:s'),
+            'Usuário' => $log->usuario?->name,
+            'Papel' => $log->papel,
+            'Ação' => $log->tool,
+            'Entidade' => $log->entidade_tipo,
+            'Registro' => $log->entidade_id,
+            'Resultado' => $log->resultado,
+            'Origem' => $log->origem,
+            'Lote' => $log->lote_id,
+        ])->all();
+
+        app(DetalhesAuditoria::class)->com(['origem' => 'manual'], fn () => $this->auditoria->registrar(
+            self::TOOL, 'exportar', 'AuditLog', null, Arr::except($filtros, ['pagina']),
+            'sucesso', count($linhas).' registros exportados.', $this->contexto->papel(), true,
+        ));
+
+        return $linhas;
+    }
+
     /**
      * Um registro com o proposto (o que a IA pediu) ao lado do confirmado (o que foi
      * executado), mascarados. Outro tenant ou inexistente: ModelNotFoundException.

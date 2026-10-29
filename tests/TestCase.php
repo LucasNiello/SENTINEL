@@ -7,6 +7,21 @@ use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
 {
+    public function createApplication()
+    {
+        $app = parent::createApplication();
+
+        // Executa antes dos traits de teste, inclusive RefreshDatabase.
+        // Recusar uma configuração insegura é preferível a apagar dados locais.
+        if (! $app->environment('testing')
+            || $app['config']->get('database.default') !== 'sqlite'
+            || $app['config']->get('database.connections.sqlite.database') !== ':memory:') {
+            throw new \RuntimeException('Testes exigem APP_ENV=testing e SQLite :memory:. Nenhum banco local pode ser usado.');
+        }
+
+        return $app;
+    }
+
     /**
      * Teste não depende de build: sem isto, telas com @vite (vitrine, login v4)
      * quebram quando public/build/manifest.json não existe.
