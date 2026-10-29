@@ -605,7 +605,7 @@
             adminErro.id = prefixo + '-admin-erro';
             card.querySelector('.rotulo-admin-email').htmlFor = adminEmail.id;
             card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
-            autorizacao.hidden = !formulario.reautenticar;
+            autorizacao.hidden = true;
             const resumoErro = card.querySelector('.card-resumo-erro');
             const etapa = card.querySelector('.card-etapa');
             const btnRevisar = card.querySelector('.btn-revisar');
@@ -684,10 +684,12 @@
             }
 
             preencherFormulario(formulario);
-            etapa.textContent = formulario.reautenticar
-                ? 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.'
-                : 'Confira os dados e clique em Revisar.';
+            etapa.textContent = 'Confira os dados e clique em Revisar.';
             historico.appendChild(card);
+            // O alvo precisa estar no DOM para receber foco. Assim quem abre
+            // Novo/Editar por teclado entra no formulário, sem voltar à tabela.
+            const primeiroCampo = form.querySelector('input:not([type="hidden"]), select');
+            (primeiroCampo || btnRevisar).focus();
 
             const pequeno = document.createElement('span');
             pequeno.className = 'pequeno';
@@ -750,6 +752,7 @@
                 btnConfirmar.classList.remove('segurando');
                 campos.disabled = true;
                 autorizacao.disabled = true;
+                autorizacao.hidden = true;
                 adminSenha.value = '';
                 [btnRevisar, btnConfirmar, btnEditar, btnCancelar].forEach((botao) => { botao.disabled = true; });
                 card.classList.add('card--expirado');
@@ -793,16 +796,20 @@
                 token = novoToken;
                 tokenEmitidoEm = performance.now();
                 campos.disabled = true;
-                autorizacao.disabled = true;
+                autorizacao.disabled = !formulario.reautenticar;
+                autorizacao.hidden = !formulario.reautenticar;
                 resumoErro.hidden = true;
                 btnRevisar.hidden = true;
                 btnConfirmar.hidden = false;
                 btnConfirmar.disabled = false;
                 // Sem campo nem senha para corrigir, "Editar" não teria o que editar.
                 btnEditar.hidden = !formulario.campos.length && !formulario.reautenticar;
-                etapa.textContent = 'Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.';
+                etapa.textContent = formulario.reautenticar
+                    ? 'Dados conferidos. Um administrador informa o e-mail e a senha nesta etapa final. Depois, segure Confirmar por 2 segundos.'
+                    : 'Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.';
                 agendarExpiracao();
-                btnConfirmar.focus();
+                if (formulario.reautenticar) adminEmail.focus();
+                else btnConfirmar.focus();
                 anunciar('dados conferidos, segure confirmar');
             }
 
@@ -824,7 +831,9 @@
                 btnRevisar.hidden = false;
                 btnRevisar.disabled = true;
                 campos.disabled = false;
-                autorizacao.disabled = false;
+                autorizacao.disabled = true;
+                autorizacao.hidden = true;
+                adminSenha.value = '';
                 aplicarCondicoes(form, formulario.campos);
                 etapa.textContent = 'Confira os dados e clique em Revisar.';
                 const primeiro = form.querySelector('input, select');
@@ -846,18 +855,6 @@
             }
 
             async function revisar() {
-                // A senha só é conferida na confirmação; aqui o card só não deixa seguir com ela em branco.
-                adminErro.hidden = true;
-                adminSenha.removeAttribute('aria-invalid');
-                if (formulario.reautenticar && (adminEmail.value.trim() === '' || adminSenha.value === '')) {
-                    adminErro.textContent = 'Informe o e-mail e a senha de um administrador.';
-                    adminErro.hidden = false;
-                    const vazio = adminEmail.value.trim() === '' ? adminEmail : adminSenha;
-                    vazio.setAttribute('aria-invalid', 'true');
-                    vazio.setAttribute('aria-describedby', adminErro.id);
-                    vazio.focus();
-                    return;
-                }
                 btnRevisar.disabled = true;
                 try {
                     const resp = await fetch('/agente/revisar', {
@@ -907,6 +904,19 @@
 
             function iniciarHold() {
                 if (segurando || btnConfirmar.disabled || btnConfirmar.hidden) return;
+                // Credenciais só são solicitadas e validadas na etapa final.
+                adminErro.hidden = true;
+                adminSenha.removeAttribute('aria-invalid');
+                if (formulario.reautenticar && (adminEmail.value.trim() === '' || adminSenha.value === '')) {
+                    adminErro.textContent = 'Informe o e-mail e a senha de um administrador.';
+                    adminErro.hidden = false;
+                    const vazio = adminEmail.value.trim() === '' ? adminEmail : adminSenha;
+                    vazio.setAttribute('aria-invalid', 'true');
+                    vazio.setAttribute('aria-describedby', adminErro.id);
+                    vazio.focus();
+                    return;
+                }
+
                 if (restanteMs() < MINIMO_PARA_SEGURAR_MS) {
                     bloquearPorTempo();
                     return;

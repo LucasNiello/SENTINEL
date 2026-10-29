@@ -78,6 +78,7 @@
             </select>
         </div>
         <button type="submit" id="botao-filtrar" data-foco>Filtrar</button>
+        <button type="button" id="botao-exportar">Exportar CSV</button>
     </form>
 
     <div id="carregando" class="carregando" hidden>
@@ -285,6 +286,12 @@
         });
         botaoAnterior.addEventListener('click', () => carregar(paginaAtual - 1));
         botaoProxima.addEventListener('click', () => carregar(paginaAtual + 1));
+
+        document.getElementById('botao-exportar').addEventListener('click', () => {
+            const parametros = new URLSearchParams();
+            new FormData(formAuditoria).forEach((valor, campo) => { if (valor) parametros.set(campo, valor); });
+            window.location.href = '/auditoria/exportar?' + parametros.toString();
+        });
 
         carregar(1);
     </script>
