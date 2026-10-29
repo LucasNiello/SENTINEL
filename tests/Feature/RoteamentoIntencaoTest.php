@@ -159,4 +159,33 @@ class RoteamentoIntencaoTest extends TestCase
             $this->assertSame(['acao' => 'excluir_definitivo', 'entidade' => 'Cliente'], $intencao->reconhecer($pedido));
         }
     }
+
+    public function test_exclusao_definitiva_pelo_comando_forca_a_tool_definitiva_e_so_propoe(): void
+    {
+        $this->logarComo('admin');
+        $cliente = Cliente::create(['nome' => 'Mercado Horizonte', 'tenant_id' => 1]);
+        $cliente->delete();
+        $cliente->arquivar();
+        Http::fake(fn () => Http::response($this->respostaTool('excluir_definitivo_cliente', ['id' => $cliente->id])));
+
+        $this->postJson('/agente/comando', ['mensagem' => 'exclua de vez o cliente '.$cliente->id])
+            ->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('tool', 'excluir_definitivo_cliente')
+            ->assertJsonPath('formulario.reautenticar', true);
+        Http::assertSent(fn ($r) => array_column(array_column($r['tools'], 'function'), 'name') === ['excluir_definitivo_cliente']
+            && $r['tool_choice']['function']['name'] === 'excluir_definitivo_cliente');
+        $this->assertTrue(Cliente::withTrashed()->whereKey($cliente->id)->exists());
+    }
+
+    public function test_exclusao_logica_devolvida_para_pedido_definitivo_nao_executa(): void
+    {
+        $this->logarComo('admin');
+        $cliente = Cliente::create(['nome' => 'Mercado Horizonte', 'tenant_id' => 1]);
+        Http::fake(fn () => Http::response($this->respostaTool('excluir_cliente', ['id' => $cliente->id])));
+
+        $this->postJson('/agente/comando', ['mensagem' => 'exclua definitivamente o cliente '.$cliente->id])
+            ->assertStatus(422)->assertJsonPath('codigo', 'AI_INTENT_MISMATCH');
+        $this->assertDatabaseHas('clientes', ['id' => $cliente->id, 'deleted_at' => null]);
+        $this->assertSame(0, AuditLog::where('resultado', 'sucesso')->count());
+        $this->assertEmpty(session('confirmacoes', []));
+    }
 }
