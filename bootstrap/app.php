@@ -16,6 +16,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectUsersTo('/agente');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Formulário HTML aberto antes do logout/expiração: indicar o motivo,
+        // sem executar a ação. APIs continuam recebendo 401 e GET vai ao login.
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, Request $request) {
+            if (! $request->expectsJson() && ! $request->isMethodSafe()) {
+                return response()->view('errors.419', [], 419);
+            }
+        });
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );

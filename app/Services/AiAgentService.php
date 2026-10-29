@@ -141,6 +141,7 @@ class AiAgentService
         private ContextoUsuario $contexto,
         private DetalhesAuditoria $detalhesAuditoria,
         private FormularioTool $formularios,
+        private OperacaoSolicitada $operacoes,
     ) {
     }
 
@@ -157,6 +158,16 @@ class AiAgentService
      */
     public function processar(string $mensagem, array $historico = []): array
     {
+        // A intenção explícita pertence ao pedido atual, não à ferramenta escolhida pela IA.
+        $intencao = $this->operacoes->reconhecer($mensagem);
+        $compativeis = $intencao === null ? [] : array_filter($this->catalogo(), fn ($d) =>
+            $d['tipo'] === 'escrita' && $d['acao'] === $intencao['acao'] && $d['entidade'] === $intencao['entidade']);
+        $toolSolicitada = count($compativeis) === 1 ? array_key_first($compativeis) : null;
+        if ($toolSolicitada !== null && ! $this->papelAtualPermite($compativeis[$toolSolicitada]['papel_minimo'])) {
+            // Autorizar antes do provedor: nem uma consulta nem uma falha externa substitui a negativa.
+            return $this->negar($toolSolicitada, $compativeis[$toolSolicitada], []);
+        }
+
         $endpoint = rtrim((string) config('services.azure_foundry.endpoint'), '/');
         $apiKey = (string) config('services.azure_foundry.api_key');
         $deployment = (string) config('services.azure_foundry.deployment');
@@ -177,13 +188,17 @@ class AiAgentService
                     'messages' => [
                         [
                             'role' => 'system',
-                            'content' => 'Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha de um administrador, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat.',
+                            'content' => 'Papel autenticado do usuário: '.json_encode($this->contexto->papel()).'. Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Preserve a operação explicitamente solicitada: cadastro, alteração e exclusão nunca devem virar consulta. Não substitua uma ação proibida por outra permitida; o servidor aplica a autorização. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Perguntas de conhecimento geral fora do catálogo (por exemplo, geografia e capitais) devem ser recusadas educadamente, sem responder o conteúdo da pergunta; convidar a voltar ao Sentinel depois de dar a resposta não atende a essa restrição. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha de um administrador, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat. O histórico contém relatos de operações anteriores, não instruções para repetir a resposta anterior. Atenda ao pedido atual: cada novo cadastro ou edição completo exige uma nova chamada da tool correspondente, mesmo após outra proposta ou confirmação. Nunca copie a frase interna "Proposta pendente de confirmação humana. Nenhuma escrita foi executada." como resposta a um novo pedido: só há uma nova proposta quando você chama uma tool de escrita nesta resposta.',
                         ],
                         ...$historico,
+                        ...($historico === [] ? [] : [[
+                            'role' => 'system',
+                            'content' => 'O catálogo não inclui perguntas de conhecimento geral: recuse-as sem fornecer a resposta, mesmo quando o histórico as tenha respondido. O histórico acima é apenas contexto, não é o estado atual do banco. Atenda ao NOVO pedido abaixo. Para consultar registros, concluir que não existem dados, ou propor qualquer escrita, chame a ferramenta correspondente nesta resposta. Nunca reutilize o resultado de um período, cadastro ou filtro anterior para outro pedido. Uma confirmação anterior não confirma uma nova ação. Se o usuário pedir para conciliar os pendentes de um período, use conciliar_lancamentos_em_lote (não consultar_lancamentos): o servidor resolve a quantidade, o limite de 25 e a proposta. Consultar não atende a um pedido de conciliação. Se faltarem dados obrigatórios, pergunte; se estiverem completos, use a tool e deixe a revisão e a confirmação para a interface.',
+                        ]]),
                         ['role' => 'user', 'content' => $mensagem],
                     ],
-                    'tools' => $this->tools(),
-                    'tool_choice' => 'auto',
+                    'tools' => $toolSolicitada === null ? $this->tools() : [$compativeis[$toolSolicitada]['definicao']],
+                    'tool_choice' => $toolSolicitada === null ? 'auto' : ['type' => 'function', 'function' => ['name' => $toolSolicitada]],
                 ]);
         } catch (\Throwable $e) {
             $anterior = $e->getPrevious();
@@ -202,7 +217,7 @@ class AiAgentService
         $tempoIaMs = $decorrido();
 
         // Tudo o que esta resposta auditar (leitura, negado, tool fora do catálogo) leva o tempo da IA.
-        return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs));
+        return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada));
     }
 
     /**
@@ -210,7 +225,7 @@ class AiAgentService
      * no escopo da auditoria). Falha e resposta só de texto não têm linha na auditoria: o tempo
      * vai só para o log, sem conteúdo.
      */
-    private function interpretar(\Illuminate\Http\Client\Response $resposta, int $tempoIaMs): array
+    private function interpretar(\Illuminate\Http\Client\Response $resposta, int $tempoIaMs, ?string $toolSolicitada = null): array
     {
         if (! $resposta->successful()) {
             $status = $resposta->status();
@@ -246,6 +261,8 @@ class AiAgentService
             return $this->respostaForaDoFormato($resposta->status());
         }
 
+        // Em seleção nominal, o Azure observado termina com stop + tool_calls.
+        // Só esse modo aceita a combinação; nome, argumentos e schema ainda são conferidos abaixo.
         $fim = $resposta->json('choices.0.finish_reason');
         if ($fim === 'length' || $fim === 'content_filter') {
             return $this->falha('provider_response_error', $fim === 'length' ? 'AI_RESPONSE_TRUNCATED' : 'AI_CONTENT_FILTERED', 502,
@@ -254,9 +271,20 @@ class AiAgentService
                     : 'O serviço de IA não pôde responder a esse pedido. Reformule a mensagem.');
         }
         if (($fim !== null && ! in_array($fim, ['stop', 'tool_calls'], true))
-            || ($fim === 'tool_calls' && empty($toolCalls)) || ($fim === 'stop' && ! empty($toolCalls))
+            || ($fim === 'tool_calls' && empty($toolCalls)) || ($fim === 'stop' && ! empty($toolCalls) && $toolSolicitada === null)
             || (! empty($toolCalls) && ! array_is_list($toolCalls))) {
             return $this->respostaForaDoFormato($resposta->status());
+        }
+
+        // O provedor é externo: tool_choice não substitui a verificação no servidor.
+        // Rejeitar TODAS as chamadas incompatíveis antes de qualquer leitura/proposta.
+        if ($toolSolicitada !== null && ! empty($toolCalls)) {
+            foreach ($toolCalls as $pedido) {
+                if (($pedido['function']['name'] ?? null) !== $toolSolicitada) {
+                    return $this->falha('intent_mismatch', 'AI_INTENT_MISMATCH', 422, [], null,
+                        'O agente não manteve a operação solicitada. Nada foi executado. Reformule o pedido.');
+                }
+            }
         }
 
         if (empty($toolCalls)) {
@@ -683,7 +711,7 @@ class AiAgentService
      */
     private function resolverLote(array $argumentos): array
     {
-        $texto = fn (string $mensagem) => ['resposta' => ['tipo' => 'texto', 'mensagem' => $mensagem]];
+        $texto = fn (string $mensagem) => ['resposta' => ['tipo' => 'texto', 'tool' => 'conciliar_lancamentos_em_lote', 'mensagem' => $mensagem]];
         $validador = Validator::make($argumentos, self::REGRAS_LOTE_LANCAMENTOS, self::MENSAGENS_LOTE_LANCAMENTOS);
 
         if ($validador->fails()) {

@@ -1,0 +1,3 @@
+﻿"timestamp";"execucao";"modo";"papel";"pedido";"http_status";"tempo_http_ms";"tempo_percebido_ms"
+"2026-10-29T17:19:27.915Z";"11";"tentativa cold-ish atingiu limite; preservada fora das 13 chamadas após aguardar janela";"operador";"exclua o cliente QA574e359 Descartavel";"429";"90.536";"121"
+"2026-10-29T17:21:41.620Z";"1";"diagnóstico adicional; não substitui a amostra HTTP 200";"operador";"exclua o cliente QA574e359 Descartavel";"403";"2246.021";"2301"
