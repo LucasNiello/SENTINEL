@@ -15,6 +15,7 @@
     $usuario = rescue(fn () => auth()->user(), null, false);
     $papel = $usuario ? rescue(fn () => app(\App\Services\ContextoUsuario::class)->papel(), null, false) : null;
     $rotulosPapel = ['leitura' => 'Leitura', 'operador' => 'Operador', 'admin' => 'Administrador'];
+    $iniciais = $usuario ? collect(preg_split('/[^\p{L}\p{N}]+/u', trim($usuario->name)))->filter()->take(2)->map(fn ($nome) => mb_substr($nome, 0, 1))->implode('') : '';
     $itens = [
         ['agente', 'Agente', 'M4 5h16v11H8l-4 4V5m4 4h8m-8 3h5'],
         ['cadastros', 'Cadastros', 'M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z'],
@@ -26,7 +27,7 @@
     <a class="pular" href="#conteudo">Pular para o conteúdo</a>
     <aside id="workspace-sidebar" class="workspace-sidebar" aria-label="Navegação lateral">
         <header class="topo">
-            <a class="marca" href="/agente" aria-label="Sentinel — ir para o agente"><x-lighthouse /><span>SENTINEL</span></a>
+            <a class="marca" href="/agente" aria-label="Sentinel — ir para o agente"><x-lighthouse /><span>SENTINEL<small>CONTROL SYSTEM</small></span></a>
             @if ($usuario)
                 <button class="sidebar-close" type="button" aria-label="Fechar menu" data-close-menu><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
             @else
@@ -42,6 +43,7 @@
             </nav>
             <p class="sidebar-note">Inteligência para agir.<br>Controle para decidir.</p>
             <div class="sidebar-account">
+                <span class="account-initials" aria-hidden="true">{{ mb_strtoupper($iniciais) }}</span>
                 <span class="usuario"><span>{{ $usuario->name }}</span><span class="papel-tag"><span class="sr-only">Papel: </span>{{ $rotulosPapel[$papel] ?? $papel }}</span></span>
                 <form method="POST" action="/logout">
                     @csrf
@@ -56,8 +58,10 @@
             @if ($usuario)
                 <button class="workspace-menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="workspace-sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
             @endif
-            <div class="workspace-context"><span>Bancada</span><span class="context-divider" aria-hidden="true">/</span><span>@yield('titulo', 'Sentinel')</span></div>
-            <span class="workspace-topbar__note">Área operacional</span>
+            <div class="workspace-context"><span>Sentinel</span><span class="context-divider" aria-hidden="true">/</span><span>@yield('titulo', 'Sentinel')</span></div>
+            @if ($usuario)
+                <span class="workspace-topbar__note"><i aria-hidden="true"></i> Sessão autenticada <span>{{ $rotulosPapel[$papel] ?? $papel }}</span></span>
+            @endif
         </div>
         <main id="conteudo" tabindex="-1">
             @yield('conteudo')

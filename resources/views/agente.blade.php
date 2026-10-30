@@ -3,23 +3,26 @@
 @section('titulo', 'Agente')
 
 @section('conteudo')
-    <header class="page-header">
-        <p class="eyebrow">Agente</p>
-        <h1>Converse com seus dados.</h1>
+    <header class="page-header agent-hero">
+        <p class="eyebrow">Workspace / Inteligência assistida</p>
+        <h1>Converse com seus dados.<br><span>Decida com contexto.</span></h1>
         <p class="intro">Consulte informações e prepare operações em linguagem natural.</p>
+    <div class="agent-orbit" aria-hidden="true"><span></span><x-lighthouse /></div>
     </header>
+    <div class="command-layout">
     <section class="agent-workspace" aria-label="Conversa com o Sentinel">
 
+    <header class="deck-header"><div><span class="eyebrow">SENTINEL AGENT</span><p>Consulta e operações assistidas</p></div><span class="deck-badge">REVISÃO HUMANA</span></header>
     <div id="historico" aria-live="polite">
         <div class="agent-empty">
-            <p class="eyebrow">SENTINEL · A seu serviço</p>
-            <h2>O que você precisa consultar?</h2>
-            <p>Peça em linguagem natural. Antes de qualquer gravação, você revisa e confirma.</p>
+            <p class="eyebrow">SEU PRÓXIMO MOVIMENTO</p>
+            <h2>Por onde começamos?</h2>
+            <p>Uma pergunta abre caminhos. Uma ação começa pela sua revisão.</p>
             <div class="agent-suggestions" aria-label="Exemplos de pedidos">
-                <button type="button" data-suggestion="liste meus clientes">Liste meus clientes <span aria-hidden="true">↗</span></button>
-                <button type="button" data-suggestion="quais lançamentos estão pendentes?">Lançamentos pendentes <span aria-hidden="true">↗</span></button>
+                <button type="button" data-suggestion="liste meus clientes"><small>CONSULTAR</small>Liste meus clientes <span aria-hidden="true">↗</span></button>
+                <button type="button" data-suggestion="quais lançamentos estão pendentes?"><small>FINANCEIRO</small>Lançamentos pendentes <span aria-hidden="true">↗</span></button>
                 @if (in_array(auth()->user()->papel, ['operador', 'admin'], true))
-                    <button type="button" data-suggestion="cadastre um cliente chamado ">Cadastre um cliente <span aria-hidden="true">↗</span></button>
+                    <button type="button" data-suggestion="cadastre um cliente chamado "><small>CADASTRO</small>Cadastre um cliente <span aria-hidden="true">↗</span></button>
                 @endif
             </div>
         </div>
@@ -33,12 +36,27 @@
     <div class="agent-composer">
     <form id="form-comando">
         <label for="campo-mensagem" class="sr-only">Seu pedido ao agente</label>
-        <input type="text" id="campo-mensagem" data-foco placeholder="Escreva seu pedido…" required>
+        <span class="composer-mark" aria-hidden="true">⌘</span>
+        <input type="text" id="campo-mensagem" data-foco placeholder="Pergunte ou descreva uma ação…" required>
+        <kbd class="composer-key" aria-hidden="true">ENTER ↵</kbd>
         <button type="submit" id="botao-enviar">Enviar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button>
     </form>
-    <p class="composer-note">Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
+    <p class="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
     </div>
     </section>
+    <aside class="context-rail" aria-label="Contexto da sessão">
+        <section class="session-context">
+            <p class="eyebrow">CONTEXTO ATUAL</p>
+            <h2>Seu espaço de decisão.</h2>
+            <dl><dt>CONTA</dt><dd>{{ auth()->user()->name }}</dd><dt>PERFIL</dt><dd>{{ ['leitura' => 'Leitura', 'operador' => 'Operador', 'admin' => 'Administrador'][auth()->user()->papel] ?? auth()->user()->papel }}</dd><dt>MÓDULO</dt><dd>Agente</dd></dl>
+        </section>
+        <section class="decision-flow" aria-label="Fluxo de decisão">
+            <p class="eyebrow">DO PEDIDO À DECISÃO</p>
+            <ol><li><span>01</span><div><h3>Peça</h3><p>Descreva o que precisa em linguagem natural.</p></div></li><li><span>02</span><div><h3>Revise</h3><p>Confira os dados e ajuste antes de prosseguir.</p></div></li><li><span>03</span><div><h3>Confirme</h3><p>Uma gravação exige sua confirmação deliberada.</p></div></li></ol>
+        </section>
+        <p class="context-protection"><span aria-hidden="true">◇</span> Dados isolados por organização.<br>Operações registradas em auditoria.</p>
+    </aside>
+    </div>
 
 
     @include('partials.bancada')
