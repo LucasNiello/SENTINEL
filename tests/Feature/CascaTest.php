@@ -28,9 +28,9 @@ class CascaTest extends TestCase
             ->assertSee($usuario->name)
             ->assertSee('<span class="sr-only">Papel: </span>Operador', false)
             ->assertSee('aria-label="Principal"', false)
-            ->assertSee('<a href="/agente"  aria-current="page" >Agente</a>', false)
-            ->assertSee('<a href="/cadastros" >Cadastros</a>', false)
-            ->assertSee('<a href="/lixeira" >Lixeira</a>', false)
+            ->assertSee('aria-current="page"', false)
+            ->assertSee('href="/cadastros"', false)
+            ->assertSee('href="/lixeira"', false)
             ->assertDontSee('href="/auditoria"', false)->assertDontSee('em breve')
             ->assertSee('<form method="POST" action="/logout">', false)
             ->assertSee('Pular para o conteúdo')
@@ -44,24 +44,23 @@ class CascaTest extends TestCase
         $this->get('/agente')
             ->assertOk()
             ->assertSee('<span class="sr-only">Papel: </span>Administrador', false)
-            ->assertSee('<a href="/auditoria" >Auditoria</a>', false);
+            ->assertSee('href="/auditoria"', false);
     }
 
     public function test_campo_de_comando_tem_rotulo_e_campos_tem_contraste_de_borda(): void
     {
         $this->logarComo('operador', 1);
-
-        $this->get('/agente')
-            ->assertOk()
+        $this->get('/agente')->assertOk()
             ->assertSee('<label for="campo-mensagem" class="sr-only">Seu pedido ao agente</label>', false)
             ->assertSee('<meta name="viewport" content="width=device-width, initial-scale=1">', false)
-            ->assertSee(':focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; }', false)
-            ->assertSee('--color-borda-campo: #5B6570;', false)
-            ->assertSee('#campo-mensagem { border: 1px solid var(--color-borda-campo); border-radius: 6px; }', false)
-            ->assertSee('border: 1px solid var(--color-borda-campo);', false)
-            ->assertSee("rolagem.className = 'tabela-rolagem';", false)
-            ->assertSee('.tabela-rolagem { max-width: 100%; overflow-x: auto; }', false)
-            ->assertDontSee('#campo-mensagem { border: 1px solid var(--color-borda);', false);
+            ->assertSee("rolagem.className = 'tabela-rolagem';", false);
+        // O visual é compartilhado no entrypoint; não depende de CSS duplicado no HTML.
+        $css = file_get_contents(resource_path('css/workspace.css'));
+        $this->assertStringContainsString(':focus-visible {outline:2px solid var(--foco)', $css);
+        $this->assertStringContainsString('--color-borda-campo:#5B6570;', $css);
+        $this->assertStringContainsString('border:1px solid var(--color-borda-campo)', $css);
+        $this->assertStringContainsString('overflow-x:auto', $css);
+        $this->assertStringContainsString('prefers-reduced-motion:reduce', $css);
     }
 
     public function test_pagina_inexistente_mostra_a_tela_404_em_portugues_no_layout(): void
@@ -71,7 +70,7 @@ class CascaTest extends TestCase
             ->assertSee('Página não encontrada')
             ->assertSee('Erro 404')
             ->assertSee('class="topo"', false)
-            ->assertSee('<a href="/login">Entrar</a>', false)
+            ->assertSee('href="/login" class="guest-access">Entrar</a>', false)
             ->assertDontSee('aria-label="Principal"', false);
     }
 

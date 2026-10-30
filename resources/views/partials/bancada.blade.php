@@ -1,180 +1,12 @@
 {{-- Bancada compartilhada (B3): estilos, popup e o JS das tabelas e do card de confirmação (Revisar → segurar).
      Usada pelas telas Agente, Cadastros e Lixeira. Cada tela tem o próprio #historico e marca com data-foco
      o elemento que recebe o foco quando um popup de erro é fechado. --}}
-@push('estilos')
-    <style>
-        /* Tela do agente. Tokens, foco, botões e .sr-only vêm da casca (layouts/app.blade.php). */
-        #historico {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            margin-bottom: 1rem;
-        }
 
-        .msg { padding: 0.6rem 0.8rem; border-radius: 6px; overflow-wrap: anywhere; }
-        .tabela-rolagem { max-width: 100%; overflow-x: auto; }
-        .btn-editar-linha { min-height: 44px; padding: 0.3rem 0.8rem; }
-        .btn-exportar { align-self: flex-start; min-height: 44px; padding: 0.4rem 1rem; }
-        .msg--usuario { background: var(--color-borda); align-self: flex-end; }
-        .msg--agente { border: 1px solid var(--color-borda); }
-        .msg--erro { background: var(--color-erro-faixa); color: var(--color-erro); }
-        .msg--aviso { background: var(--color-aviso-faixa); color: var(--color-aviso); }
-
-        table { border-collapse: collapse; width: 100%; font-size: 15px; }
-        th, td { border: 1px solid var(--color-borda); padding: 0.4rem 0.6rem; text-align: left; }
-        th { background: var(--color-borda); }
-
-        form#form-comando { display: flex; gap: 0.5rem; }
-        #campo-mensagem { flex: 1; min-width: 0; min-height: 44px; padding: 0.6rem; font-size: 1rem; background: var(--color-creme); color: var(--color-tinta); }
-        #campo-mensagem { border: 1px solid var(--color-borda-campo); border-radius: 6px; }
-        #botao-enviar { min-height: 44px; padding: 0.5rem 1rem; }
-
-        /* Carregamento (seção 7): texto de estado + barra fina de 1px, sem animação. */
-        .carregando { margin: 0 0 1rem; color: var(--color-tinta-2); }
-        .carregando__barra { height: 1px; margin-top: 0.25rem; background: var(--color-aco); }
-
-        /* Card de confirmação: borda de 2px na cor do risco da tool (seção 5). */
-        .card-confirmacao {
-            --cor-risco: var(--color-aviso);
-            --cor-risco-faixa: var(--color-aviso-faixa);
-            border: 2px solid var(--cor-risco);
-            background: var(--color-creme);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-        }
-        .card--risco-leitura { --cor-risco: var(--color-tinta-2); --cor-risco-faixa: var(--color-borda); }
-        .card--risco-escrita { --cor-risco: var(--color-aviso); --cor-risco-faixa: var(--color-aviso-faixa); }
-        .card--risco-exclusao { --cor-risco: var(--color-erro); --cor-risco-faixa: var(--color-erro-faixa); }
-        /* RF04: o card é o formulário (ação + dados), nunca nome de tool nem JSON. */
-        .card-titulo { display: block; margin-bottom: 0.75rem; }
-        .card-form { display: grid; gap: 0.75rem; }
-        .campo { display: flex; flex-direction: column; gap: 0.25rem; }
-        .campo[hidden] { display: none; }
-        .campo label { font-weight: 500; }
-        .campo-obrigatorio { font-weight: 400; color: var(--color-tinta-2); }
-        .campo input, .campo select {
-            width: 100%;
-            min-height: 44px;
-            padding: 0.5rem;
-            font: inherit;
-            background: var(--color-creme);
-            color: var(--color-tinta);
-            border: 1px solid var(--color-borda-campo);
-            border-radius: 6px;
-        }
-        .campo-info, .campo-falta, .campo-erro { margin: 0; font-size: 15px; }
-        .campo-info { color: var(--color-tinta-2); }
-        .campo-falta { color: var(--color-aviso); }
-        .campo-erro { color: var(--color-erro); }
-        .campo--faltando input, .campo--faltando select { border: 2px solid var(--color-aviso); }
-        .campo--erro input, .campo--erro select { border: 2px solid var(--color-erro); }
-        .card-confirmacao .acoes {
-            display: flex;
-            gap: 0.75rem;
-            margin-top: 0.75rem;
-        }
-        .card-expirado-texto { margin-top: 0.75rem; }
-        .card-campos { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 0.75rem; }
-        /* Bloco 4: o registro que a ação vai mover (só leitura) e a autorização do admin, separada do formulário. */
-        .card-registro { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0; }
-        .card-registro dt { font-weight: 500; }
-        .card-registro dd { margin: 0; overflow-wrap: anywhere; }
-        /* RF03: plano do lote, item a item (só leitura). Números em mono; item recusado com a frase, não só a cor. */
-        .card-lote td.num { font-family: var(--fonte-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-        .card-lote tr.item-erro td { background: var(--color-erro-faixa); }
-        .card-lote .item-erro-texto { display: block; color: var(--color-erro); font-weight: 500; }
-        .card-autorizacao { border: 1px solid var(--color-borda-campo); border-radius: 6px; margin: 0; padding: 0.75rem; min-width: 0; display: grid; gap: 0.75rem; }
-        .card-autorizacao legend { font-weight: 600; padding: 0 0.25rem; }
-        .card-etapa { margin: 0.75rem 0 0; color: var(--color-tinta-2); }
-        .acoes { flex-wrap: wrap; }
-
-        /* Revisar, Confirmar (segurar), Editar e Cancelar: mesmo formato e peso; Editar e Cancelar são neutros (seção 6). */
-        .btn-revisar,
-        .btn-editar,
-        .btn-confirmar,
-        .btn-cancelar {
-            min-height: 44px;
-            min-width: 140px;
-            padding: 0.5rem 1rem;
-            font-size: 16px;
-            font-weight: 600;
-            background: var(--color-creme);
-            border-width: 2px;
-            border-style: solid;
-        }
-        .btn-confirmar {
-            position: relative;
-            overflow: hidden;
-            border-color: var(--cor-risco);
-            color: var(--cor-risco);
-        }
-        .btn-confirmar__fill {
-            position: absolute;
-            inset: 0;
-            width: 0%;
-            background: var(--cor-risco-faixa);
-            border-bottom: 4px solid var(--cor-risco);
-            z-index: 0;
-        }
-        .btn-confirmar__label {
-            position: relative;
-            z-index: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            line-height: 1.1;
-            pointer-events: none;
-        }
-        .btn-confirmar__label .pequeno { font-family: var(--fonte-mono); font-size: 12px; font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; }
-        .btn-confirmar__label .grande { font-family: var(--fonte-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
-
-        .btn-editar,
-        .btn-cancelar {
-            border-color: var(--color-tinta-2);
-            color: var(--color-tinta);
-        }
-        /* Revisar só valida (não grava): destaque da bancada, não a cor do risco. */
-        .btn-revisar {
-            border-color: var(--color-aco);
-            color: var(--color-aco);
-        }
-
-        /* Popup de resultado. Sem fade (bancada não anima); o de erro fica até o usuário fechar (seção 7). */
-        #overlay-popup {
-            position: fixed;
-            inset: 0;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-            background: color-mix(in srgb, var(--color-tinta) 15%, transparent);
-        }
-        #popup {
-            background: var(--color-creme);
-            border-radius: 10px;
-            padding: 1.5rem 2rem;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.75rem;
-            max-width: 460px;
-            font-size: 1.05rem;
-            font-weight: 600;
-        }
-        #popup .popup-fechar { min-height: 44px; padding: 0.5rem 1rem; font-weight: 400; }
-        #popup.sucesso { color: var(--color-sucesso); border: 2px solid var(--color-sucesso); }
-        #popup.erro { color: var(--color-erro); border: 2px solid var(--color-erro); }
-        #popup.neutro { color: var(--color-tinta); border: 2px solid var(--color-tinta-2); }
-
-    </style>
-@endpush
 
 <div id="status-anuncio" class="sr-only" aria-live="assertive"></div>
 
 <div id="overlay-popup">
-    <div id="popup"></div>
+    <div id="popup" role="dialog" aria-modal="true" aria-label="Resultado da operação"></div>
 </div>
 
 <script>
@@ -243,7 +75,12 @@
         function adicionarMensagem(texto, classe) {
             const div = document.createElement('div');
             div.className = 'msg ' + classe;
-            div.textContent = texto;
+            const speaker = document.createElement('span');
+            speaker.className = 'msg__speaker';
+            speaker.textContent = classe === 'msg--usuario' ? 'Você' : classe === 'msg--erro' ? 'Atenção' : 'Sentinel';
+            const content = document.createElement('span');
+            content.textContent = texto;
+            div.append(speaker, content);
             historico.appendChild(div);
         }
 
@@ -270,6 +107,7 @@
             colunas.forEach(c => {
                 const th = document.createElement('th');
                 th.textContent = c;
+                th.scope = 'col';
                 trCabecalho.appendChild(th);
             });
             if (temAcao) {
@@ -294,6 +132,7 @@
                     if (l.acao && l.acao.tool) {
                         const acao = l.acao;
                         botao.textContent = acao.rotulo;
+                        if (acao.tool.startsWith('excluir_definitivo_')) botao.classList.add('btn-danger');
                         botao.setAttribute('aria-label', acao.rotulo + ' o registro ' + l.id);
                         botao.addEventListener('click', () => abrirFormulario(acao.tool, l.id, botao));
                         td.appendChild(botao);
@@ -312,7 +151,14 @@
             // Tabela larga rola dentro do próprio contêiner, nunca a página (375 px; skill seção 9).
             const rolagem = document.createElement('div');
             rolagem.className = 'tabela-rolagem';
+            rolagem.tabIndex = 0;
+            rolagem.setAttribute('role', 'region');
+            rolagem.setAttribute('aria-label', 'Resultado da consulta');
             rolagem.appendChild(table);
+            const resumo = document.createElement('div');
+            resumo.className = 'tabela-resumo';
+            resumo.textContent = linhas.length + ' registro(s) encontrado(s)';
+            historico.appendChild(resumo);
             historico.appendChild(rolagem);
             if (exportar) {
                 const botaoExportar = document.createElement('button');
@@ -337,6 +183,9 @@
         function mostrarPopup(estado, texto) {
             clearTimeout(timerPopup);
             popup.className = estado;
+            popup.setAttribute('role', estado === 'erro' ? 'alertdialog' : 'status');
+            if (estado === 'erro') popup.setAttribute('aria-modal', 'true');
+            else popup.removeAttribute('aria-modal');
             popup.textContent = texto;
             overlayPopup.style.display = 'flex';
             if (estado === 'erro') {
@@ -356,6 +205,10 @@
         }
 
         document.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab' && popup.classList.contains('erro') && overlayPopup.style.display === 'flex') {
+                e.preventDefault();
+                popup.querySelector('.popup-fechar')?.focus();
+            }
             if (e.key === 'Escape' && popup.classList.contains('erro') && overlayPopup.style.display === 'flex') {
                 fecharPopup();
                 focarPagina();
@@ -557,6 +410,7 @@
             card.className = 'card-confirmacao card--risco-' + (RISCOS.includes(risco) ? risco : 'exclusao');
             card.setAttribute('aria-label', 'Confirmação necessária: ' + formulario.titulo);
             card.innerHTML = `
+                <div class="card-overline"><span>AÇÃO PROPOSTA</span><span class="card-risco"></span></div>
                 <strong class="card-titulo">Confirmação necessária: <span class="card-acao"></span></strong>
                 <div class="msg msg--erro card-resumo-erro" role="alert" hidden>Confira os campos destacados. Nada foi gravado.</div>
                 <dl class="card-registro" hidden></dl>
@@ -590,6 +444,7 @@
             `;
             card.querySelector('.card-acao').textContent = formulario.titulo;
 
+            card.querySelector('.card-risco').textContent = ({ leitura: 'Leitura', escrita: 'Escrita', exclusao: 'Exclusão' })[risco] || 'Exclusão';
             const form = card.querySelector('.card-form');
             const campos = card.querySelector('.card-campos');
             const registro = card.querySelector('.card-registro');

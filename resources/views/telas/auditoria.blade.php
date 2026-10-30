@@ -2,36 +2,15 @@
 
 @section('titulo', 'Auditoria')
 
-@push('estilos')
-    <style>
-        /* B3: tela da auditoria (só admin). Tokens vêm da casca. */
-        .intro { color: var(--color-tinta-2); margin-top: 0; }
-        .painel { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem; margin-bottom: 1rem; }
-        .campo { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
-        .campo label { font-size: 15px; color: var(--color-tinta-2); }
-        .campo input, .campo select { min-height: 44px; padding: 0.4rem 0.6rem; font: inherit; background: var(--color-creme); color: var(--color-tinta); border: 1px solid var(--color-borda-campo); border-radius: 6px; max-width: 100%; }
-        .painel button, .paginacao button, .btn-ver { min-height: 44px; padding: 0.4rem 1rem; }
-        .msg { padding: 0.6rem 0.8rem; border-radius: 6px; overflow-wrap: anywhere; }
-        .msg--erro { background: var(--color-erro-faixa); color: var(--color-erro); }
-        .carregando { margin: 0 0 1rem; color: var(--color-tinta-2); }
-        .carregando__barra { height: 1px; margin-top: 0.25rem; background: var(--color-aco); }
-        .tabela-rolagem { max-width: 100%; overflow-x: auto; margin-bottom: 0.75rem; }
-        table { border-collapse: collapse; width: 100%; font-size: 15px; }
-        th, td { border: 1px solid var(--color-borda); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-        th { background: var(--color-borda); }
-        .paginacao { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem; }
-        .detalhe { border: 2px solid var(--color-tinta-2); border-radius: 6px; padding: 0.75rem 1rem; }
-        .detalhe h2 { font-family: var(--fonte-titulo); font-weight: 400; font-size: 1.1rem; margin-top: 0; }
-        .detalhe h3 { font-size: 1rem; margin-bottom: 0.4rem; }
-        .detalhe dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; }
-        .detalhe dt { color: var(--color-tinta-2); }
-        .detalhe dd { margin: 0; overflow-wrap: anywhere; }
-    </style>
-@endpush
+
 
 @section('conteudo')
+    <header class="page-header">
+    <p class="eyebrow">Rastreabilidade</p>
     <h1>Auditoria</h1>
-    <p class="intro">Tudo o que foi pedido, revisado, confirmado, cancelado ou negado neste escritório. Dados pessoais aparecem mascarados.</p>
+    <p class="intro">Veja quem pediu, o que foi executado e o resultado. Dados pessoais aparecem mascarados.</p>
+
+    </header>
 
     <form id="form-auditoria" class="painel" aria-label="Filtros da auditoria">
         <div class="campo">
@@ -77,8 +56,10 @@
                 <option value="revisoes">Só revisões com erro</option>
             </select>
         </div>
+        <div class="painel__acoes">
         <button type="submit" id="botao-filtrar" data-foco>Filtrar</button>
         <button type="button" id="botao-exportar">Exportar CSV</button>
+        </div>
     </form>
 
     <div id="carregando" class="carregando" hidden>
@@ -144,6 +125,7 @@
             if (!dados.registros.length) {
                 const p = document.createElement('p');
                 p.textContent = 'Nenhum registro encontrado.';
+                p.className = 'empty-state';
                 lista.replaceChildren(p);
                 paginacao.hidden = true;
                 return;
@@ -153,6 +135,7 @@
             ['Data', 'Usuário', 'Papel', 'Ação', 'Registro', 'Resultado', 'Origem', 'Detalhe'].forEach((titulo) => {
                 const th = document.createElement('th');
                 th.textContent = titulo;
+                th.scope = 'col';
                 cabecalho.appendChild(th);
             });
             const tbody = table.createTBody();
@@ -163,7 +146,11 @@
                 celula(tr, legivel(r.papel));
                 celula(tr, legivel(r.tool));
                 celula(tr, registro(r));
-                celula(tr, RESULTADOS[r.resultado] || legivel(r.resultado));
+                const status = document.createElement('span');
+                status.className = 'status-badge status--' + (Object.hasOwn(RESULTADOS, r.resultado) ? r.resultado : 'neutro');
+                status.textContent = RESULTADOS[r.resultado] || legivel(r.resultado);
+                const statusCell = tr.insertCell();
+                statusCell.appendChild(status);
                 celula(tr, ORIGENS[r.origem] || legivel(r.origem));
                 const td = document.createElement('td');
                 const botao = document.createElement('button');
@@ -177,6 +164,9 @@
             });
             const rolagem = document.createElement('div');
             rolagem.className = 'tabela-rolagem';
+            rolagem.tabIndex = 0;
+            rolagem.setAttribute('role', 'region');
+            rolagem.setAttribute('aria-label', 'Registros de auditoria');
             rolagem.appendChild(table);
             lista.replaceChildren(rolagem);
 

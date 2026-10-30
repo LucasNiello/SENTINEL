@@ -3,20 +3,42 @@
 @section('titulo', 'Agente')
 
 @section('conteudo')
-    <h1>Agente</h1>
+    <header class="page-header">
+        <p class="eyebrow">Agente</p>
+        <h1>Converse com seus dados.</h1>
+        <p class="intro">Consulte informações e prepare operações em linguagem natural.</p>
+    </header>
+    <section class="agent-workspace" aria-label="Conversa com o Sentinel">
 
-    <div id="historico" aria-live="polite"></div>
+    <div id="historico" aria-live="polite">
+        <div class="agent-empty">
+            <p class="eyebrow">SENTINEL · A seu serviço</p>
+            <h2>O que você precisa consultar?</h2>
+            <p>Peça em linguagem natural. Antes de qualquer gravação, você revisa e confirma.</p>
+            <div class="agent-suggestions" aria-label="Exemplos de pedidos">
+                <button type="button" data-suggestion="liste meus clientes">Liste meus clientes <span aria-hidden="true">↗</span></button>
+                <button type="button" data-suggestion="quais lançamentos estão pendentes?">Lançamentos pendentes <span aria-hidden="true">↗</span></button>
+                @if (in_array(auth()->user()->papel, ['operador', 'admin'], true))
+                    <button type="button" data-suggestion="cadastre um cliente chamado ">Cadastre um cliente <span aria-hidden="true">↗</span></button>
+                @endif
+            </div>
+        </div>
+    </div>
 
     <div id="carregando" class="carregando" hidden>
         <span>Consultando…</span>
         <div class="carregando__barra"></div>
     </div>
 
+    <div class="agent-composer">
     <form id="form-comando">
         <label for="campo-mensagem" class="sr-only">Seu pedido ao agente</label>
-        <input type="text" id="campo-mensagem" data-foco placeholder="Pergunte algo sobre os lançamentos..." required>
-        <button type="submit" id="botao-enviar">Enviar</button>
+        <input type="text" id="campo-mensagem" data-foco placeholder="Escreva seu pedido…" required>
+        <button type="submit" id="botao-enviar">Enviar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button>
     </form>
+    <p class="composer-note">Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
+    </div>
+    </section>
 
 
     @include('partials.bancada')

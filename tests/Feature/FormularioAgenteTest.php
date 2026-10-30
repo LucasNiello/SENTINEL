@@ -745,7 +745,7 @@ class FormularioAgenteTest extends TestCase
             ->assertSee("fetch('/agente/editar'", false)
             ->assertSee('const PRAZO_RASCUNHO_MS = 300000;', false)
             ->assertSee('Confira os dados e clique em Revisar.')
-            ->assertSee('.campo[hidden] { display: none; }', false)
+            ->assertSee('class="card-autorizacao" hidden', false)
             ->assertSee("entrada.inputMode = campo.inteiro ? 'numeric' : 'decimal';", false)
             ->assertSee('Informado (oculto por segurança). Deixe em branco para manter.')
             ->assertSee('Só números, com ponto nos centavos (ex.: 4567.89).')
