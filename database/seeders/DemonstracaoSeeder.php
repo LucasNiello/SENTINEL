@@ -28,12 +28,25 @@ class DemonstracaoSeeder extends Seeder
 
     public const TENANT_ISOLAMENTO = 102;
 
+    private const SENHA_MINIMO = 12;
+
+    private const SENHAS_CONHECIDAS = ['sentinel123', 'password', '12345678', '123456789', 'admin123', 'senha123'];
+
     public function run(): void
     {
         $senha = (string) env('DEMO_SENHA', '');
 
         if ($senha === '') {
             throw new \RuntimeException('Defina a variável de ambiente DEMO_SENHA (senha dos usuários de demonstração) antes de rodar o DemonstracaoSeeder. Nada foi gravado.');
+        }
+
+        // As mensagens nunca repetem a senha recebida. Espaços nas pontas não contam.
+        if (in_array(mb_strtolower(trim($senha)), self::SENHAS_CONHECIDAS, true)) {
+            throw new \RuntimeException('DEMO_SENHA está na lista de senhas conhecidas; escolha outra. Nada foi gravado.');
+        }
+
+        if (mb_strlen(trim($senha)) < self::SENHA_MINIMO) {
+            throw new \RuntimeException('DEMO_SENHA é curta demais: use pelo menos '.self::SENHA_MINIMO.' caracteres. Nada foi gravado.');
         }
 
         DB::transaction(function () use ($senha) {

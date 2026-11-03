@@ -49,8 +49,3 @@ Route::middleware('auth')->group(function () {
         Route::post('/agente/exportar', [AgenteController::class, 'exportar'])->middleware('throttle:exportar');
     });
 });
-
-// AMOSTRA: telas de demonstração com dados fictícios (sem login e sem banco). Fora do ar em produção.
-if (! app()->environment('production')) {
-    require __DIR__.'/amostra.php';
-}

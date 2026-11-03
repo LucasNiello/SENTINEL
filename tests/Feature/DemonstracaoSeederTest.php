@@ -140,6 +140,45 @@ class DemonstracaoSeederTest extends TestCase
         $this->assertSame(0, array_sum($this->contagens()));
     }
 
+    private function assertSenhaRecusada(string $senha, string $trecho): void
+    {
+        $this->definirSenha($senha);
+
+        try {
+            (new DemonstracaoSeeder)->run();
+            $this->fail('A senha fraca deveria ser recusada.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString($trecho, $e->getMessage());
+            $this->assertStringNotContainsStringIgnoringCase(trim($senha), $e->getMessage());
+        }
+
+        $this->assertSame(0, array_sum($this->contagens()));
+    }
+
+    public function test_demo_senha_curta_e_recusada_sem_gravar_nada(): void
+    {
+        $this->assertSenhaRecusada('Curta-9x!', 'curta demais');
+        // Espaços nas pontas não completam os 12 caracteres.
+        $this->assertSenhaRecusada('   abc123    ', 'curta demais');
+    }
+
+    public function test_demo_senha_conhecida_e_recusada_sem_gravar_nada(): void
+    {
+        // A lista é checada antes do tamanho, sem diferenciar maiúsculas e ignorando espaços nas pontas.
+        $this->assertSenhaRecusada('sentinel123', 'senhas conhecidas');
+        $this->assertSenhaRecusada('  SENTINEL123  ', 'senhas conhecidas');
+        $this->assertSenhaRecusada('Admin123', 'senhas conhecidas');
+    }
+
+    public function test_demo_senha_forte_cria_as_contas(): void
+    {
+        $this->definirSenha('Forte-e-Comprida-2026');
+        $this->semear();
+
+        $this->assertSame(4, User::query()->count());
+        $this->assertTrue(Hash::check('Forte-e-Comprida-2026', User::where('email', 'leitura@demo.sentinel.local')->value('password')));
+    }
+
     public function test_excluir_a_oficina_vem_bloqueado_com_motivo_em_linguagem_simples(): void
     {
         $this->definirSenha(self::SENHA);
