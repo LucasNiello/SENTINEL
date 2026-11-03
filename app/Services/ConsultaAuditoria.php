@@ -22,6 +22,9 @@ class ConsultaAuditoria
 
     public const POR_PAGINA = 25;
 
+    /** Teto do CSV: acima disso recusa pedindo filtro menor (nunca corta em silêncio). */
+    public const TETO_EXPORTACAO = 5000;
+
     /** Filtro "grupo": desfechos (RESULTADOS_FINAIS) ou só as revisões recusadas (não-final). */
     public const GRUPOS = ['desfechos', 'revisoes'];
 
@@ -78,11 +81,26 @@ class ConsultaAuditoria
         ];
     }
 
-    /** Mesmos filtros/tenant da lista, todas as páginas; sem parâmetros ou salários. */
-    public function exportar(array $filtros): array
+    /**
+     * Mesmos filtros/tenant da lista, todas as páginas; sem parâmetros ou salários.
+     * Acima de TETO_EXPORTACAO: audita "recusado" e devolve null (quem chama pede filtro menor).
+     */
+    public function exportar(array $filtros): ?array
     {
         $this->autorizar('exportar');
-        $linhas = $this->consulta($filtros)->get()->map(fn (AuditLog $log) => [
+        $filtrosAuditados = Arr::except($filtros, ['pagina']);
+        $registros = $this->consulta($filtros)->limit(self::TETO_EXPORTACAO + 1)->get();
+
+        if ($registros->count() > self::TETO_EXPORTACAO) {
+            app(DetalhesAuditoria::class)->com(['origem' => 'manual'], fn () => $this->auditoria->registrar(
+                self::TOOL, 'exportar', 'AuditLog', null, $filtrosAuditados,
+                'recusado', 'Mais de '.self::TETO_EXPORTACAO.' registros no filtro.', $this->contexto->papel(), true,
+            ));
+
+            return null;
+        }
+
+        $linhas = $registros->map(fn (AuditLog $log) => [
             'ID' => $log->id,
             'Data' => $log->created_at?->format('Y-m-d H:i:s'),
             'Usuário' => $log->usuario?->name,
@@ -96,7 +114,7 @@ class ConsultaAuditoria
         ])->all();
 
         app(DetalhesAuditoria::class)->com(['origem' => 'manual'], fn () => $this->auditoria->registrar(
-            self::TOOL, 'exportar', 'AuditLog', null, Arr::except($filtros, ['pagina']),
+            self::TOOL, 'exportar', 'AuditLog', null, $filtrosAuditados,
             'sucesso', count($linhas).' registros exportados.', $this->contexto->papel(), true,
         ));
 

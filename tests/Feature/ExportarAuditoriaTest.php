@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
+use App\Services\ConsultaAuditoria;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -62,6 +63,30 @@ class ExportarAuditoriaTest extends TestCase
 
         // Conteúdo da célula já sem as aspas do CSV: o apóstrofo vem antes do =.
         $this->assertSame('\'=HYPERLINK("http://x.test","clique")', $usuario);
+    }
+
+    public function test_acima_do_teto_recusa_sem_cortar_e_audita(): void
+    {
+        $user = $this->logarComo('admin', 1);
+        $agora = now()->toDateTimeString();
+        $linha = ['user_id' => $user->id, 'tool' => 'criar_cliente', 'acao' => 'criar', 'entidade_tipo' => 'Cliente',
+            'resultado' => 'sucesso', 'papel' => 'admin', 'permitido' => true, 'tenant_id' => 1, 'parametros' => '[]',
+            'created_at' => $agora, 'updated_at' => $agora];
+        foreach (array_chunk(array_fill(0, ConsultaAuditoria::TETO_EXPORTACAO + 1, $linha), 500) as $bloco) {
+            AuditLog::insert($bloco);
+        }
+
+        $this->get('/auditoria/exportar?tool=criar_cliente')->assertStatus(422)->assertJsonPath('codigo', 'AI_EXPORT_TOO_LARGE');
+        $this->assertSame(['recusado'], AuditLog::where('tool', 'consultar_auditoria')->pluck('resultado')->all());
+    }
+
+    public function test_nao_admin_com_filtro_invalido_recebe_a_mesma_negacao_auditada(): void
+    {
+        $this->logarComo('operador');
+        $this->getJson('/auditoria/registros?de=invalido')->assertForbidden()->assertJsonPath('codigo', 'AI_FORBIDDEN');
+        $this->get('/auditoria/exportar?de[]=x')->assertForbidden();
+        $this->assertSame(['consultar', 'exportar'], AuditLog::where('tool', 'consultar_auditoria')
+            ->where('resultado', 'negado')->orderBy('id')->pluck('acao')->all());
     }
 
     public function test_sexta_exportacao_no_minuto_recebe_429(): void

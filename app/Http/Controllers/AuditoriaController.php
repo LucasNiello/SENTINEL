@@ -33,6 +33,14 @@ class AuditoriaController extends Controller
 
     private function responder(Request $request, bool $exportar)
     {
+        // O papel vem antes dos filtros: quem não é admin recebe a mesma negação auditada,
+        // com filtro válido ou não (a validação não pode responder antes da permissão).
+        try {
+            $this->consulta->autorizar($exportar ? 'exportar' : 'consultar');
+        } catch (AuthorizationException) {
+            return $this->semPermissao();
+        }
+
         $validador = Validator::make($request->query(), [
             'de' => 'nullable|string|date_format:Y-m-d',
             // Só com "de" em texto: sem ele, o after_or_equal compararia com o texto "de"; com "de" em
@@ -59,6 +67,10 @@ class AuditoriaController extends Controller
             $filtros = array_filter($validador->validated(), fn ($valor) => $valor !== null && $valor !== '');
             if ($exportar) {
                 $linhas = $this->consulta->exportar($filtros);
+                if ($linhas === null) {
+                    return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_EXPORT_TOO_LARGE', 'http_status' => 422,
+                        'mensagem' => 'Esse filtro tem mais de '.ConsultaAuditoria::TETO_EXPORTACAO.' registros. Restrinja o período para exportar.'], 422);
+                }
                 $colunas = ['ID', 'Data', 'Usuário', 'Papel', 'Ação', 'Entidade', 'Registro', 'Resultado', 'Origem', 'Lote'];
 
                 return response(PlanilhaCsv::gerar($colunas, $linhas), 200, [

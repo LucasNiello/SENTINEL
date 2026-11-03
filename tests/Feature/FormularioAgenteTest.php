@@ -745,6 +745,8 @@ class FormularioAgenteTest extends TestCase
             ->assertSee("fetch('/agente/editar'", false)
             ->assertSee('const PRAZO_RASCUNHO_MS = 300000;', false)
             ->assertSee('Confira os dados e clique em Revisar.')
+            ->assertDontSee("etapa.textContent = 'Confira os dados e clique em Revisar.';", false)
+            ->assertSee('A senha do administrador foi apagada. Digite o e-mail e a senha de novo antes de Revisar.')
             ->assertSee('.campo[hidden] { display: none; }', false)
             ->assertSee("entrada.inputMode = campo.inteiro ? 'numeric' : 'decimal';", false)
             ->assertSee('Informado (oculto por segurança). Deixe em branco para manter.')
