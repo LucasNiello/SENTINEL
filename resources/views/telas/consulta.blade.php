@@ -2,23 +2,14 @@
 
 @section('titulo', $titulo)
 
-@push('estilos')
-    <style>
-        /* B3: telas Cadastros e Lixeira (modo manual, sem IA). Tokens vêm da casca. */
-        .intro { color: var(--color-tinta-2); margin-top: 0; }
-        .painel { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem; margin-bottom: 1rem; }
-        .filtros { display: contents; }
-        .campo { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
-        .campo label { font-size: 15px; color: var(--color-tinta-2); }
-        .campo input, .campo select { min-height: 44px; padding: 0.4rem 0.6rem; font: inherit; background: var(--color-creme); color: var(--color-tinta); border: 1px solid var(--color-borda-campo); border-radius: 6px; max-width: 100%; }
-        .painel__acoes { display: flex; gap: 0.5rem; }
-        .painel__acoes button { min-height: 44px; padding: 0.4rem 1rem; }
-    </style>
-@endpush
+
 
 @section('conteudo')
-    <h1>{{ $titulo }}</h1>
-    <p class="intro">{{ $intro }}</p>
+    <header class="page-header">
+        <p class="eyebrow">{{ $titulo === 'Lixeira' ? 'Gestão de registros' : 'Organização' }}</p>
+        <h1>{{ $titulo }}</h1>
+        <p class="intro">{{ $intro }}</p>
+    </header>
 
     <form id="form-consulta" class="painel" aria-label="Filtros">
         @if (count($entidades) > 1)
