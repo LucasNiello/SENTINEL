@@ -41,7 +41,7 @@ class AuditoriaService
 
     /**
      * @param  string  $resultado  desfechos (finais): 'sucesso' | 'erro' (falha técnica) | 'recusado' (regra de negócio
-     *                             na execução ou prazo) | 'negado' (RBAC/whitelist) | 'cancelado' | 'expirado';
+     *                             na execução ou prazo) | 'negado' (RBAC/whitelist/divergência de intenção) | 'cancelado' | 'expirado';
      *                             não-final: REVISAO_COM_ERRO (o Revisar recusou os valores; a proposta segue em rascunho)
      */
     public function registrar(

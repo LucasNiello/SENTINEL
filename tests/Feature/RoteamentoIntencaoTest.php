@@ -112,7 +112,9 @@ class RoteamentoIntencaoTest extends TestCase
         $this->logarComo('admin');
         Http::fake(fn () => Http::response($this->respostaTool('consultar_clientes')));
         $this->postJson('/agente/comando', ['mensagem' => $pedido])->assertStatus(422)->assertJsonPath('codigo', 'AI_INTENT_MISMATCH');
-        $this->assertSame(0, AuditLog::count());
+        $log = AuditLog::sole();
+        $this->assertSame(['negado', false], [$log->resultado, (bool) $log->permitido]);
+        $this->assertNotSame('consultar_clientes', $log->tool);
         $this->assertSame(0, Cliente::count());
         $this->assertEmpty(session('confirmacoes', []));
     }
@@ -124,7 +126,38 @@ class RoteamentoIntencaoTest extends TestCase
         $body['choices'][0]['message']['tool_calls'][] = ['function' => ['name' => 'consultar_fornecedores', 'arguments' => '{}']];
         Http::fake(fn () => Http::response($body));
         $this->postJson('/agente/comando', ['mensagem' => 'exclua o cliente Horizonte'])->assertStatus(422);
-        $this->assertSame(0, AuditLog::count());
+        $log = AuditLog::sole();
+        $this->assertSame(['excluir_cliente', 'negado'], [$log->tool, $log->resultado]);
+    }
+
+    public function test_divergencia_audita_negado_so_com_os_nomes_dos_argumentos(): void
+    {
+        $this->logarComo('admin');
+        Http::fake(fn () => Http::response($this->respostaTool('consultar_clientes',
+            ['nome' => 'Horizonte', 'cpf' => '12345678909', 'x9' => 'qa@exemplo.com'])));
+
+        $this->postJson('/agente/comando', ['mensagem' => 'exclua o cliente Horizonte'])->assertStatus(422);
+
+        $log = AuditLog::sole();
+        $this->assertSame(['excluir_cliente', 'negado', false], [$log->tool, $log->resultado, (bool) $log->permitido]);
+        $this->assertNotNull($log->tempo_ia_ms);
+        $this->assertEqualsCanonicalizing(['nome', 'cpf', '[chave redigida]'], array_keys($log->parametros));
+        foreach (['Horizonte', '12345678909', 'qa@exemplo.com', 'x9'] as $valor) {
+            $this->assertStringNotContainsString($valor, json_encode($log->getAttributes()));
+        }
+    }
+
+    public function test_item_de_tool_calls_fora_do_formato_audita_e_responde_422(): void
+    {
+        $this->logarComo('admin');
+        $body = $this->respostaTool('excluir_cliente');
+        $body['choices'][0]['message']['tool_calls'] = ['x'];
+        Http::fake(fn () => Http::response($body));
+
+        $this->postJson('/agente/comando', ['mensagem' => 'exclua o cliente Horizonte'])
+            ->assertStatus(422)->assertJsonPath('codigo', 'AI_INTENT_MISMATCH');
+        $log = AuditLog::sole();
+        $this->assertSame(['excluir_cliente', 'negado', []], [$log->tool, $log->resultado, $log->parametros]);
     }
 
     public static function consultas(): array

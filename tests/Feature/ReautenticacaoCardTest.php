@@ -120,6 +120,29 @@ class ReautenticacaoCardTest extends TestCase
         $this->assertNotEmpty(Http::recorded(), 'houve pedido à IA para conferir');
     }
 
+    public function test_editar_invalida_token_de_restauracao_e_nova_revisao_nao_reutiliza_credenciais(): void
+    {
+        $cliente = $this->naLixeira();
+        $this->freezeTime();
+        $proposta = $this->postJson('/agente/formulario', ['tool' => 'restaurar_cliente', 'id' => $cliente->id])
+            ->assertOk()->json('proposta');
+        $token = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => [],
+            'email_admin' => self::EMAIL, 'senha_admin' => self::SENHA])->assertOk()->json('token');
+
+        $this->postJson('/agente/editar', ['token' => $token])->assertOk();
+        $this->confirmarCom($token, ['email_admin' => self::EMAIL, 'senha_admin' => self::SENHA])
+            ->assertStatus(422)->assertJsonPath('mensagem', 'Confirmação inválida ou já utilizada.');
+        $this->assertNull(Cliente::find($cliente->id));
+
+        $novoToken = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []])
+            ->assertOk()->json('token');
+        $this->assertNotSame($token, $novoToken);
+        $this->confirmarCom($novoToken, [])->assertStatus(403)->assertJsonPath('codigo', 'AI_REAUTH_REQUIRED');
+        $this->assertNull(Cliente::find($cliente->id));
+        $this->assertSame(['negado'], AuditLog::query()->pluck('resultado')->all());
+        $this->assertStringNotContainsString(self::SENHA, json_encode(session()->all()).AuditLog::all()->toJson());
+    }
+
     public function test_tool_sem_senha_ignora_e_mail_e_senha_no_corpo(): void
     {
         $token = $this->propor(['nome' => 'Cliente novo'], 'criar_cliente');

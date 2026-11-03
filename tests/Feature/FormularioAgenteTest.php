@@ -746,11 +746,17 @@ class FormularioAgenteTest extends TestCase
             ->assertSee('const PRAZO_RASCUNHO_MS = 300000;', false)
             ->assertSee('Confira os dados e clique em Revisar.')
             ->assertSee('class="card-autorizacao" hidden', false)
+            ->assertDontSee("etapa.textContent = 'Confira os dados e clique em Revisar.';", false)
+            ->assertSee('A senha do administrador foi apagada. Digite o e-mail e a senha de novo antes de Revisar.')
             ->assertSee("entrada.inputMode = campo.inteiro ? 'numeric' : 'decimal';", false)
             ->assertSee('Informado (oculto por segurança). Deixe em branco para manter.')
             ->assertSee('Só números, com ponto nos centavos (ex.: 4567.89).')
             ->assertSee("campo.erro ? 'Digite o valor de novo.'", false)
             ->assertDontSee('card-argumentos', false)
             ->assertDontSee('JSON.stringify(argumentos', false);
+
+        // O redesign moveu os estilos inline para o CSS do workspace: hidden continua obrigatório.
+        $this->assertMatchesRegularExpression('/\[hidden\]\s*\{\s*display\s*:\s*none\s*!important\s*;?\s*\}/',
+            file_get_contents(resource_path('css/workspace.css')));
     }
 }

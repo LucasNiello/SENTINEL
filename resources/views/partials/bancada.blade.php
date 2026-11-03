@@ -26,8 +26,11 @@
         const MINIMO_PARA_SEGURAR_MS = 2500;
         const RISCOS = ['leitura', 'escrita', 'exclusao'];
 
+        // Limpa antes de gravar: o mesmo texto repetido (ex.: dois Editar seguidos) não muda o DOM
+        // e o leitor de tela não o relê.
         function anunciar(texto) {
-            statusAnuncio.textContent = texto;
+            statusAnuncio.textContent = '';
+            setTimeout(() => { statusAnuncio.textContent = texto; }, 50);
         }
 
         // Depois de fechar um popup de erro, o foco volta ao campo principal da tela (marcado com data-foco).
@@ -538,11 +541,16 @@
                 lote.replaceChildren(table);
             }
 
-            preencherFormulario(formulario);
             // O prazo do card começa no Revisar: as credenciais são digitadas antes dele.
-            etapa.textContent = formulario.reautenticar
-                ? 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.'
-                : 'Confira os dados e clique em Revisar.';
+            // Função (não const): o formulario é trocado em preencherFormulario() e o Editar a chama depois.
+            function textoPrimeiraEtapa() {
+                return formulario.reautenticar
+                    ? 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.'
+                    : 'Confira os dados e clique em Revisar.';
+            }
+
+            preencherFormulario(formulario);
+            etapa.textContent = textoPrimeiraEtapa();
             historico.appendChild(card);
             // O alvo precisa estar no DOM para receber foco. Assim quem abre
             // Novo/Editar por teclado entra no formulário, sem voltar à tabela.
@@ -686,9 +694,12 @@
                 btnRevisar.disabled = true;
                 campos.disabled = false;
                 autorizacao.disabled = false;
+                adminEmail.value = '';
                 adminSenha.value = '';
                 aplicarCondicoes(form, formulario.campos);
-                etapa.textContent = 'Confira os dados e clique em Revisar.';
+                etapa.textContent = textoPrimeiraEtapa();
+                // A senha foi apagada: quem usa leitor de tela precisa saber que ela é pedida de novo.
+                if (formulario.reautenticar) anunciar('A senha do administrador foi apagada. Digite o e-mail e a senha de novo antes de Revisar.');
                 const primeiro = form.querySelector('input, select');
                 if (primeiro) primeiro.focus();
                 const resp = await fetch('/agente/editar', {
