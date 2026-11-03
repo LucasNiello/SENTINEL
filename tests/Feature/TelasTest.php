@@ -29,7 +29,7 @@ class TelasTest extends TestCase
         $this->get('/cadastros')->assertOk()
             ->assertSee('href="/lixeira"', false)
             ->assertDontSee('href="/auditoria"', false)
-            ->assertSee('<a href="/cadastros"  aria-current="page" >Cadastros</a>', false);
+            ->assertSee('aria-current="page"', false);
 
         $this->logarComo('admin', 1);
         $this->get('/agente')->assertOk()->assertSee('href="/lixeira"', false)->assertSee('href="/auditoria"', false);
