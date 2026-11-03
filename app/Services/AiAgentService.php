@@ -223,7 +223,8 @@ class AiAgentService
     /**
      * O que fazer com a resposta do provedor (continuação do processar(), já com o tempo da IA
      * no escopo da auditoria). Falha e resposta só de texto não têm linha na auditoria: o tempo
-     * vai só para o log, sem conteúdo.
+     * vai só para o log, sem conteúdo. Exceção: a divergência de intenção (AI_INTENT_MISMATCH)
+     * é auditada como negado, só com os nomes dos argumentos.
      */
     private function interpretar(\Illuminate\Http\Client\Response $resposta, int $tempoIaMs, ?string $toolSolicitada = null): array
     {
@@ -281,6 +282,7 @@ class AiAgentService
         if ($toolSolicitada !== null && ! empty($toolCalls)) {
             foreach ($toolCalls as $pedido) {
                 if (($pedido['function']['name'] ?? null) !== $toolSolicitada) {
+                    $this->auditarDivergencia($toolSolicitada, $pedido);
                     return $this->falha('intent_mismatch', 'AI_INTENT_MISMATCH', 422, [], null,
                         'O agente não manteve a operação solicitada. Nada foi executado. Reformule o pedido.');
                 }
@@ -506,10 +508,8 @@ class AiAgentService
             // Fica só o nome de cada argumento, nunca o valor — e nome com dígito ou fora do formato de
             // identificador (onde caberia um CPF ou e-mail) também é redigido, assim como o nome da tool.
             // O proposto (se a confirmação abriu escopo com ele) também não vai: sem esquema, nada de valores.
-            $identificador = fn ($nome, string $redigido) => is_string($nome) && preg_match('/^[a-z_]{1,40}$/D', $nome) === 1 ? $nome : $redigido;
-            $chaves = array_slice(array_map(fn ($chave) => $identificador($chave, '[chave redigida]'), array_keys($argumentos)), 0, 20);
-            $this->detalhesAuditoria->com(['parametros_propostos' => null], fn () => $this->auditar($identificador($tool, '[tool redigida]'), 'desconhecida',
-                null, null, array_fill_keys($chaves, AuditoriaService::REDIGIDO), 'negado', 'Tool fora do catálogo.', false));
+            $this->detalhesAuditoria->com(['parametros_propostos' => null], fn () => $this->auditar($this->identificador($tool, '[tool redigida]'), 'desconhecida',
+                null, null, $this->soNomesDosArgumentos($argumentos), 'negado', 'Tool fora do catálogo.', false));
 
             throw new InvalidArgumentException("Tool desconhecida: {$tool}");
         }
@@ -2184,6 +2184,39 @@ class AiAgentService
                 'local' => basename($e->getFile()).':'.$e->getLine(),
             ]);
         }
+    }
+
+    /** Nome fora do formato de identificador (onde caberia um CPF ou e-mail) é redigido. */
+    private function identificador(mixed $nome, string $redigido): string
+    {
+        return is_string($nome) && preg_match('/^[a-z_]{1,40}$/D', $nome) === 1 ? $nome : $redigido;
+    }
+
+    /** LGPD: só o nome de cada argumento (até 20), nunca o valor. */
+    private function soNomesDosArgumentos(array $argumentos): array
+    {
+        $chaves = array_slice(array_map(fn ($chave) => $this->identificador($chave, '[chave redigida]'), array_keys($argumentos)), 0, 20);
+
+        return array_fill_keys($chaves, AuditoriaService::REDIGIDO);
+    }
+
+    /**
+     * RF06: a IA devolveu outra operação que não a pedida. Fica a tool pedida, o nome da devolvida
+     * e só os nomes dos argumentos, como na tool fora do catálogo. JSON inválido: nenhum nome.
+     * Sem definição no catálogo, audita como desconhecida: a auditoria nunca derruba a resposta.
+     */
+    private function auditarDivergencia(string $toolSolicitada, mixed $pedido): void
+    {
+        // mixed: o provedor é externo e um item de tool_calls pode não ser array; o ?? cobre isso, nunca vira 500.
+        $bruto = $pedido['function']['arguments'] ?? null;
+        $argumentos = is_string($bruto) ? json_decode($bruto, true, 32) : null;
+        $definicao = $this->catalogo()[$toolSolicitada] ?? null;
+        $devolvida = $this->identificador($pedido['function']['name'] ?? null, '[tool redigida]');
+
+        $this->detalhesAuditoria->com(['parametros_propostos' => null], fn () => $this->auditar($toolSolicitada,
+            $definicao['acao'] ?? 'desconhecida', $definicao['entidade'] ?? null, null,
+            $this->soNomesDosArgumentos(is_array($argumentos) ? $argumentos : []),
+            'negado', "A IA devolveu outra operação ({$devolvida}).", false));
     }
 
     private function auditar(
