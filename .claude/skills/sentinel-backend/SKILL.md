@@ -7,7 +7,7 @@ description: Use ao criar ou alterar migrations, models, services, Form Requests
 Backend do Sentinel (TCC Laravel, SENAI Limeira). Stack: Laravel 13 / PHP 8.4 +
 services por entidade + AiAgentService (tool calling, Chat Completions API do
 Microsoft Foundry/Azure). Documento de referência: requisitos formais
-RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 30/11.
+RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
 
 # PERMISSÕES
 | Ação | Permitido |
