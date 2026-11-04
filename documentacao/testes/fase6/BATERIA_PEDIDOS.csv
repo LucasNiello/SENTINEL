@@ -1,0 +1,41 @@
+n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao
+1;consulta;liste meus clientes;;consultar_clientes;resultado_leitura;
+2;consulta;quais fornecedores eu tenho?;;consultar_fornecedores;resultado_leitura;
+3;consulta;mostre os lançamentos pendentes;;consultar_lancamentos;resultado_leitura;
+4;consulta;quais foram os lançamentos de outubro de 2026?;;consultar_lancamentos;resultado_leitura;
+5;consulta;quais são as categorias de lançamento?;;consultar_categorias_lancamento;resultado_leitura;
+6;consulta;liste as notas fiscais;;consultar_notas_fiscais;resultado_leitura;
+7;consulta;procure o cliente Padaria Pão Dourado;;consultar_clientes;resultado_leitura;
+8;consulta;o que tem na lixeira?;;consultar_lixeira;resultado_leitura;
+9;consulta;mostre os lançamentos de honorários;;consultar_lancamentos;resultado_leitura;
+10;consulta;tem algum fornecedor com Papelaria no nome?;;consultar_fornecedores;resultado_leitura;
+11;cadastro;cadastre o cliente Mercado Bom Preço, telefone 19 99876-5432;;criar_cliente;confirmacao_pendente;completo
+12;cadastro;cadastre um cliente;;criar_cliente;confirmacao_pendente;faltando nome: card com campo marcado
+13;cadastro;crie o fornecedor Gráfica Rápida Limeira;;criar_fornecedor;confirmacao_pendente;completo
+14;cadastro;preciso adicionar um fornecedor novo;;criar_fornecedor;confirmacao_pendente;faltando nome
+15;cadastro;registre um lançamento de 350 reais de conta de luz com data de hoje;;criar_lancamento;confirmacao_pendente;completo (categoria opcional)
+16;cadastro;registre um lançamento;;criar_lancamento;confirmacao_pendente;faltando descrição/valor/data
+17;cadastro;crie a categoria Marketing;;criar_categoria_lancamento;confirmacao_pendente;tipo pode faltar
+18;cadastro;cadastre uma nota fiscal de 1200 reais para o cliente ABC Comércio;;criar_nota_fiscal;confirmacao_pendente;faltando número/data
+19;cadastro;quero cadastrar o cliente Oficina do Zé com email ze@oficina.com.br;;criar_cliente;confirmacao_pendente;completo
+20;cadastro;cadastre a funcionária Ana Souza, cargo auxiliar administrativa;;criar_funcionario;negado;operador não cria funcionário
+21;atualizacao;altera o telefone da Padaria Pão Dourado para 19 3441-2200;;atualizar_cliente;confirmacao_pendente;por nome
+22;atualizacao;atualize o email do fornecedor Papelaria Central para contato@papelariacentral.com.br;;atualizar_fornecedor;confirmacao_pendente;por nome
+23;atualizacao;muda o nome da categoria Impostos e taxas para Impostos;;atualizar_categoria_lancamento;confirmacao_pendente;por nome
+24;atualizacao;marque como conciliado o lançamento da tarifa bancária;;atualizar_status_lancamento;confirmacao_pendente;por descrição
+25;atualizacao;troque o documento do cliente João da Silva Consultoria;;atualizar_cliente;confirmacao_pendente;faltando o novo valor: card
+26;atualizacao;edite o fornecedor Distribuidora Limeira;;atualizar_fornecedor;confirmacao_pendente;sem campo: card de edição
+27;continuacao;edita o segundo;1;atualizar_cliente;confirmacao_pendente;id = 2ª linha da consulta 1
+28;continuacao;altera o telefone do primeiro para 19 3451-0000;2;atualizar_fornecedor;confirmacao_pendente;id = 1ª linha da consulta 2
+29;continuacao;marca o terceiro como conciliado;3;atualizar_status_lancamento;confirmacao_pendente;id = 3ª linha da consulta 3
+30;continuacao;renomeia a última para Taxas bancárias;5;atualizar_categoria_lancamento;confirmacao_pendente;id = última linha da consulta 5
+31;exclusao;exclua o cliente Jonas;;excluir_cliente;negado;operador não exclui
+32;exclusao;apague o fornecedor Cartório do 2º Ofício;;excluir_fornecedor;negado;operador não exclui
+33;exclusao;restaure o cliente Teste;;restaurar_cliente;erro;não está na lixeira: tool certa conta
+34;exclusao;restaure o lançamento venda;;restaurar_lancamento;erro;não está na lixeira: tool certa conta
+35;lote;concilie todos os lançamentos pendentes de outubro de 2026;;conciliar_lancamentos_em_lote;confirmacao_pendente|texto;texto se não houver pendente
+36;lote;concilia os pendentes deste mês;;conciliar_lancamentos_em_lote;confirmacao_pendente|texto;texto se não houver pendente
+37;ambiguo;altera o telefone;;-;texto;deve perguntar de quem
+38;ambiguo;apaga aquele;;-;texto;deve perguntar qual
+39;ambiguo;cadastra o Silva;;-;texto;cliente, fornecedor ou funcionário?
+40;ambiguo;mostra o relatório;;-;texto;qual relatório?
