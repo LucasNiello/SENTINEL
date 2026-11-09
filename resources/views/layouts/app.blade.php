@@ -14,14 +14,17 @@
     // Erros continuam renderizando se o banco/sessão não puder fornecer o usuário.
     $usuario = rescue(fn () => auth()->user(), null, false);
     $papel = $usuario ? rescue(fn () => app(\App\Services\ContextoUsuario::class)->papel(), null, false) : null;
-    $rotulosPapel = ['leitura' => 'Leitura', 'operador' => 'Operador', 'admin' => 'Administrador'];
+    $rotulosPapel = (array) config('sentinel.rotulos_papeis', []);
     $iniciais = $usuario ? collect(preg_split('/[^\p{L}\p{N}]+/u', trim($usuario->name)))->filter()->take(2)->map(fn ($nome) => mb_substr($nome, 0, 1))->implode('') : '';
     $itens = [
         ['agente', 'Agente', 'M4 5h16v11H8l-4 4V5m4 4h8m-8 3h5'],
         ['cadastros', 'Cadastros', 'M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z'],
     ];
-    if (in_array($papel, ['operador', 'admin'], true)) $itens[] = ['lixeira', 'Lixeira', 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5'];
-    if ($papel === 'admin') $itens[] = ['auditoria', 'Auditoria', 'M6 3h9l3 3v15H6V3m4 5h4m-4 4h4m-4 4h4'];
+    // O menu segue as mesmas regras do servidor (que confere de novo em cada rota): a lixeira, a lista de
+    // papéis da tool; a auditoria, o papel administrativo (ConsultaAuditoria).
+    $pode = fn (callable $regra) => $papel !== null && rescue($regra, false, false);
+    if ($pode(fn () => app(\App\Services\AiAgentService::class)->podeExecutar('consultar_lixeira'))) $itens[] = ['lixeira', 'Lixeira', 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5'];
+    if ($pode(fn () => app(\App\Services\ContextoUsuario::class)->ehAdministrativo())) $itens[] = ['auditoria', 'Auditoria', 'M6 3h9l3 3v15H6V3m4 5h4m-4 4h4m-4 4h4'];
 @endphp
 <body class="workspace{{ $usuario ? '' : ' workspace--guest' }}">
     <a class="pular" href="#conteudo">Pular para o conteúdo</a>

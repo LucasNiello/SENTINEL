@@ -34,10 +34,27 @@ class DemonstracaoSeeder extends Seeder
 
     public function run(): void
     {
+        $senha = self::lerDemoSenha('DemonstracaoSeeder');
+
+        DB::transaction(function () use ($senha) {
+            $this->usuarios($senha);
+            $this->tenantDemo();
+            $this->tenantIsolamento();
+        });
+
+        $this->command?->info('Demonstração pronta nos tenants '.self::TENANT_DEMO.' e '.self::TENANT_ISOLAMENTO.'. Senha: a de DEMO_SENHA.');
+    }
+
+    /**
+     * A DEMO_SENHA validada (obrigatória, fora da lista de senhas conhecidas, tamanho mínimo). Um só
+     * lugar para esta regra: o ClinicaSeeder usa a mesma senha e a mesma validação.
+     */
+    public static function lerDemoSenha(string $seeder): string
+    {
         $senha = (string) env('DEMO_SENHA', '');
 
         if ($senha === '') {
-            throw new \RuntimeException('Defina a variável de ambiente DEMO_SENHA (senha dos usuários de demonstração) antes de rodar o DemonstracaoSeeder. Nada foi gravado.');
+            throw new \RuntimeException("Defina a variável de ambiente DEMO_SENHA (senha dos usuários de demonstração) antes de rodar o {$seeder}. Nada foi gravado.");
         }
 
         // As mensagens nunca repetem a senha recebida. Espaços nas pontas não contam.
@@ -49,13 +66,7 @@ class DemonstracaoSeeder extends Seeder
             throw new \RuntimeException('DEMO_SENHA é curta demais: use pelo menos '.self::SENHA_MINIMO.' caracteres. Nada foi gravado.');
         }
 
-        DB::transaction(function () use ($senha) {
-            $this->usuarios($senha);
-            $this->tenantDemo();
-            $this->tenantIsolamento();
-        });
-
-        $this->command?->info('Demonstração pronta nos tenants '.self::TENANT_DEMO.' e '.self::TENANT_ISOLAMENTO.'. Senha: a de DEMO_SENHA.');
+        return $senha;
     }
 
     private function usuarios(string $senha): void

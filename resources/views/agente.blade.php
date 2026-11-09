@@ -21,7 +21,7 @@
             <div class="agent-suggestions" aria-label="Exemplos de pedidos">
                 <button type="button" data-suggestion="liste meus clientes"><small>CONSULTAR</small>Liste meus clientes <span aria-hidden="true">↗</span></button>
                 <button type="button" data-suggestion="quais lançamentos estão pendentes?"><small>FINANCEIRO</small>Lançamentos pendentes <span aria-hidden="true">↗</span></button>
-                @if (in_array(auth()->user()->papel, ['operador', 'admin'], true))
+                @if (app(\App\Services\AiAgentService::class)->podeExecutar('criar_cliente'))
                     <button type="button" data-suggestion="cadastre um cliente chamado "><small>CADASTRO</small>Cadastre um cliente <span aria-hidden="true">↗</span></button>
                 @endif
             </div>
@@ -48,7 +48,7 @@
         <section class="session-context">
             <p class="eyebrow">CONTEXTO ATUAL</p>
             <h2>Seu espaço de decisão.</h2>
-            <dl><dt>CONTA</dt><dd>{{ auth()->user()->name }}</dd><dt>PERFIL</dt><dd>{{ ['leitura' => 'Leitura', 'operador' => 'Operador', 'admin' => 'Administrador'][auth()->user()->papel] ?? auth()->user()->papel }}</dd><dt>MÓDULO</dt><dd>Agente</dd></dl>
+            <dl><dt>CONTA</dt><dd>{{ auth()->user()->name }}</dd><dt>PERFIL</dt><dd>{{ config('sentinel.rotulos_papeis')[auth()->user()->papel] ?? auth()->user()->papel }}</dd><dt>MÓDULO</dt><dd>Agente</dd></dl>
         </section>
         <section class="decision-flow" aria-label="Fluxo de decisão">
             <p class="eyebrow">DO PEDIDO À DECISÃO</p>

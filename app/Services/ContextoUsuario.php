@@ -47,6 +47,18 @@ class ContextoUsuario
         return $papel;
     }
 
+    /**
+     * Papel administrativo (config('sentinel.papeis_administrativos'): admin e, na clínica, dono):
+     * vê a auditoria e o salário no card. Papel desconhecido nunca é administrativo.
+     */
+    public function ehAdministrativo(): bool
+    {
+        $papel = $this->papel();
+
+        return in_array($papel, (array) config('sentinel.papeis', []), true)
+            && in_array($papel, (array) config('sentinel.papeis_administrativos', []), true);
+    }
+
     public function tenantId(): int
     {
         $tenantId = $this->usuario()->tenant_id;

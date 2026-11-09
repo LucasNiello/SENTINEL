@@ -2,12 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Models\CatalogoItem;
 use App\Models\CategoriaLancamento;
 use App\Models\Cliente;
 use App\Models\Fornecedor;
 use App\Models\Funcionario;
 use App\Models\Lancamento;
 use App\Models\NotaFiscal;
+use App\Models\Pet;
+use App\Models\Tutor;
 use Illuminate\Console\Command;
 
 /**
@@ -27,6 +30,10 @@ class ArquivarLixeiraExpirada extends Command
         Fornecedor::class,
         Funcionario::class,
         NotaFiscal::class,
+        // Clínica vet: os três com lixeira.
+        Tutor::class,
+        Pet::class,
+        CatalogoItem::class,
     ];
 
     public function handle(): int

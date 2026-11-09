@@ -4,6 +4,7 @@ namespace App\Services\Concerns;
 
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -23,6 +24,12 @@ trait ExclusaoSegura
     private const ROTULOS_RELACAO = [
         'lancamentos' => 'lançamentos vinculados',
         'notasFiscais' => 'notas fiscais vinculadas',
+        // Clínica vet.
+        'pets' => 'pets vinculados',
+        'vendas' => 'vendas vinculadas',
+        'mensagens' => 'mensagens vinculadas',
+        'agendamentos' => 'agendamentos vinculados',
+        'prontuarios' => 'prontuários vinculados',
     ];
 
     /** Como cada "pai" aparece na frase de recusa da restauração. */
@@ -32,6 +39,7 @@ trait ExclusaoSegura
         'fornecedor' => 'o fornecedor',
         'funcionario' => 'o funcionário',
         'lancamento' => 'o lançamento',
+        'tutor' => 'o tutor',
     ];
 
     /**
@@ -94,7 +102,7 @@ trait ExclusaoSegura
     protected function excluirDeVez(Model $registro, ?int $autorizadoPor): array
     {
         $adminDoTenant = $autorizadoPor !== null && User::query()->whereKey($autorizadoPor)
-            ->where('papel', 'admin')->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
+            ->whereIn('papel', (array) config('sentinel.papeis_administrativos', []))->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
 
         if (! $adminDoTenant) {
             return ['excluido' => false, 'motivo' => 'Para excluir de vez, é preciso a senha de um administrador.'];
@@ -167,7 +175,13 @@ trait ExclusaoSegura
         }
 
         foreach (self::DEPENDENTES as $relacao) {
-            if ($registro->{$relacao}()->withTrashed()->exists()) {
+            $dependentes = $registro->{$relacao}();
+            // Só modelo com lixeira tem withTrashed (agendamento, prontuário, venda e mensagem não têm).
+            if (in_array(SoftDeletes::class, class_uses_recursive($dependentes->getRelated()), true)) {
+                $dependentes->withTrashed();
+            }
+
+            if ($dependentes->exists()) {
                 $rotulo = self::ROTULOS_RELACAO[$relacao] ?? 'registros vinculados';
 
                 return "Não é possível excluir de vez: existem {$rotulo} a este registro, incluindo itens na lixeira ou arquivados.";

@@ -55,6 +55,14 @@ class UserFactory extends Factory
         ]);
     }
 
+    /** Clínica vet: CRMV do veterinário (obrigatório para assinar prontuário). */
+    public function crmv(string $crmv): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'crmv' => $crmv,
+        ]);
+    }
+
     /**
      * Indicate that the model's email address should be unverified.
      */

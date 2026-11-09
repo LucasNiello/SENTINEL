@@ -533,6 +533,7 @@ $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
 try {
     $env:DEMO_SENHA = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
     & "{php}" artisan db:seed --class=DemonstracaoSeeder
+    & "{php}" artisan db:seed --class=ClinicaSeeder
 } finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b)
     Remove-Item Env:DEMO_SENHA -ErrorAction SilentlyContinue

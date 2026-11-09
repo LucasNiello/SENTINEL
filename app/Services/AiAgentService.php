@@ -33,6 +33,19 @@ use Throwable;
 class AiAgentService
 {
     /**
+     * RBAC por lista de papéis (clínica vet, Fase A): cada tool declara QUEM pode usá-la.
+     * Mapeamento PROVISÓRIO das tools do domínio antigo: a hierarquia antiga
+     * (leitura < operador < admin) expandida em listas, com o dono no lugar do admin.
+     * Os outros papéis novos (atendente, vendedor, recepcao, veterinario) não acessam
+     * nenhuma tool antiga; ganham as suas na Fase B.
+     */
+    private const PAPEIS_LEITURA = ['leitura', 'operador', 'admin', 'dono'];
+
+    private const PAPEIS_OPERADOR = ['operador', 'admin', 'dono'];
+
+    private const PAPEIS_ADMIN = ['admin', 'dono'];
+
+    /**
      * Frases amigáveis para as regras de validação usadas nas tools (mesmo
      * espírito do motivo de bloqueio do RF08: sem termo técnico). Chaves
      * "campo.regra" valem só para aquele campo. Se uma tool nova usar outra
@@ -163,7 +176,7 @@ class AiAgentService
         $compativeis = $intencao === null ? [] : array_filter($this->catalogo(), fn ($d) =>
             $d['tipo'] === 'escrita' && $d['acao'] === $intencao['acao'] && $d['entidade'] === $intencao['entidade']);
         $toolSolicitada = count($compativeis) === 1 ? array_key_first($compativeis) : null;
-        if ($toolSolicitada !== null && ! $this->papelAtualPermite($compativeis[$toolSolicitada]['papel_minimo'])) {
+        if ($toolSolicitada !== null && ! $this->papelAtualPermite($compativeis[$toolSolicitada]['papeis'])) {
             // Autorizar antes do provedor: nem uma consulta nem uma falha externa substitui a negativa.
             return $this->negar($toolSolicitada, $compativeis[$toolSolicitada], []);
         }
@@ -348,7 +361,7 @@ class AiAgentService
         $definicao = $this->catalogo()[$tool] ?? null;
 
         if ($definicao !== null && $definicao['tipo'] === 'escrita') {
-            if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+            if (! $this->papelAtualPermite($definicao['papeis'])) {
                 return $this->comAviso($this->negar($tool, $definicao, $argumentos), $aviso);
             }
 
@@ -514,7 +527,7 @@ class AiAgentService
             throw new InvalidArgumentException("Tool desconhecida: {$tool}");
         }
 
-        if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+        if (! $this->papelAtualPermite($definicao['papeis'])) {
             return $this->negar($tool, $definicao, $argumentos);
         }
 
@@ -626,7 +639,7 @@ class AiAgentService
     {
         $atualizar = $toolAtualizar === null ? null : ($this->catalogo()[$toolAtualizar] ?? null);
 
-        return $atualizar !== null && $this->papelAtualPermite($atualizar['papel_minimo']);
+        return $atualizar !== null && $this->papelAtualPermite($atualizar['papeis']);
     }
 
     /**
@@ -639,7 +652,7 @@ class AiAgentService
         $definicao = $this->catalogo()[$tool] ?? null;
         $this->contexto->tenantId(); // sem tenant: AuthenticationException (falha fechada), antes de qualquer senha
 
-        return $definicao !== null && $this->papelAtualPermite($definicao['papel_minimo']);
+        return $definicao !== null && $this->papelAtualPermite($definicao['papeis']);
     }
 
     /** A tool pede a senha de um administrador no card (Bloco 4: restaurar e excluir de vez). */
@@ -779,7 +792,7 @@ class AiAgentService
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada.'];
         }
 
-        if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+        if (! $this->papelAtualPermite($definicao['papeis'])) {
             return $this->detalhesAuditoria->com(['origem' => 'formulario'],
                 fn () => $this->negar($tool, $definicao, $id === null ? [] : ['id' => $id]));
         }
@@ -848,7 +861,7 @@ class AiAgentService
         unset($argumentos['tenant_id']);
 
         return $this->detalhesAuditoria->com(['origem' => $origem], function () use ($tool, $definicao, $argumentos) {
-            if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+            if (! $this->papelAtualPermite($definicao['papeis'])) {
                 return $this->negar($tool, $definicao, $argumentos);
             }
 
@@ -943,7 +956,7 @@ class AiAgentService
         }
 
         return $this->detalhesAuditoria->com(['parametros_propostos' => $propostos, 'origem' => $origem, 'tempo_ia_ms' => $tempoIaMs], function () use ($tool, $definicao, $argumentos, $loteIds) {
-            if (! $this->papelAtualPermite($definicao['papel_minimo'])) {
+            if (! $this->papelAtualPermite($definicao['papeis'])) {
                 return $this->negar($tool, $definicao, $argumentos);
             }
 
@@ -1016,7 +1029,7 @@ class AiAgentService
 
         // Decisão do Lucas (20/10): só o admin vê o salário no card, formatado em reais, para conferir o
         // que vai confirmar. Só nesta resposta ao front: log, histórico e auditoria continuam mascarados.
-        $revelados = $this->contexto->papel() === 'admin' ? ['salario'] : [];
+        $revelados = $this->contexto->ehAdministrativo() ? ['salario'] : [];
 
         $titulo = $definicao['titulo'].(isset($valores['id']) && $definicao['localizar'] !== null ? ' #'.$valores['id'] : '');
 
@@ -1189,7 +1202,7 @@ class AiAgentService
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Lancamento',
-                papelMinimo: 'leitura',
+                papeis: self::PAPEIS_LEITURA,
                 propriedades: [
                     'status' => ['type' => 'string', 'enum' => ['pendente', 'conciliado']],
                     'data_inicio' => ['type' => 'string', 'format' => 'date'],
@@ -1212,7 +1225,7 @@ class AiAgentService
                 risco: 'escrita',
                 acao: 'criar',
                 entidade: 'Lancamento',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'descricao' => ['type' => 'string'],
                     'valor' => ['type' => 'number'],
@@ -1232,7 +1245,7 @@ class AiAgentService
                 risco: 'escrita',
                 acao: 'atualizar',
                 entidade: 'Lancamento',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'id' => ['type' => 'integer', 'description' => 'Id do lançamento a atualizar.'],
                     'novo_status' => ['type' => 'string', 'enum' => ['pendente', 'conciliado']],
@@ -1255,7 +1268,7 @@ class AiAgentService
                 risco: 'escrita',
                 acao: 'atualizar',
                 entidade: 'Lancamento',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'data_inicio' => ['type' => 'string', 'format' => 'date'],
                     'data_fim' => ['type' => 'string', 'format' => 'date'],
@@ -1276,7 +1289,7 @@ class AiAgentService
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Cliente',
-                papelMinimo: 'leitura',
+                papeis: self::PAPEIS_LEITURA,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Parte do nome do cliente.'],
                 ],
@@ -1290,7 +1303,7 @@ class AiAgentService
                 nome: 'criar_cliente',
                 descricao: 'Cadastra um novo cliente. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'Cliente',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'nome' => ['type' => 'string'],
                     'documento' => ['type' => 'string', 'description' => 'CPF ou CNPJ.'],
@@ -1311,7 +1324,7 @@ class AiAgentService
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Fornecedor',
-                papelMinimo: 'leitura',
+                papeis: self::PAPEIS_LEITURA,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Parte do nome do fornecedor.'],
                 ],
@@ -1325,7 +1338,7 @@ class AiAgentService
                 nome: 'criar_fornecedor',
                 descricao: 'Cadastra um novo fornecedor. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'Fornecedor',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'nome' => ['type' => 'string'],
                     'documento' => ['type' => 'string', 'description' => 'CPF ou CNPJ.'],
@@ -1346,7 +1359,7 @@ class AiAgentService
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Funcionario',
-                papelMinimo: 'leitura',
+                papeis: self::PAPEIS_LEITURA,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Parte do nome do funcionário.'],
                 ],
@@ -1361,7 +1374,7 @@ class AiAgentService
                 nome: 'criar_funcionario',
                 descricao: 'Cadastra um novo funcionário. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'Funcionario',
-                papelMinimo: 'admin',
+                papeis: self::PAPEIS_ADMIN,
                 propriedades: [
                     'nome' => ['type' => 'string'],
                     'cpf' => ['type' => 'string', 'description' => 'CPF no formato 000.000.000-00.'],
@@ -1384,7 +1397,7 @@ class AiAgentService
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'NotaFiscal',
-                papelMinimo: 'leitura',
+                papeis: self::PAPEIS_LEITURA,
                 propriedades: [
                     'tipo' => ['type' => 'string', 'enum' => ['entrada', 'saida']],
                 ],
@@ -1398,7 +1411,7 @@ class AiAgentService
                 nome: 'criar_nota_fiscal',
                 descricao: 'Cadastra uma nova nota fiscal. Nota de saída exige cliente_id; nota de entrada exige fornecedor_id. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'NotaFiscal',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'numero' => ['type' => 'string'],
                     'tipo' => ['type' => 'string', 'enum' => ['entrada', 'saida']],
@@ -1423,7 +1436,7 @@ class AiAgentService
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'CategoriaLancamento',
-                papelMinimo: 'leitura',
+                papeis: self::PAPEIS_LEITURA,
                 propriedades: [
                     'tipo' => ['type' => 'string', 'enum' => ['receita', 'despesa']],
                 ],
@@ -1437,7 +1450,7 @@ class AiAgentService
                 nome: 'criar_categoria_lancamento',
                 descricao: 'Cadastra uma nova categoria de lançamento (receita ou despesa). Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'CategoriaLancamento',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'nome' => ['type' => 'string'],
                     'tipo' => ['type' => 'string', 'enum' => ['receita', 'despesa']],
@@ -1455,7 +1468,7 @@ class AiAgentService
                 descricao: 'Altera um cliente existente, achado pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'Cliente',
                 rotulo: 'o cliente',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
                     'documento' => ['type' => 'string', 'description' => 'CPF ou CNPJ.'],
@@ -1476,7 +1489,7 @@ class AiAgentService
                 descricao: 'Altera um fornecedor existente, achado pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'Fornecedor',
                 rotulo: 'o fornecedor',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
                     'documento' => ['type' => 'string', 'description' => 'CPF ou CNPJ.'],
@@ -1497,7 +1510,7 @@ class AiAgentService
                 descricao: 'Altera um funcionário existente, achado pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'Funcionario',
                 rotulo: 'o funcionário',
-                papelMinimo: 'admin',
+                papeis: self::PAPEIS_ADMIN,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
                     'cpf' => ['type' => 'string', 'description' => 'CPF no formato 000.000.000-00.'],
@@ -1520,7 +1533,7 @@ class AiAgentService
                 descricao: 'Altera uma nota fiscal existente, achada pelo id ou pelo número exato da nota. Mande só os campos que mudam. Nota de saída exige cliente_id; de entrada, fornecedor_id. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'NotaFiscal',
                 rotulo: 'a nota fiscal',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'numero' => ['type' => 'string', 'description' => 'Número novo, só se for mudar.'],
                     'tipo' => ['type' => 'string', 'enum' => ['entrada', 'saida']],
@@ -1545,7 +1558,7 @@ class AiAgentService
                 descricao: 'Altera uma categoria de lançamento existente, achada pelo id ou por parte do nome. Mande só os campos que mudam. Ação de escrita — exige confirmação humana antes de ser executada.',
                 entidade: 'CategoriaLancamento',
                 rotulo: 'a categoria',
-                papelMinimo: 'operador',
+                papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'nome' => ['type' => 'string', 'description' => 'Nome novo, só se for mudar.'],
                     'tipo' => ['type' => 'string', 'enum' => ['receita', 'despesa']],
@@ -1568,7 +1581,7 @@ class AiAgentService
      * Bloco 4 — as entidades com lixeira (RF08–RF12). O vínculo tool ↔ entidade ↔ service
      * da lixeira fica todo aqui; trocar de domínio é trocar estas linhas. "colunas": o que o
      * card mostra do registro para o humano conferir (as da consulta, sem o id, que vai no
-     * título). "papel": o mínimo para restaurar — o mesmo de criar/alterar a entidade.
+     * título). "papeis": quem pode restaurar — os mesmos de criar/alterar a entidade.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -1576,17 +1589,17 @@ class AiAgentService
     {
         return [
             'lancamento' => ['entidade' => 'Lancamento', 'modelo' => Lancamento::class, 'rotulo' => 'o lançamento', 'servico' => $this->lancamentoService,
-                'busca_por' => 'descrição', 'coluna_rotulo' => 'descricao', 'colunas' => ['descricao', 'valor', 'status', 'data'], 'papel' => 'operador'],
+                'busca_por' => 'descrição', 'coluna_rotulo' => 'descricao', 'colunas' => ['descricao', 'valor', 'status', 'data'], 'papeis' => self::PAPEIS_OPERADOR],
             'cliente' => ['entidade' => 'Cliente', 'modelo' => Cliente::class, 'rotulo' => 'o cliente', 'servico' => $this->clienteService,
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papel' => 'operador'],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papeis' => self::PAPEIS_OPERADOR],
             'fornecedor' => ['entidade' => 'Fornecedor', 'modelo' => Fornecedor::class, 'rotulo' => 'o fornecedor', 'servico' => $this->fornecedorService,
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papel' => 'operador'],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papeis' => self::PAPEIS_OPERADOR],
             'funcionario' => ['entidade' => 'Funcionario', 'modelo' => Funcionario::class, 'rotulo' => 'o funcionário', 'servico' => $this->funcionarioService,
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'cargo', 'data_admissao', 'data_demissao'], 'papel' => 'admin'],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'cargo', 'data_admissao', 'data_demissao'], 'papeis' => self::PAPEIS_ADMIN],
             'nota_fiscal' => ['entidade' => 'NotaFiscal', 'modelo' => NotaFiscal::class, 'rotulo' => 'a nota fiscal', 'servico' => $this->notaFiscalService,
-                'busca_por' => 'número', 'coluna_rotulo' => 'numero', 'colunas' => ['numero', 'tipo', 'valor', 'data_emissao'], 'papel' => 'operador'],
+                'busca_por' => 'número', 'coluna_rotulo' => 'numero', 'colunas' => ['numero', 'tipo', 'valor', 'data_emissao'], 'papeis' => self::PAPEIS_OPERADOR],
             'categoria_lancamento' => ['entidade' => 'CategoriaLancamento', 'modelo' => CategoriaLancamento::class, 'rotulo' => 'a categoria', 'servico' => $this->categoriaLancamentoService,
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'tipo'], 'papel' => 'operador'],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'tipo'], 'papeis' => self::PAPEIS_OPERADOR],
         ];
     }
 
@@ -1610,7 +1623,7 @@ class AiAgentService
             acao: 'consultar',
             entidade: 'Lixeira',
             // DECISÃO PENDENTE (Lucas): papel mínimo da lixeira. Padrão do plano aprovado: operador (quem pede para restaurar).
-            papelMinimo: 'operador',
+            papeis: self::PAPEIS_OPERADOR,
             propriedades: [
                 'tipo' => ['type' => 'string', 'enum' => array_keys($lixeiras)],
                 'situacao' => ['type' => 'string', 'enum' => ['lixeira', 'arquivado']],
@@ -1632,20 +1645,20 @@ class AiAgentService
             $localizarEm = fn (string $situacao) => fn (?int $id, ?string $busca, int $tenantId) => $servico->localizar($id, $busca, $tenantId, $situacao);
 
             foreach ([
-                // [tool, risco, ação, papel, situação em que o registro está, onde, motivo (só leitura), operação, título, sucesso, botão, feito, descrição]
-                ["excluir_{$sufixo}", 'exclusao', 'excluir', 'admin', 'ativo', '', 'motivoParaNaoExcluir',
+                // [tool, risco, ação, papéis, situação em que o registro está, onde, motivo (só leitura), operação, título, sucesso, botão, feito, descrição]
+                ["excluir_{$sufixo}", 'exclusao', 'excluir', self::PAPEIS_ADMIN, 'ativo', '', 'motivoParaNaoExcluir',
                     fn (int $id, int $t) => $servico->excluir($id, $t),
                     "Excluir {$nome}", Str::ucfirst($nome)." movid{$o} para a lixeira", 'Excluir', "excluíd{$o}",
                     "Move {$rotulo} para a lixeira (exclusão segura: dá para restaurar dentro do prazo), achado pelo id ou por {$buscaPor}. Não exclui se houver registros vinculados. Ação de exclusão — exige confirmação humana antes de ser executada."],
-                ["restaurar_{$sufixo}", 'escrita', 'restaurar', $lixeira['papel'], 'lixeira', ' na lixeira', 'motivoParaNaoRestaurar',
+                ["restaurar_{$sufixo}", 'escrita', 'restaurar', $lixeira['papeis'], 'lixeira', ' na lixeira', 'motivoParaNaoRestaurar',
                     fn (int $id, int $t) => $servico->restaurarDaLixeira($id, $t, $this->autorizadoPor() !== null),
                     "Restaurar {$nome}", Str::ucfirst($nome)." restaurad{$o} da lixeira", 'Restaurar', "restaurad{$o}",
                     "Restaura {$rotulo} que está na lixeira, achado pelo id ou por {$buscaPor}. Exige a senha de um administrador, digitada no card de confirmação (nunca no chat). Ação de escrita — exige confirmação humana antes de ser executada."],
-                ["excluir_definitivo_{$sufixo}", 'exclusao', 'excluir_definitivo', 'admin', 'arquivado', ' entre os arquivados', 'motivoParaNaoExcluirDeVez',
+                ["excluir_definitivo_{$sufixo}", 'exclusao', 'excluir_definitivo', self::PAPEIS_ADMIN, 'arquivado', ' entre os arquivados', 'motivoParaNaoExcluirDeVez',
                     fn (int $id, int $t) => $servico->excluirDefinitivo($id, $t, $this->autorizadoPor()),
                     "Excluir de vez: {$nome}", Str::ucfirst($nome)." excluíd{$o} de vez", 'Excluir de vez', "excluíd{$o} de vez",
                     "Exclui de vez, sem volta, {$rotulo} que já foi arquivado (passou do prazo da lixeira), achado pelo id ou por {$buscaPor}. Só administrador; exige a senha de um administrador, digitada no card de confirmação (nunca no chat). Ação de exclusão — exige confirmação humana antes de ser executada."],
-            ] as [$tool, $risco, $acao, $papel, $situacao, $onde, $motivo, $operacao, $titulo, $sucesso, $botao, $feito, $descricao]) {
+            ] as [$tool, $risco, $acao, $papeis, $situacao, $onde, $motivo, $operacao, $titulo, $sucesso, $botao, $feito, $descricao]) {
                 $localizar = $localizarEm($situacao);
                 $naoEncontrei = 'Não encontrei '.$rotulo;
 
@@ -1658,7 +1671,7 @@ class AiAgentService
                     entidade: $entidade,
                     // DECISÃO PENDENTE (Lucas): papéis da lixeira. Padrão fechado do plano aprovado: excluir e
                     // excluir de vez só admin; restaurar com o papel de criar/alterar a entidade + senha de admin.
-                    papelMinimo: $papel,
+                    papeis: $papeis,
                     propriedades: $propriedades,
                     obrigatorios: [],
                     executar: fn (array $a) => $this->executarNaLixeira($a, $naoEncontrei, $onde, $operacao),
@@ -1910,7 +1923,7 @@ class AiAgentService
         string $nome,
         string $descricao,
         string $entidade,
-        string $papelMinimo,
+        array $papeis,
         array $propriedades,
         array $obrigatorios,
         string $formRequest,
@@ -1929,7 +1942,7 @@ class AiAgentService
             risco: 'escrita',
             acao: 'criar',
             entidade: $entidade,
-            papelMinimo: $papelMinimo,
+            papeis: $papeis,
             propriedades: $propriedades,
             obrigatorios: $obrigatorios,
             executar: fn (array $a) => $gravar($this->validar($a, $regras, $mensagens)),
@@ -1956,7 +1969,7 @@ class AiAgentService
         string $descricao,
         string $entidade,
         string $rotulo,
-        string $papelMinimo,
+        array $papeis,
         array $propriedades,
         string $formRequest,
         Closure $localizar,
@@ -1977,7 +1990,7 @@ class AiAgentService
             risco: 'escrita',
             acao: 'atualizar',
             entidade: $entidade,
-            papelMinimo: $papelMinimo,
+            papeis: $papeis,
             propriedades: [
                 'id' => ['type' => 'integer', 'description' => 'Número (id) do registro a alterar, se o usuário informou.'],
                 'busca' => ['type' => 'string', 'description' => Str::ucfirst($buscaPor).' do registro a alterar, quando o número não foi informado.'],
@@ -2033,7 +2046,7 @@ class AiAgentService
         string $risco,
         string $acao,
         string $entidade,
-        string $papelMinimo,
+        array $papeis,
         array $propriedades,
         array $obrigatorios,
         Closure $executar,
@@ -2063,6 +2076,13 @@ class AiAgentService
             throw new InvalidArgumentException("Tool {$nome}: tipo '{$tipo}' e risco '{$risco}' incoerentes.");
         }
 
+        // RBAC por lista: vazia ou com papel fora de config('sentinel.papeis') quebra cedo — um erro de
+        // digitação ("recepção") nunca vira, calado, uma tool que ninguém usa ou que alguém usa sem querer.
+        $desconhecidos = array_diff($papeis, (array) config('sentinel.papeis', []));
+        if ($papeis === [] || $desconhecidos !== [] || ! array_is_list($papeis)) {
+            throw new InvalidArgumentException("Tool {$nome}: lista de papéis vazia ou com papel desconhecido (".implode(', ', $desconhecidos).').');
+        }
+
         return [
             'nome' => $nome,
             'tipo' => $tipo,
@@ -2070,7 +2090,7 @@ class AiAgentService
             'risco' => $risco,
             'acao' => $acao,
             'entidade' => $entidade,
-            'papel_minimo' => $papelMinimo,
+            'papeis' => $papeis,
             'executar' => $executar,
             'mensagem_erro' => $mensagemErro,
             'colunas' => $colunas, // só leitura: colunas que o front exibe na tabela
@@ -2106,17 +2126,17 @@ class AiAgentService
     }
 
     /**
-     * RBAC: a hierarquia vem de config('sentinel.papeis'); o papel atual, do
-     * usuário logado (ContextoUsuario). Papel atual ou mínimo fora da
-     * hierarquia nega (falha fechada).
+     * RBAC por lista: o papel atual (do usuário logado, via ContextoUsuario) precisa
+     * estar em config('sentinel.papeis') E na lista da tool. Papel desconhecido nega
+     * tudo (falha fechada), mesmo que alguém o escreva numa lista.
+     *
+     * @param  string[]  $papeis
      */
-    private function papelAtualPermite(string $papelMinimo): bool
+    private function papelAtualPermite(array $papeis): bool
     {
-        $hierarquia = (array) config('sentinel.papeis', []);
-        $atual = array_search($this->contexto->papel(), $hierarquia, true);
-        $minimo = array_search($papelMinimo, $hierarquia, true);
+        $atual = $this->contexto->papel();
 
-        return $atual !== false && $minimo !== false && $atual >= $minimo;
+        return in_array($atual, (array) config('sentinel.papeis', []), true) && in_array($atual, $papeis, true);
     }
 
     /**
@@ -2134,7 +2154,7 @@ class AiAgentService
             null,
             $argumentos,
             'negado',
-            'Papel '.$this->contexto->papel().' abaixo do mínimo exigido ('.$definicao['papel_minimo'].').',
+            'Papel '.$this->contexto->papel().' sem permissão para esta ação.',
             false,
         );
 

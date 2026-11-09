@@ -39,7 +39,7 @@ class ConsultaAuditoria
     }
 
     /**
-     * Só admin. Quem não é fica na auditoria como "negado" (como numa tool negada) e recebe
+     * Só papel administrativo (admin; na clínica, dono). Quem não é fica na auditoria como "negado" (como numa tool negada) e recebe
      * AuthorizationException. Sem usuário, papel ou tenant: AuthenticationException (ContextoUsuario).
      *
      * @throws AuthorizationException
@@ -49,12 +49,12 @@ class ConsultaAuditoria
         $papel = $this->contexto->papel();
         $this->contexto->tenantId();
 
-        if ($papel === 'admin') {
+        if ($this->contexto->ehAdministrativo()) {
             return;
         }
 
         app(DetalhesAuditoria::class)->com(['origem' => 'manual'], fn () => $this->auditoria->registrar(
-            self::TOOL, $acao, 'AuditLog', null, [], 'negado', "Papel {$papel} abaixo do mínimo exigido (admin).", $papel, false,
+            self::TOOL, $acao, 'AuditLog', null, [], 'negado', "Papel {$papel} sem permissão para a auditoria.", $papel, false,
         ));
 
         throw new AuthorizationException;
