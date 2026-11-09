@@ -1,4 +1,14 @@
-# Fase 6: progresso (04/11/2026)
+# Fase 6: progresso
+
+## Atualização de 05/11/2026: C0 concluído, parado no ⏸
+- A bateria rodou com a Azure real como operador do tenant 1. Resultado em `BATERIA_ANTES_2026-11-05.csv`.
+- **Acerto: 30/40.** Por grupo: consulta 10/10, cadastro 9/10, atualização 3/6, continuação 0/4, exclusão 4/4, lote 2/2, ambíguo 2/4.
+- **Tempo** (38 pedidos com chamada à IA; 2 negados antes da IA): média 2,51 s, mediana 2,44 s, p90 2,99 s, máximo 3,78 s.
+- O script da bateria fica fora do repositório (scratchpad do Claude, `bateria.php`), para a rodada pós-C1.
+- Próximo passo: o Lucas lê o plano do C1 (segunda leitura) e libera. Nada do C1 foi codado.
+
+---
+(Registro de 04/11/2026, mantido abaixo.)
 
 ## Camada atual
 **C0 (medir o "antes")**, em andamento. As camadas C1, C2 e C3 ainda não começaram. Nenhum código do app foi alterado.
