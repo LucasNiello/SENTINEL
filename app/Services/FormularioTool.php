@@ -18,10 +18,14 @@ class FormularioTool
     private const LIMITE_REFERENCIAS = 50;
 
     /** Coluna que nomeia um registro numa lista de vínculo, na ordem de preferência. */
-    private const COLUNAS_ROTULO = ['nome', 'descricao', 'numero'];
+    private const COLUNAS_ROTULO = ['nome', 'nome_comercial', 'name', 'descricao', 'numero'];
 
     /** Opções cujo rótulo não é só a palavra com inicial maiúscula. */
-    private const ROTULOS_OPCOES = ['saida' => 'Saída'];
+    private const ROTULOS_OPCOES = [
+        'saida' => 'Saída', 'sim' => 'Sim', 'nao' => 'Não',
+        // Clínica vet.
+        'cao' => 'Cão', 'femea' => 'Fêmea', 'reptil' => 'Réptil', 'servico' => 'Serviço', 'clinica' => 'Clínica', 'diaria' => 'Diária',
+    ];
 
     /**
      * @param  array<string, mixed>  $regras  rules() do Form Request da tool
@@ -212,7 +216,9 @@ class FormularioTool
     private function referencias(string $tabela, string $chave, int $tenantId, mixed $atual): array
     {
         $coluna = collect(self::COLUNAS_ROTULO)->first(fn (string $coluna) => Schema::hasColumn($tabela, $coluna));
-        $escopo = fn () => DB::table($tabela)->where('tenant_id', $tenantId)->whereNull('deleted_at');
+        // Só as tabelas com lixeira têm deleted_at (agendamentos, cobranças, usuários... não têm).
+        $comLixeira = Schema::hasColumn($tabela, 'deleted_at');
+        $escopo = fn () => DB::table($tabela)->where('tenant_id', $tenantId)->when($comLixeira, fn ($query) => $query->whereNull('deleted_at'));
         $colunas = array_filter([$chave, $coluna]);
 
         $linhas = $escopo()->orderByDesc($chave)->limit(self::LIMITE_REFERENCIAS)->get($colunas);

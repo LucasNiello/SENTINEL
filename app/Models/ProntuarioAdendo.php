@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /** Correção de um prontuário assinado. Nasce assinado e nunca muda nem é excluído. */
-#[Fillable(['prontuario_id', 'autor_id', 'texto', 'assinado_em', 'tenant_id'])]
+#[Fillable(['prontuario_id', 'autor_id', 'autor_nome', 'autor_crmv', 'texto', 'assinado_em', 'tenant_id'])]
 class ProntuarioAdendo extends Model
 {
     protected static function booted(): void

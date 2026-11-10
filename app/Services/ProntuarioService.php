@@ -11,12 +11,10 @@ use App\Models\ProntuarioAdendo;
 use App\Models\ProntuarioItem;
 use App\Models\User;
 use App\Services\Concerns\ConfereTenant;
-use Carbon\CarbonImmutable;
-use Carbon\CarbonInterface;
+use App\Services\Concerns\InterpretaMomento;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 /**
  * Clínica vet: prontuário. Regras:
@@ -31,7 +29,7 @@ use Throwable;
  */
 class ProntuarioService
 {
-    use ConfereTenant;
+    use ConfereTenant, InterpretaMomento;
 
     private const PAPEIS_CLINICOS = ['veterinario', 'dono'];
 
@@ -88,6 +86,8 @@ class ProntuarioService
             return ProntuarioItem::create([
                 'prontuario_id' => $prontuario->id,
                 'catalogo_item_id' => $item->id,
+                // Cópia do nome de agora: renomear ou excluir o item do catálogo não muda o prontuário.
+                'nome_item' => $item->nome_comercial,
                 'quantidade' => $this->quantidadeValida($quantidade),
                 'tenant_id' => $tenantId,
             ]);
@@ -107,13 +107,19 @@ class ProntuarioService
     {
         return DB::transaction(function () use ($id, $veterinarioId, $tenantId) {
             $prontuario = $this->rascunhoDoAutor($id, $veterinarioId, $tenantId);
-            $this->exigirCrmv($this->veterinario($veterinarioId, $tenantId), 'assinar o prontuário');
+            $veterinario = $this->veterinario($veterinarioId, $tenantId);
+            $this->exigirCrmv($veterinario, 'assinar o prontuário');
 
             if ($prontuario->tipo === 'internacao' && ($prontuario->entrada_em === null || $prontuario->alta_em === null)) {
                 throw new RegraDeNegocioException('Internação só é assinada com a entrada e a alta informadas.');
             }
 
-            $prontuario->update(['assinado_em' => now()]);
+            // Quem assinou fica gravado com o nome e o CRMV de agora: mudar o cadastro depois não muda o prontuário.
+            $prontuario->update([
+                'assinado_em' => now(),
+                'assinado_por_nome' => $veterinario->name,
+                'assinado_por_crmv' => trim((string) $veterinario->crmv),
+            ]);
 
             return $prontuario;
         });
@@ -124,7 +130,8 @@ class ProntuarioService
     {
         return DB::transaction(function () use ($id, $texto, $autorId, $tenantId) {
             $prontuario = Prontuario::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
-            $this->exigirCrmv($this->veterinario($autorId, $tenantId), 'registrar um adendo');
+            $autor = $this->veterinario($autorId, $tenantId);
+            $this->exigirCrmv($autor, 'registrar um adendo');
 
             if (! $prontuario->estaAssinado()) {
                 throw new RegraDeNegocioException('O prontuário ainda não foi assinado: corrija o próprio prontuário em vez de registrar um adendo.');
@@ -136,6 +143,8 @@ class ProntuarioService
             return ProntuarioAdendo::create([
                 'prontuario_id' => $prontuario->id,
                 'autor_id' => $autorId,
+                'autor_nome' => $autor->name,
+                'autor_crmv' => trim((string) $autor->crmv),
                 'texto' => $texto,
                 'assinado_em' => now(),
                 'tenant_id' => $tenantId,
@@ -256,18 +265,5 @@ class ProntuarioService
         }
 
         return $campos;
-    }
-
-    private function momento(mixed $valor): ?CarbonImmutable
-    {
-        if ($valor instanceof CarbonInterface) {
-            return CarbonImmutable::instance($valor)->setTimezone((string) config('app.timezone'));
-        }
-
-        try {
-            return is_string($valor) && trim($valor) !== '' ? CarbonImmutable::parse($valor, (string) config('app.timezone')) : null;
-        } catch (Throwable) {
-            return null;
-        }
     }
 }

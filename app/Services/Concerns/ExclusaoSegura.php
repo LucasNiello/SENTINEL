@@ -30,6 +30,9 @@ trait ExclusaoSegura
         'mensagens' => 'mensagens vinculadas',
         'agendamentos' => 'agendamentos vinculados',
         'prontuarios' => 'prontuários vinculados',
+        'prontuarioItens' => 'itens de prontuário vinculados',
+        'cobrancaItens' => 'cobranças vinculadas',
+        'vendaItens' => 'vendas vinculadas',
     ];
 
     /** Como cada "pai" aparece na frase de recusa da restauração. */
@@ -40,6 +43,7 @@ trait ExclusaoSegura
         'funcionario' => 'o funcionário',
         'lancamento' => 'o lançamento',
         'tutor' => 'o tutor',
+        'catalogoItem' => 'o item do catálogo',
     ];
 
     /**
@@ -102,7 +106,7 @@ trait ExclusaoSegura
     protected function excluirDeVez(Model $registro, ?int $autorizadoPor): array
     {
         $adminDoTenant = $autorizadoPor !== null && User::query()->whereKey($autorizadoPor)
-            ->whereIn('papel', (array) config('sentinel.papeis_administrativos', []))->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
+            ->whereIn('papel', \App\Services\ContextoUsuario::papeisAdministrativos())->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
 
         if (! $adminDoTenant) {
             return ['excluido' => false, 'motivo' => 'Para excluir de vez, é preciso a senha de um administrador.'];

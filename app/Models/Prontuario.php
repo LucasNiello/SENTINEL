@@ -19,7 +19,7 @@ use Illuminate\Support\Arr;
  * Limite conhecido: update/delete em massa (Prontuario::where()->update(), DB::table) passa por fora
  * dos eventos do model; nenhum código do projeto faz isso.
  */
-#[Fillable(['pet_id', 'veterinario_id', 'agendamento_id', 'vinculado_por', 'vinculado_em', 'tipo', 'anamnese', 'exame_fisico', 'diagnostico', 'conduta', 'entrada_em', 'alta_em', 'assinado_em', 'tenant_id'])]
+#[Fillable(['pet_id', 'veterinario_id', 'agendamento_id', 'vinculado_por', 'vinculado_em', 'tipo', 'anamnese', 'exame_fisico', 'diagnostico', 'conduta', 'entrada_em', 'alta_em', 'assinado_em', 'assinado_por_nome', 'assinado_por_crmv', 'tenant_id'])]
 class Prontuario extends Model
 {
     public const TIPOS = ['consulta', 'retorno', 'vacinacao', 'exame', 'cirurgia', 'internacao', 'emergencia'];
@@ -27,7 +27,7 @@ class Prontuario extends Model
     public const CAMPOS_CLINICOS = ['anamnese', 'exame_fisico', 'diagnostico', 'conduta'];
 
     /** O que a recepção vê: pet, veterinário, data e tipo (e se já foi assinado/vinculado). */
-    public const CAMPOS_METADADOS = ['id', 'pet_id', 'veterinario_id', 'agendamento_id', 'tipo', 'created_at', 'assinado_em'];
+    public const CAMPOS_METADADOS = ['id', 'pet_id', 'veterinario_id', 'agendamento_id', 'tipo', 'created_at', 'assinado_em', 'assinado_por_nome', 'assinado_por_crmv'];
 
     private const CAMPOS_DO_VINCULO = ['agendamento_id', 'vinculado_por', 'vinculado_em'];
 

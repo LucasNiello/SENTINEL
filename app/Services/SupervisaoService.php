@@ -47,7 +47,9 @@ class SupervisaoService
         if ($usuario->supervisor_setor === null) {
             throw new RegraDeNegocioException('Só um supervisor de setor define PIN de autorização.');
         }
-        if (mb_strlen(trim($pin)) < self::PIN_MINIMO) {
+        // O PIN medido, comparado com a senha e guardado é sempre o MESMO texto, sem espaços nas pontas (quem confere o PIN usa o mesmo trim).
+        $pin = trim($pin);
+        if (mb_strlen($pin) < self::PIN_MINIMO) {
             throw new RegraDeNegocioException('O PIN precisa de pelo menos '.self::PIN_MINIMO.' caracteres (espaços não contam).');
         }
         // Diferente da senha de login: quem souber a senha não autoriza estorno com ela.

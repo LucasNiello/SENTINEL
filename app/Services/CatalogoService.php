@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\RegraDeNegocioException;
 use App\Models\CatalogoItem;
 use App\Services\Concerns\ConfereTenant;
+use App\Services\Concerns\ExclusaoSegura;
 use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -12,10 +13,17 @@ use Illuminate\Support\Collection;
 /**
  * Clínica vet: catálogo (serviços e produtos dos dois setores) e estoque. Preço em centavos (int).
  * O estoque só muda por entradaDeEstoque/baixarEstoque/devolverEstoque, nunca pelo atualizar().
+ * Decisão de 10/11: o estoque PODE ficar negativo (o saldo do sistema pode estar errado em relação à prateleira e
+ * isso não trava venda nem atendimento). O estoque inicial do cadastro continua de zero ao teto.
  */
 class CatalogoService
 {
-    use ConfereTenant, FiltroPorNome;
+    use ConfereTenant, ExclusaoSegura, FiltroPorNome;
+
+    /** Lixeira: onde o item já foi usado ele não sai (as cobranças e vendas antigas guardam a cópia, mas a chave estrangeira impede a exclusão de vez). */
+    private const DEPENDENTES = ['agendamentos', 'prontuarioItens', 'cobrancaItens', 'vendaItens'];
+
+    private const PAIS = [];
 
     /** Teto técnico (centavos): preço x quantidade nunca sai do inteiro nem da coluna. */
     private const PRECO_MAXIMO_CENTAVOS = 100_000_000;
@@ -28,7 +36,7 @@ class CatalogoService
             'cobranca_por' => 'unidade', 'controla_estoque' => false, 'estoque' => 0, 'exige_receita' => false,
             ...Arr::only($dados, self::CAMPOS),
         ];
-        $this->conferir($dados);
+        $this->conferir($dados, criacao: true);
 
         return CatalogoItem::create([...$dados, 'tenant_id' => $tenantId]);
     }
@@ -38,7 +46,8 @@ class CatalogoService
     {
         $item = CatalogoItem::where('tenant_id', $tenantId)->findOrFail($id);
         $dados = Arr::except(Arr::only($dados, self::CAMPOS), ['estoque']);
-        $this->conferir([...$item->only(self::CAMPOS), ...$dados]);
+        // O estoque de agora não é conferido aqui: ele pode estar negativo e isso não impede corrigir preço ou nome.
+        $this->conferir([...$item->only(self::CAMPOS), ...$dados], criacao: false);
 
         $item->update($dados);
 
@@ -54,6 +63,56 @@ class CatalogoService
             ->when($nome, fn ($query) => $this->nomeContem($query, $nome, 'nome_comercial'))
             ->orderBy('nome_comercial')
             ->get();
+    }
+
+    /** Acha o item por id ou por parte do nome comercial, só no tenant; por padrão fora da lixeira. Até 6. */
+    public function localizar(?int $id, ?string $busca, int $tenantId, string $situacao = 'ativo'): Collection
+    {
+        return CatalogoItem::query()
+            ->naSituacao($situacao)
+            ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id), fn ($query) => $this->nomeContem($query, (string) $busca, 'nome_comercial'))
+            ->limit(6)
+            ->get();
+    }
+
+    /** @return array{bloqueado: bool, motivo?: string} */
+    public function excluir(int $id, int $tenantId): array
+    {
+        return $this->excluirComBloqueio(CatalogoItem::where('tenant_id', $tenantId)->findOrFail($id), self::DEPENDENTES);
+    }
+
+    /** @return array{restaurado: bool, motivo?: string} */
+    public function restaurarDaLixeira(int $id, int $tenantId, bool $reautenticadoComoAdmin): array
+    {
+        return $this->restaurar(CatalogoItem::onlyTrashed()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id), $reautenticadoComoAdmin);
+    }
+
+    /** @return array{excluido: bool, motivo?: string} */
+    public function excluirDefinitivo(int $id, int $tenantId, ?int $autorizadoPor): array
+    {
+        return $this->excluirDeVez(CatalogoItem::onlyTrashed()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id), $autorizadoPor);
+    }
+
+    /**
+     * Frases para o card antes do segurar (o card mostra em aviso, sem bloquear): os itens destes ids que controlam
+     * estoque e estão com saldo negativo AGORA. A prévia chama isto dentro da transação que vai desfazer, então o
+     * saldo lido é o que a operação deixaria.
+     *
+     * @param  int[]  $ids
+     * @return string[]
+     */
+    public function avisosDeSaldoNegativo(array $ids, int $tenantId): array
+    {
+        return CatalogoItem::withTrashed()
+            ->where('tenant_id', $tenantId)
+            ->whereIn('id', $ids)
+            ->where('controla_estoque', true)
+            ->where('estoque', '<', 0)
+            ->orderBy('nome_comercial')
+            ->get(['nome_comercial', 'estoque'])
+            ->map(fn (CatalogoItem $i) => "Estoque de {$i->nome_comercial} ficará em {$i->estoque}. Confira a prateleira; a operação não é bloqueada.")
+            ->all();
     }
 
     /** Reposição (compra de mercadoria). */
@@ -77,9 +136,10 @@ class CatalogoService
     }
 
     /**
-     * Baixa atômica: um UPDATE só acontece se houver saldo (estoque >= quantidade), então o estoque
-     * nunca fica negativo, nem com duas vendas ao mesmo tempo. Item sem controle de estoque: nada muda.
-     * Deve rodar dentro da transação de quem chama (venda ou cobrança): se faltar saldo, nada é gravado.
+     * Baixa atômica: um único UPDATE relativo (estoque = estoque - quantidade), então duas vendas ao mesmo tempo
+     * nunca perdem uma baixa. Sem saldo, a baixa acontece do mesmo jeito e o estoque fica NEGATIVO (decisão de
+     * 10/11: o saldo pode estar errado e não pode travar a venda nem o atendimento; o card avisa antes do segurar).
+     * Item sem controle de estoque: nada muda. Roda dentro da transação de quem chama (venda ou cobrança).
      * Devolve se baixou; quem chama grava isso na linha (baixou_estoque), e o estorno segue esse registro.
      * Com withTrashed: item que foi para a lixeira depois de usado no prontuário ainda tem o seu saldo.
      */
@@ -92,13 +152,11 @@ class CatalogoService
         $baixou = CatalogoItem::withTrashed()
             ->whereKey($item->id)
             ->where('tenant_id', $tenantId)
-            ->where('estoque', '>=', $this->quantidadeValida($quantidade))
-            ->decrement('estoque', $quantidade);
+            ->decrement('estoque', $this->quantidadeValida($quantidade));
 
+        // Nenhuma linha: o item não é deste tenant (nunca é "falta de saldo": saldo negativo é permitido).
         if ($baixou === 0) {
-            $saldo = (int) CatalogoItem::withTrashed()->whereKey($item->id)->where('tenant_id', $tenantId)->value('estoque');
-
-            throw new RegraDeNegocioException("Estoque insuficiente de {$item->nome_comercial}: há {$saldo} e foram pedidos {$quantidade}. Nada foi gravado.");
+            throw new RegraDeNegocioException('Não encontrei o item do catálogo #'.$item->id.'.');
         }
 
         return true;
@@ -114,7 +172,7 @@ class CatalogoService
         CatalogoItem::withTrashed()->whereKey($catalogoItemId)->where('tenant_id', $tenantId)->increment('estoque', $this->quantidadeValida($quantidade));
     }
 
-    private function conferir(array $d): void
+    private function conferir(array $d, bool $criacao): void
     {
         $recusar = fn (string $frase) => throw new RegraDeNegocioException($frase);
 
@@ -149,7 +207,8 @@ class CatalogoService
         if ($d['exige_receita'] && $d['categoria'] !== 'farmacia') {
             $recusar('Só item de farmácia pode exigir receita.');
         }
-        if (! is_int($d['estoque']) || $d['estoque'] < 0 || $d['estoque'] > self::QUANTIDADE_MAXIMA) {
+        // Só o estoque inicial do cadastro: depois ele muda por entrada, venda e cobrança, e pode ficar negativo.
+        if ($criacao && (! is_int($d['estoque']) || $d['estoque'] < 0 || $d['estoque'] > self::QUANTIDADE_MAXIMA)) {
             $recusar('O estoque deve ser um número inteiro, de zero a '.self::QUANTIDADE_MAXIMA.'.');
         }
     }

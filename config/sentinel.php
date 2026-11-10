@@ -30,6 +30,20 @@ return [
     */
     'papeis_administrativos' => ['admin', 'dono'],
 
+    /*
+    | Domínio de cada tenant: o catálogo de tools do agente é o do domínio do tenant do usuário logado.
+    | Os tenants listados aqui são clínica veterinária + petshop; qualquer outro é o domínio antigo
+    | (contabilidade). Não há tabela de tenants (ver CLAUDE.md > Pendências conhecidas), então a lista
+    | mora na configuração: SENTINEL_TENANTS_CLINICA=3,5. Tenant fora da lista NUNCA vê as tools da clínica.
+    */
+    'tenants_clinica' => array_values(array_filter(array_map('intval', explode(',', (string) env('SENTINEL_TENANTS_CLINICA', '3'))))),
+
+    /*
+    | Agenda: duração máxima de um agendamento, em minutos (padrão 480 = 8 h). Acima disso o
+    | servidor recusa — inclusive no encaixe de emergência, que não confere conflito de horário.
+    */
+    'agenda_duracao_maxima_minutos' => (int) env('SENTINEL_AGENDA_DURACAO_MAXIMA_MIN', 480),
+
     /* Como cada papel aparece na interface. */
     'rotulos_papeis' => [
         'leitura' => 'Leitura', 'operador' => 'Operador', 'admin' => 'Administrador',

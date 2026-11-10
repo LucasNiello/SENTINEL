@@ -343,15 +343,18 @@ class ClinicaSeeder extends Seeder
             [6, '11:00', 'thor', 'veterinario', 'consulta', 'agendado'],
         ];
 
-        foreach ($semana as [$dias, $hora, $pet, $quem, $servico, $status]) {
-            $inicio = $this->dia(-$dias, $hora);
-            $agendamento = $agenda->agendar(['pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios[$quem]->id,
-                'catalogo_item_id' => $this->itens[$servico]->id, 'inicio' => $inicio,
-                'fim' => $inicio->copy()->addMinutes($quem === 'atendente' ? 60 : 30)], self::TENANT);
-            if ($status === 'confirmado') {
-                $agenda->alterarStatus($agendamento->id, 'confirmado', self::TENANT);
+        // Relógio na meia-noite de hoje: agendar no passado é recusado, e o horário de hoje pode já ter passado.
+        $this->em($this->dia(0, '00:00'), function () use ($semana, $agenda) {
+            foreach ($semana as [$dias, $hora, $pet, $quem, $servico, $status]) {
+                $inicio = $this->dia(-$dias, $hora);
+                $agendamento = $agenda->agendar(['pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios[$quem]->id,
+                    'catalogo_item_id' => $this->itens[$servico]->id, 'inicio' => $inicio,
+                    'fim' => $inicio->copy()->addMinutes($quem === 'atendente' ? 60 : 30)], self::TENANT);
+                if ($status === 'confirmado') {
+                    $agenda->alterarStatus($agendamento->id, 'confirmado', self::TENANT);
+                }
             }
-        }
+        });
     }
 
     /** Despesas gerais do mês (lançamentos de categoria "despesa"), para o lucro dos Resultados. */

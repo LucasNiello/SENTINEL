@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /** Venda de balcão. total_centavos é sempre calculado pelo VendaService. */
-#[Fillable(['setor', 'vendedor_id', 'tutor_id', 'status', 'total_centavos', 'forma_pagamento', 'pago_em', 'tenant_id'])]
+#[Fillable(['setor', 'vendedor_id', 'tutor_id', 'agendamento_id', 'pet_id', 'status', 'total_centavos', 'forma_pagamento', 'pago_em', 'tenant_id'])]
 class Venda extends Model
 {
     public const STATUS = ['aberta', 'paga', 'cancelada'];
@@ -18,6 +18,8 @@ class Venda extends Model
         return [
             'vendedor_id' => 'integer',
             'tutor_id' => 'integer',
+            'agendamento_id' => 'integer',
+            'pet_id' => 'integer',
             'tenant_id' => 'integer',
             'total_centavos' => 'integer',
             'pago_em' => 'datetime',
@@ -37,5 +39,15 @@ class Venda extends Model
     public function tutor(): BelongsTo
     {
         return $this->belongsTo(Tutor::class);
+    }
+
+    public function pet(): BelongsTo
+    {
+        return $this->belongsTo(Pet::class);
+    }
+
+    public function agendamento(): BelongsTo
+    {
+        return $this->belongsTo(Agendamento::class);
     }
 }

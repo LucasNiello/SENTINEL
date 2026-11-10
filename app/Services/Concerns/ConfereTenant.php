@@ -4,6 +4,7 @@ namespace App\Services\Concerns;
 
 use App\Exceptions\RegraDeNegocioException;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -46,6 +47,17 @@ trait ConfereTenant
         }
 
         return $usuario;
+    }
+
+    /**
+     * "Existe algum?" com leitura TRAVADA (FOR UPDATE). Conferência feita depois de travar o registro-pai
+     * (cobrança de um agendamento, conflito de horário...) precisa ver o dado MAIS NOVO: uma leitura comum,
+     * dentro de uma transação já aberta, usa a foto de antes (InnoDB, REPEATABLE READ). O SQLite dos testes
+     * ignora FOR UPDATE: a trava é provada pelos testes de ProvaDeTravas, não por disputa real.
+     */
+    private function existeTravado(Builder $consulta): bool
+    {
+        return $consulta->lockForUpdate()->value('id') !== null;
     }
 
     private function idValido(mixed $id): ?int

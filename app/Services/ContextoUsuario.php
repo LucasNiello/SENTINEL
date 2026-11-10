@@ -55,8 +55,31 @@ class ContextoUsuario
     {
         $papel = $this->papel();
 
-        return in_array($papel, (array) config('sentinel.papeis', []), true)
-            && in_array($papel, (array) config('sentinel.papeis_administrativos', []), true);
+        return in_array($papel, self::papeisAdministrativos(), true);
+    }
+
+    /**
+     * Papéis administrativos que AINDA são papéis válidos (config('sentinel.papeis')). Um papel que saiu da lista
+     * de válidos nunca autoriza nada, mesmo que continue em papeis_administrativos. Usada também pela senha
+     * de administrador (ReautenticacaoAdmin) e pela exclusão definitiva (ExclusaoSegura).
+     *
+     * @return string[]
+     */
+    public static function papeisAdministrativos(): array
+    {
+        return array_values(array_intersect(
+            (array) config('sentinel.papeis_administrativos', []),
+            (array) config('sentinel.papeis', []),
+        ));
+    }
+
+    /**
+     * Domínio do tenant do usuário logado: 'clinica' (config sentinel.tenants_clinica) ou 'contabilidade'.
+     * Define quais tools do agente e quais telas existem para ele; sem tenant, falha fechada (AuthenticationException).
+     */
+    public function dominio(): string
+    {
+        return in_array($this->tenantId(), array_map('intval', (array) config('sentinel.tenants_clinica', [])), true) ? 'clinica' : 'contabilidade';
     }
 
     public function tenantId(): int

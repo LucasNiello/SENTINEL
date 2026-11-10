@@ -22,6 +22,9 @@ class OperacaoSolicitada
         'categoria de lancamento' => 'CategoriaLancamento', 'categoria' => 'CategoriaLancamento',
         'nota fiscal' => 'NotaFiscal', 'cliente' => 'Cliente', 'fornecedor' => 'Fornecedor',
         'funcionario' => 'Funcionario', 'lancamento' => 'Lancamento',
+        // Clínica vet: o mesmo vocabulário explícito (a ação vem do verbo; o servidor nega antes da IA).
+        'tutor' => 'Tutor', 'pet' => 'Pet', 'animal' => 'Pet',
+        'item do catalogo' => 'CatalogoItem', 'item de catalogo' => 'CatalogoItem', 'item' => 'CatalogoItem',
     ];
 
     /**

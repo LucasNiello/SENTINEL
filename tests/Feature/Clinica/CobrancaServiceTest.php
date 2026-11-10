@@ -198,8 +198,13 @@ class CobrancaServiceTest extends TestCase
         $linha = CobrancaItem::where('catalogo_item_id', $vermifugo->id)->sole();
         $this->assertTrue($linha->baixou_estoque);
 
-        $this->recusa(fn () => $this->cobrancas->adicionarItem($cobranca->id, $vermifugo->id, 4, self::T), 'Estoque insuficiente de Vermífugo: há 3');
-        $this->assertSame([3, 22000], [$vermifugo->fresh()->estoque, $cobranca->fresh()->total_centavos]);
+        // Estoque negativo é permitido (decisão de 10/11): sem saldo, a linha entra e o saldo fica negativo.
+        // (Antes da decisão, este passo esperava a recusa "Estoque insuficiente".)
+        $this->cobrancas->adicionarItem($cobranca->id, $vermifugo->id, 4, self::T);
+        $semSaldo = CobrancaItem::where('catalogo_item_id', $vermifugo->id)->where('quantidade', 4)->sole();
+        $this->assertSame([-1, 36000, true], [$vermifugo->fresh()->estoque, $cobranca->fresh()->total_centavos, $semSaldo->baixou_estoque]);
+        $this->cobrancas->removerItem($semSaldo->id, self::T);
+        $this->assertSame([3, 22000], [$vermifugo->fresh()->estoque, $cobranca->fresh()->total_centavos], 'a devolução volta exatamente o que baixou');
 
         $this->cobrancas->removerItem($linha->id, self::T);
         $this->assertSame(5, $vermifugo->fresh()->estoque);

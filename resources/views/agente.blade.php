@@ -76,6 +76,13 @@
             if (ativo) anunciar('consultando');
         }
 
+        // P-B5: "Pedir ao agente" numa mensagem da caixa de entrada manda o texto dela como um pedido normal.
+        window.pedirAoAgente = (texto) => {
+            if (campoMensagem.disabled) return;
+            campoMensagem.value = String(texto).slice(0, 1000);
+            form.requestSubmit();
+        };
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const mensagem = campoMensagem.value.trim();

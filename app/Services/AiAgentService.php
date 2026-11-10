@@ -15,6 +15,8 @@ use App\Models\Fornecedor;
 use App\Models\Funcionario;
 use App\Models\Lancamento;
 use App\Models\NotaFiscal;
+use App\Services\Agente\CatalogoDaClinica;
+use App\Services\Agente\ConstrutoresDeTool;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -23,6 +25,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Http\Client\ConnectionException;
@@ -32,6 +35,9 @@ use Throwable;
 
 class AiAgentService
 {
+    // Catálogo da clínica e construtores dos domínios novos (arquivos próprios, mesmo motor).
+    use CatalogoDaClinica, ConstrutoresDeTool;
+
     /**
      * RBAC por lista de papéis (clínica vet, Fase A): cada tool declara QUEM pode usá-la.
      * Mapeamento PROVISÓRIO das tools do domínio antigo: a hierarquia antiga
@@ -102,6 +108,30 @@ class AiAgentService
         'lancamento_id' => 'o lançamento',
         'id' => 'o número do registro',
         'novo_status' => 'o novo status',
+        // Clínica vet.
+        'tutor_id' => 'o tutor',
+        'endereco' => 'o endereço',
+        'especie' => 'a espécie',
+        'raca' => 'a raça',
+        'sexo' => 'o sexo',
+        'data_nascimento' => 'a data de nascimento',
+        'peso_gramas' => 'o peso em gramas',
+        'microchip' => 'o microchip',
+        'alertas' => 'os alertas',
+        'setor' => 'o setor',
+        'categoria' => 'a categoria',
+        'nome_comercial' => 'o nome comercial',
+        'preco_centavos' => 'o preço em centavos',
+        'cobranca_por' => 'a forma de cobrança',
+        'controla_estoque' => 'o controle de estoque',
+        'estoque' => 'o estoque',
+        'exige_receita' => 'a exigência de receita',
+        'forma_pagamento' => 'a forma de pagamento',
+        'pet_id' => 'o pet',
+        'agendamento_id' => 'o atendimento',
+        'itens' => 'os itens',
+        'itens.*.catalogo_item_id' => 'o item do catálogo',
+        'itens.*.quantidade' => 'a quantidade',
     ];
 
     /** atualizar_status_lancamento não tem Form Request: estas regras desenham o formulário e validam o executor. */
@@ -140,8 +170,8 @@ class AiAgentService
     /** Até quantos itens a consulta da lixeira devolve (os excluídos mais recentes). */
     private const LIMITE_LIXEIRA = 50;
 
-    /** @var array<string, array<string, mixed>>|null */
-    private ?array $catalogo = null;
+    /** @var array<string, array<string, array<string, mixed>>> catálogo por domínio ('contabilidade', 'clinica') */
+    private array $catalogos = [];
 
     public function __construct(
         private LancamentoService $lancamentoService,
@@ -354,8 +384,14 @@ class AiAgentService
             if ($schema !== null && array_diff(array_keys($args), array_keys($schema)) !== []) {
                 return $this->respostaForaDoFormato($resposta->status());
             }
+            // O mesmo vale DENTRO das listas de objetos (os itens da venda): chave fora do esquema não entra nem na sessão
+            // nem na auditoria. Sem isso, um "preco_centavos" ou "tenant_id" dentro de um item ficaria gravado como proposto.
+            if ($schema !== null && $this->aninhadoForaDoEsquema(json_decode($f['arguments'], true, 32), $schema)) {
+                return $this->respostaForaDoFormato($resposta->status());
+            }
         }
-        $argumentos = (array) json_decode($argumentosJson, false, 32, JSON_THROW_ON_ERROR);
+        // O topo já foi conferido como objeto acima; aqui tudo vira array, inclusive o que é aninhado (os itens da venda).
+        $argumentos = (array) json_decode($argumentosJson, true, 32, JSON_THROW_ON_ERROR);
         unset($argumentos['tenant_id']);
         if ($tool === 'criar_lancamento') unset($argumentos['status']);
         $definicao = $this->catalogo()[$tool] ?? null;
@@ -786,7 +822,7 @@ class AiAgentService
         $definicao = $this->catalogo()[$tool] ?? null;
 
         // RF03: o lote só nasce de um pedido ao agente (o servidor resolve o filtro); não há formulário em branco dele.
-        if ($definicao === null || $definicao['tipo'] !== 'escrita' || ($definicao['regras'] === [] && $definicao['resumo'] === [])
+        if ($definicao === null || $definicao['tipo'] !== 'escrita' || ($definicao['regras'] === [] && $definicao['resumo'] === [] && $definicao['resumir'] === null)
             || $tool === 'conciliar_lancamentos_em_lote') {
             return ['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION',
                 'http_status' => 422, 'mensagem' => 'Esta operação não é suportada.'];
@@ -963,7 +999,7 @@ class AiAgentService
             $argumentos['tenant_id'] = $this->contexto->tenantId();
 
             try {
-                $this->validar($argumentos, $definicao['regras'], $definicao['mensagens']);
+                $this->validar($argumentos, $definicao['regras_revisar'] ?? $definicao['regras'], $definicao['mensagens']);
 
                 $recusa = $definicao['conferir'] === null ? null : ($definicao['conferir'])($argumentos);
                 if ($recusa !== null) {
@@ -1019,7 +1055,7 @@ class AiAgentService
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
-        if ($definicao === null || ($definicao['regras'] === [] && $definicao['resumo'] === [])) {
+        if ($definicao === null || ($definicao['regras'] === [] && $definicao['resumo'] === [] && $definicao['resumir'] === null)) {
             return null;
         }
 
@@ -1040,6 +1076,19 @@ class AiAgentService
         // A senha não é campo do formulário: não vai no Revisar nem fica na sessão (ver /agente/confirmar).
         if ($definicao['resumo'] !== []) {
             $formulario['resumo'] = $this->resumo($definicao, $valores);
+        }
+        if ($definicao['resumir'] !== null) {
+            try {
+                $resumido = ($definicao['resumir'])($valores, $this->contexto->tenantId());
+                // Forma longa: ['resumo' => linhas, 'avisos' => frases]. Aviso não bloqueia: só aparece no card, em aviso.
+                $formulario['resumo'] = array_key_exists('resumo', $resumido) ? $resumido['resumo'] : $resumido;
+                if (($resumido['avisos'] ?? []) !== []) {
+                    $formulario['avisos'] = array_values($resumido['avisos']);
+                }
+            } catch (ToolRecusadaException $e) {
+                $formulario['resumo'] = [];
+                $erros = ['_acao' => $e->getMessage(), ...$erros];
+            }
         }
         if ($definicao['reautenticar']) {
             $formulario['reautenticar'] = true;
@@ -1194,7 +1243,17 @@ class AiAgentService
      */
     private function catalogo(): array
     {
-        return $this->catalogo ??= array_column([
+        // O catálogo é o do domínio do tenant do usuário logado (config sentinel.tenants_clinica). Tenant fora da
+        // lista nunca vê as tools da clínica, e o tenant da clínica não vê as de contabilidade.
+        $dominio = $this->contexto->dominio();
+
+        return $this->catalogos[$dominio] ??= array_column($dominio === 'clinica' ? $this->toolsDaClinica() : $this->toolsDeContabilidade(), null, 'nome');
+    }
+
+    /** @return array<int, array<string, mixed>> as tools do domínio antigo (contabilidade) */
+    private function toolsDeContabilidade(): array
+    {
+        return [
             $this->definirTool(
                 nome: 'consultar_lancamentos',
                 descricao: 'Consulta lançamentos financeiros, opcionalmente filtrando por status e período. Ação de leitura — não exige confirmação.',
@@ -1573,8 +1632,8 @@ class AiAgentService
                 sucesso: 'Categoria atualizada',
                 mensagens: ['tipo.in' => 'O tipo deve ser "receita" ou "despesa".'],
             ),
-            ...$this->definirLixeira(),
-        ], null, 'nome');
+            ...$this->definirLixeira($this->lixeiras()),
+        ];
     }
 
     /**
@@ -1611,10 +1670,8 @@ class AiAgentService
      *
      * @return array<int, array<string, mixed>>
      */
-    private function definirLixeira(): array
+    private function definirLixeira(array $lixeiras): array
     {
-        $lixeiras = $this->lixeiras();
-
         $tools = [$this->definirTool(
             nome: 'consultar_lixeira',
             descricao: 'Lista o que está na lixeira (excluído, ainda dá para restaurar) e o que já foi arquivado, opcionalmente por tipo de registro e por situação. Ação de leitura — não exige confirmação.',
@@ -1828,7 +1885,10 @@ class AiAgentService
 
                 [$tabela, $coluna] = array_pad(explode(',', substr($parte, 7)), 2, 'id');
 
-                return Rule::exists($tabela, $coluna)->where('tenant_id', $tenantId)->whereNull('deleted_at');
+                $regraExists = Rule::exists($tabela, $coluna)->where('tenant_id', $tenantId);
+
+                // Só as tabelas com lixeira têm deleted_at (agendamentos, cobranças, vendas, prontuários... não têm).
+                return Schema::hasColumn($tabela, 'deleted_at') ? $regraExists->whereNull('deleted_at') : $regraExists;
             }, explode('|', $regra));
         }, $regras);
     }
@@ -2067,6 +2127,8 @@ class AiAgentService
         string $feito = 'alterado',
         string $onde = '',
         string $rotuloAcao = '',
+        ?Closure $resumir = null,
+        ?array $regrasRevisar = null,
     ): array {
         // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
         // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
@@ -2109,6 +2171,10 @@ class AiAgentService
             'feito' => $feito, // "Informe qual cliente deve ser {feito}…"
             'onde' => $onde, // lixeira: "Não encontrei o cliente… {onde}" (" na lixeira")
             'rotulo_acao' => $rotuloAcao, // lixeira: botão da linha na lista de escolha ("Restaurar"); vazio = "Editar"
+            'resumir' => $resumir, // ação (definirAcao): o que vai acontecer, só leitura no card (linhas, total, pet...)
+            // ação (definirAcao): o Revisar valida estas regras (todas as do Form Request), não só as do card; assim nada
+            // inválido (ex.: 21 itens, atendimento "abc") passa pelo Revisar para quebrar só depois do segurar.
+            'regras_revisar' => $regrasRevisar,
             'definicao' => [
                 'type' => 'function',
                 'function' => [
@@ -2204,6 +2270,34 @@ class AiAgentService
                 'local' => basename($e->getFile()).':'.$e->getLine(),
             ]);
         }
+    }
+
+    /**
+     * Uma propriedade "lista de objetos" do esquema (ex.: itens) recebeu algum objeto com chave fora das propriedades
+     * declaradas dele. Só olha o que o esquema declara como lista de objetos; o resto é validado pelas regras da tool.
+     *
+     * @param  array<string, mixed>  $esquema  as propriedades do topo da tool
+     */
+    private function aninhadoForaDoEsquema(mixed $argumentos, array $esquema): bool
+    {
+        if (! is_array($argumentos)) {
+            return false;
+        }
+
+        foreach ($esquema as $nome => $propriedade) {
+            $permitidas = $propriedade['items']['properties'] ?? null;
+            if (($propriedade['type'] ?? null) !== 'array' || ! is_array($permitidas) || ! is_array($argumentos[$nome] ?? null)) {
+                continue;
+            }
+
+            foreach ($argumentos[$nome] as $elemento) {
+                if (is_array($elemento) && array_diff(array_keys($elemento), array_keys($permitidas)) !== []) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** Nome fora do formato de identificador (onde caberia um CPF ou e-mail) é redigido. */

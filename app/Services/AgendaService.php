@@ -8,11 +8,14 @@ use App\Models\CatalogoItem;
 use App\Models\Cobranca;
 use App\Models\Pet;
 use App\Models\User;
+use App\Models\Prontuario;
 use App\Services\Concerns\ConfereTenant;
+use App\Services\Concerns\FiltroPorNome;
+use App\Services\Concerns\InterpretaMomento;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 /**
  * Clínica vet: agenda da clínica e do banho e tosa.
@@ -24,7 +27,7 @@ use Throwable;
  */
 class AgendaService
 {
-    use ConfereTenant;
+    use ConfereTenant, FiltroPorNome, InterpretaMomento;
 
     private const PROFISSIONAIS = ['clinica' => ['veterinario', 'dono'], 'petshop' => ['atendente']];
 
@@ -74,20 +77,103 @@ class AgendaService
     {
         return DB::transaction(function () use ($id, $novoStatus, $tenantId) {
             $agendamento = Agendamento::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
-
-            if (! in_array($novoStatus, self::TRANSICOES[$agendamento->status] ?? [], true)) {
-                throw new RegraDeNegocioException("Um agendamento {$agendamento->status} não pode passar para {$novoStatus}.");
-            }
-            // Defesa: com cobrança viva (não cancelada), o agendamento não é desfeito. Paga sai por estorno.
-            if (in_array($novoStatus, Agendamento::STATUS_LIVRES, true)
-                && Cobranca::where('agendamento_id', $agendamento->id)->where('status', '!=', 'cancelada')->exists()) {
-                throw new RegraDeNegocioException("Este agendamento tem cobrança: cancele ou estorne a cobrança antes de marcá-lo como {$novoStatus}.");
-            }
+            $this->conferirStatus($agendamento, $novoStatus);
 
             $agendamento->update(['status' => $novoStatus]);
 
             return $agendamento;
         });
+    }
+
+    /** Só leitura (para o Revisar, antes do segurar): a frase do motivo de recusa da mudança de status, ou null. */
+    public function motivoParaNaoAlterarStatus(int $id, string $novoStatus, int $tenantId): ?string
+    {
+        $agendamento = Agendamento::where('tenant_id', $tenantId)->find($id);
+
+        if ($agendamento === null) {
+            return 'Não encontrei o agendamento #'.$id.'.';
+        }
+
+        try {
+            $this->conferirStatus($agendamento, $novoStatus);
+
+            return null;
+        } catch (RegraDeNegocioException $e) {
+            return $e->getMessage();
+        }
+    }
+
+    /**
+     * A agenda do tenant num período (padrão: de hoje até 6 dias depois), com o pet, o tutor, o profissional e o
+     * serviço de cada horário. Datas AAAA-MM-DD no fuso da aplicação; até 200, do mais cedo para o mais tarde.
+     */
+    public function buscarPorFiltro(?string $dataInicio, ?string $dataFim, ?string $setor, ?int $profissionalId, ?int $petId, ?string $status, int $tenantId): Collection
+    {
+        $fuso = (string) config('app.timezone');
+        foreach (['de início' => $dataInicio, 'de fim' => $dataFim] as $qual => $informada) {
+            if ($informada !== null && $informada !== '' && $this->dia($informada) === null) {
+                throw new RegraDeNegocioException("A data {$qual} da agenda deve estar no formato AAAA-MM-DD (ex.: 2026-12-15).");
+            }
+        }
+        $inicio = $this->dia($dataInicio) ?? CarbonImmutable::now($fuso)->startOfDay();
+        $fim = ($this->dia($dataFim) ?? $inicio->addDays(6))->endOfDay();
+
+        return Agendamento::query()
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')
+            ->join('tutores', 'tutores.id', '=', 'pets.tutor_id')
+            ->join('users', 'users.id', '=', 'agendamentos.profissional_id')
+            ->join('catalogo_itens', 'catalogo_itens.id', '=', 'agendamentos.catalogo_item_id')
+            ->where('agendamentos.tenant_id', $tenantId)
+            ->whereBetween('agendamentos.inicio', [$inicio, $fim])
+            ->when($setor, fn ($query) => $query->where('agendamentos.setor', $setor))
+            ->when($profissionalId, fn ($query) => $query->where('agendamentos.profissional_id', $profissionalId))
+            ->when($petId, fn ($query) => $query->where('agendamentos.pet_id', $petId))
+            ->when($status, fn ($query) => $query->where('agendamentos.status', $status))
+            ->orderBy('agendamentos.inicio')
+            ->limit(200)
+            ->get(['agendamentos.*', 'pets.nome as pet', 'tutores.nome as tutor', 'users.name as profissional', 'catalogo_itens.nome_comercial as servico']);
+    }
+
+    /** Para mudar o status: agendamento ainda em aberto (agendado ou confirmado), por id ou pelo nome do pet. Até 6. */
+    public function localizarEmAberto(?int $id, ?string $busca, int $tenantId): Collection
+    {
+        return Agendamento::query()
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')
+            ->where('agendamentos.tenant_id', $tenantId)
+            ->whereIn('agendamentos.status', array_keys(self::TRANSICOES))
+            ->when($id, fn ($query) => $query->where('agendamentos.id', $id), fn ($query) => $this->nomeContem($query, (string) $busca, 'pets.nome'))
+            ->orderBy('agendamentos.inicio')
+            ->limit(6)
+            ->get(['agendamentos.*', 'pets.nome as pet']);
+    }
+
+    /** As regras da mudança de status (transição, cobrança viva, prontuário), com leitura travada. */
+    private function conferirStatus(Agendamento $agendamento, string $novoStatus): void
+    {
+        if (! in_array($novoStatus, self::TRANSICOES[$agendamento->status] ?? [], true)) {
+            throw new RegraDeNegocioException("Um agendamento {$agendamento->status} não pode passar para {$novoStatus}.");
+        }
+        if (in_array($novoStatus, Agendamento::STATUS_LIVRES, true)) {
+            // Defesa: com cobrança viva (não cancelada), o agendamento não é desfeito. Paga sai por estorno.
+            if ($this->existeTravado(Cobranca::where('agendamento_id', $agendamento->id)->where('status', '!=', 'cancelada'))) {
+                throw new RegraDeNegocioException("Este agendamento tem cobrança: cancele ou estorne a cobrança antes de marcá-lo como {$novoStatus}.");
+            }
+            // O atendimento já foi registrado: cancelado ou faltou seria um estado final que impede a cobrança para sempre.
+            if ($this->existeTravado(Prontuario::where('agendamento_id', $agendamento->id))) {
+                throw new RegraDeNegocioException("Este agendamento já tem prontuário: o atendimento aconteceu e não pode ser marcado como {$novoStatus}.");
+            }
+        }
+    }
+
+    /** AAAA-MM-DD estrito, no fuso da aplicação, ou null. */
+    private function dia(?string $valor): ?CarbonImmutable
+    {
+        if ($valor === null || preg_match('/^\d{4}-\d{2}-\d{2}$/', $valor) !== 1) {
+            return null;
+        }
+        $dia = CarbonImmutable::createFromFormat('!Y-m-d', $valor, (string) config('app.timezone'));
+
+        return $dia !== false && $dia->format('Y-m-d') === $valor ? $dia : null;
     }
 
     /** @return array{servico: CatalogoItem, inicio: CarbonImmutable, fim: CarbonImmutable, origem: string} */
@@ -120,6 +206,12 @@ class AgendaService
             throw new RegraDeNegocioException('O fim precisa ser depois do início.');
         }
 
+        // Limite de duração vem da configuração (sentinel.agenda_duracao_maxima_minutos); sem valor válido, recusa (falha fechada).
+        $maximo = max(0, (int) config('sentinel.agenda_duracao_maxima_minutos'));
+        if ($inicio->diffInMinutes($fim) > $maximo) {
+            throw new RegraDeNegocioException('Um agendamento dura no máximo '.$this->duracaoPorExtenso($maximo).': ajuste o fim.');
+        }
+
         if ($origem === 'encaixe_emergencia') {
             if ($servico->setor !== 'clinica') {
                 throw new RegraDeNegocioException('Encaixe de emergência é só da clínica.');
@@ -127,6 +219,9 @@ class AgendaService
             if ($inicio->gt(now())) {
                 throw new RegraDeNegocioException('Encaixe de emergência registra um atendimento que já começou: o início não pode estar no futuro.');
             }
+        } elseif ($inicio->lt(CarbonImmutable::now($inicio->getTimezone())->startOfMinute())) {
+            // Atendimento que já aconteceu só entra como encaixe de emergência; agendar é para daqui em diante.
+            throw new RegraDeNegocioException('Não dá para agendar no passado: o início precisa ser agora ou depois.');
         } elseif ($this->temConflito((int) $dados['profissional_id'], $inicio, $fim, $tenantId)) {
             throw new RegraDeNegocioException('O profissional já tem um agendamento nesse horário.');
         }
@@ -137,31 +232,19 @@ class AgendaService
     /** Sobreposição de intervalos [início, fim): encostar (fim de um = início do outro) não é conflito. */
     private function temConflito(int $profissionalId, CarbonInterface $inicio, CarbonInterface $fim, int $tenantId): bool
     {
-        return Agendamento::query()
+        // Leitura TRAVADA: dentro da transação do executor, uma leitura comum veria a foto de antes
+        // (InnoDB, REPEATABLE READ) e não enxergaria o agendamento que acabou de ser gravado por outro pedido.
+        return $this->existeTravado(Agendamento::query()
             ->where('tenant_id', $tenantId)
             ->where('profissional_id', $profissionalId)
             ->whereNotIn('status', Agendamento::STATUS_LIVRES)
             ->where('inicio', '<', $fim)
-            ->where('fim', '>', $inicio)
-            ->exists();
+            ->where('fim', '>', $inicio));
     }
 
-    private function momento(mixed $valor): ?CarbonImmutable
+    /** "8 h" ou "45 min": a duração máxima como aparece na frase de recusa. */
+    private function duracaoPorExtenso(int $minutos): string
     {
-        $fuso = (string) config('app.timezone');
-
-        if ($valor instanceof CarbonInterface) {
-            return CarbonImmutable::instance($valor)->setTimezone($fuso);
-        }
-
-        if (! is_string($valor) || trim($valor) === '') {
-            return null;
-        }
-
-        try {
-            return CarbonImmutable::parse($valor, $fuso);
-        } catch (Throwable) {
-            return null;
-        }
+        return $minutos % 60 === 0 ? ($minutos / 60).' h' : $minutos.' min';
     }
 }

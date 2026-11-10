@@ -16,7 +16,7 @@ use Illuminate\Auth\Access\AuthorizationException;
  */
 class TelasController extends Controller
 {
-    /** Entidades da tela Cadastros: a consulta, o cadastro e os filtros (do esquema da tool). */
+    /** Entidades da tela Cadastros no domínio antigo (contabilidade): a consulta, o cadastro e os filtros (do esquema da tool). */
     private const CADASTROS = [
         'clientes' => ['rotulo' => 'Clientes', 'consultar' => 'consultar_clientes', 'criar' => 'criar_cliente',
             'filtros' => [['campo' => 'nome', 'rotulo' => 'Nome contém', 'tipo' => 'texto']]],
@@ -36,6 +36,21 @@ class TelasController extends Controller
             'filtros' => [['campo' => 'tipo', 'rotulo' => 'Tipo', 'tipo' => 'lista', 'opcoes' => ['receita' => 'Receita', 'despesa' => 'Despesa']]]],
     ];
 
+    /** Clínica vet: o mesmo molde, só configuração (as tools vêm de CatalogoDaClinica). */
+    private const CADASTROS_CLINICA = [
+        'tutores' => ['rotulo' => 'Tutores', 'consultar' => 'consultar_tutores', 'criar' => 'criar_tutor',
+            'filtros' => [['campo' => 'nome', 'rotulo' => 'Nome contém', 'tipo' => 'texto']]],
+        'pets' => ['rotulo' => 'Pets', 'consultar' => 'consultar_pets', 'criar' => 'criar_pet',
+            'filtros' => [['campo' => 'nome', 'rotulo' => 'Nome contém', 'tipo' => 'texto']]],
+        'catalogo' => ['rotulo' => 'Catálogo', 'consultar' => 'consultar_catalogo', 'criar' => 'criar_item_catalogo',
+            'filtros' => [
+                ['campo' => 'setor', 'rotulo' => 'Setor', 'tipo' => 'lista', 'opcoes' => ['clinica' => 'Clínica', 'petshop' => 'Petshop']],
+                ['campo' => 'nome', 'rotulo' => 'Nome contém', 'tipo' => 'texto'],
+            ]],
+    ];
+
+    private const TIPOS_LIXEIRA_CLINICA = ['tutor' => 'Tutores', 'pet' => 'Pets', 'item_catalogo' => 'Itens do catálogo'];
+
     private const TIPOS_LIXEIRA = [
         'lancamento' => 'Lançamentos', 'cliente' => 'Clientes', 'fornecedor' => 'Fornecedores',
         'funcionario' => 'Funcionários', 'nota_fiscal' => 'Notas fiscais', 'categoria_lancamento' => 'Categorias de lançamento',
@@ -48,7 +63,8 @@ class TelasController extends Controller
     public function cadastros()
     {
         // "Novo" só aparece para quem pode cadastrar aquela entidade (o /agente/formulario confere de novo).
-        $entidades = array_map(fn (array $e) => [...$e, 'criar' => $this->agente->podeExecutar($e['criar']) ? $e['criar'] : null], self::CADASTROS);
+        $cadastros = $this->contexto->dominio() === 'clinica' ? self::CADASTROS_CLINICA : self::CADASTROS;
+        $entidades = array_map(fn (array $e) => [...$e, 'criar' => $this->agente->podeExecutar($e['criar']) ? $e['criar'] : null], $cadastros);
 
         return view('telas.consulta', [
             'titulo' => 'Cadastros',
@@ -65,7 +81,7 @@ class TelasController extends Controller
             'titulo' => 'Lixeira',
             'intro' => 'Registros excluídos podem ser restaurados dentro do prazo; depois ficam arquivados. Restaurar e excluir de vez pedem a senha de um administrador.',
             'entidades' => ['lixeira' => ['rotulo' => 'Lixeira', 'consultar' => 'consultar_lixeira', 'criar' => null, 'filtros' => [
-                ['campo' => 'tipo', 'rotulo' => 'Tipo de registro', 'tipo' => 'lista', 'opcoes' => self::TIPOS_LIXEIRA],
+                ['campo' => 'tipo', 'rotulo' => 'Tipo de registro', 'tipo' => 'lista', 'opcoes' => $this->contexto->dominio() === 'clinica' ? self::TIPOS_LIXEIRA_CLINICA : self::TIPOS_LIXEIRA],
                 ['campo' => 'situacao', 'rotulo' => 'Situação', 'tipo' => 'lista', 'opcoes' => ['lixeira' => 'Na lixeira', 'arquivado' => 'Arquivado']],
             ]]],
         ]);

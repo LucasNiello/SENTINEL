@@ -125,7 +125,7 @@ class ReautenticacaoAdmin
 
         $admin = User::query()
             ->where('email', $email)
-            ->whereIn('papel', (array) config('sentinel.papeis_administrativos', []))
+            ->whereIn('papel', ContextoUsuario::papeisAdministrativos())
             ->where('tenant_id', $tenantId)
             ->first();
 

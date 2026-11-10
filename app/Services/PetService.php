@@ -18,7 +18,7 @@ class PetService
 
     private const CAMPOS = ['tutor_id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'microchip', 'alertas'];
 
-    private const DEPENDENTES = ['agendamentos', 'prontuarios'];
+    private const DEPENDENTES = ['agendamentos', 'prontuarios', 'vendas'];
 
     /** Tutor na lixeira: o pet não volta antes dele. */
     private const PAIS = ['tutor'];

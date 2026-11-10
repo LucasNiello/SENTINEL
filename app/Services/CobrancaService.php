@@ -10,6 +10,8 @@ use App\Models\CobrancaItem;
 use App\Models\Prontuario;
 use App\Models\User;
 use App\Services\Concerns\ConfereTenant;
+use App\Services\Concerns\FiltroPorNome;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -22,15 +24,15 @@ use Illuminate\Support\Facades\DB;
  * - itens do prontuário entram só depois da assinatura, uma única vez cada; item por diária cobra os
  *   dias de calendário entre a entrada e a alta (mínimo 1);
  * - item que exige receita não entra avulso: só pelo prontuário (decisão do veterinário);
- * - produto com controle de estoque baixa o estoque ao entrar na cobrança (mesma transação, nunca
- *   negativo). Item removido devolve. Cobrança cancelada ou estornada devolve só os itens avulsos: o que
+ * - produto com controle de estoque baixa o estoque ao entrar na cobrança (mesma transação; sem saldo, fica
+ *   negativo e o card avisa, decisão de 10/11). Item removido devolve. Cobrança cancelada ou estornada devolve só os itens avulsos: o que
  *   veio do prontuário foi aplicado no animal (não volta, e não baixa de novo numa cobrança seguinte);
  * - cancelada não conta: o agendamento pode ganhar uma cobrança nova.
  * Nenhum texto clínico passa para a cobrança: só o nome comercial do item.
  */
 class CobrancaService
 {
-    use ConfereTenant;
+    use ConfereTenant, FiltroPorNome;
 
     /** Quem pode pedir o estorno, por setor da cobrança (o dono pede em qualquer setor). */
     private const SOLICITANTE_DO_ESTORNO = ['clinica' => 'recepcao', 'petshop' => 'atendente'];
@@ -51,7 +53,7 @@ class CobrancaService
                 throw new RegraDeNegocioException("O agendamento está {$agendamento->status}: só o realizado é cobrado.");
             }
             // O agendamento está travado acima: duas aberturas simultâneas não passam juntas por aqui.
-            if (Cobranca::where('agendamento_id', $agendamento->id)->where('status', '!=', 'cancelada')->exists()) {
+            if ($this->existeTravado(Cobranca::where('agendamento_id', $agendamento->id)->where('status', '!=', 'cancelada'))) {
                 throw new RegraDeNegocioException('Este agendamento já tem uma cobrança.');
             }
 
@@ -96,6 +98,11 @@ class CobrancaService
             // do commit da 1ª, não acha mais a linha (nunca devolve o estoque duas vezes).
             $linha = CobrancaItem::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($cobrancaItemId);
             $cobranca = $this->aberta($linha->cobranca_id, $tenantId);
+            // O que veio do prontuário foi aplicado no animal: tirar a linha devolveria ao estoque algo que já saiu
+            // e o item deixaria de ser cobrado. Para refazer a conta, cancele a cobrança.
+            if ($linha->prontuario_item_id !== null) {
+                throw new RegraDeNegocioException("{$linha->descricao} veio do prontuário (já foi aplicado no atendimento) e não sai da cobrança: para refazê-la, cancele a cobrança.");
+            }
             if ($linha->baixou_estoque) {
                 $this->catalogo->devolverEstoque($linha->catalogo_item_id, $linha->quantidade, $tenantId);
             }
@@ -119,25 +126,150 @@ class CobrancaService
                 throw new RegraDeNegocioException('O prontuário ainda não foi assinado: os itens entram na cobrança depois da assinatura.');
             }
 
-            $jaLancados = CobrancaItem::whereNotNull('prontuario_item_id')->where('cobranca_id', $cobranca->id)->pluck('prontuario_item_id')->all();
-            // Em ordem de item do catálogo: a baixa de estoque trava na mesma ordem da venda (sem deadlock).
-            $novos = $prontuario->itens()->whereNotIn('id', $jaLancados)->orderBy('catalogo_item_id')->orderBy('id')->get();
-
-            if ($novos->isEmpty()) {
+            if ($this->lancarDoProntuario($cobranca, $prontuario, $tenantId) === 0) {
                 throw new RegraDeNegocioException('Os itens deste prontuário já estão na cobrança.');
-            }
-
-            foreach ($novos as $itemDoProntuario) {
-                $item = CatalogoItem::withTrashed()->where('tenant_id', $tenantId)->findOrFail($itemDoProntuario->catalogo_item_id);
-                // Diária: os dias de calendário da internação; sem entrada/alta, vale a quantidade registrada.
-                $quantidade = $item->cobranca_por === 'diaria' ? ($prontuario->diarias() ?? $itemDoProntuario->quantidade) : $itemDoProntuario->quantidade;
-                // Já consumido numa cobrança cancelada antes (lá ficou baixou_estoque = true e não voltou): não baixa de novo.
-                $jaConsumido = CobrancaItem::where('tenant_id', $tenantId)->where('prontuario_item_id', $itemDoProntuario->id)->where('baixou_estoque', true)->exists();
-                $this->lancar($cobranca, $item, $quantidade, $itemDoProntuario->id, baixar: ! $jaConsumido);
             }
 
             return $this->recalcular($cobranca);
         });
+    }
+
+    /**
+     * Cobrar o atendimento (P-B4), numa operação só: abre a cobrança (o serviço do agendamento é a 1ª linha), puxa
+     * os itens do prontuário ASSINADO, se houver prontuário (com prontuário em rascunho, recusa: o veterinário assina
+     * antes), e fecha. A cobrança fica "a receber"; receber é outra tool. Itens avulsos entram e saem pela tela.
+     */
+    public function cobrarAtendimento(int $agendamentoId, int $tenantId): Cobranca
+    {
+        return DB::transaction(function () use ($agendamentoId, $tenantId) {
+            $cobranca = $this->abrir($agendamentoId, $tenantId);
+            $prontuario = Prontuario::where('tenant_id', $tenantId)->where('agendamento_id', $agendamentoId)->first();
+
+            if ($prontuario !== null) {
+                if (! $prontuario->estaAssinado()) {
+                    throw new RegraDeNegocioException('O prontuário deste atendimento ainda não foi assinado: o veterinário assina antes de cobrar.');
+                }
+                $this->lancarDoProntuario($cobranca, $prontuario, $tenantId);
+                $this->recalcular($cobranca);
+            }
+
+            return $this->fechar($cobranca->id, $tenantId);
+        });
+    }
+
+    /**
+     * Só leitura, para o card antes do segurar: as linhas e o total que a cobrança do atendimento teria AGORA.
+     * Roda o cobrarAtendimento() de verdade numa transação desfeita no fim: a prévia nunca diverge da regra (nem do
+     * abatimento do serviço) e nada fica gravado, nem a baixa de estoque. Recusa: RegraDeNegocioException.
+     *
+     * @return array{linhas: array<int, array{descricao: string, quantidade: int, subtotal_centavos: int}>, total_centavos: int, avisos: string[]}
+     */
+    public function previaDaCobranca(int $agendamentoId, int $tenantId): array
+    {
+        DB::beginTransaction();
+
+        try {
+            $cobranca = $this->cobrarAtendimento($agendamentoId, $tenantId);
+
+            return [
+                'linhas' => $cobranca->itens()->orderBy('id')->get()
+                    ->map(fn (CobrancaItem $l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->all(),
+                'total_centavos' => $cobranca->total_centavos,
+                // Lido antes do rollBack: o saldo que a cobrança deixaria.
+                'avisos' => $this->catalogo->avisosDeSaldoNegativo($cobranca->itens()->pluck('catalogo_item_id')->all(), $tenantId),
+            ];
+        } finally {
+            DB::rollBack();
+        }
+    }
+
+    /**
+     * Cobranças do tenant, mais novas primeiro, com o pet e o serviço do atendimento (para a tabela e para achar
+     * "a cobrança do Thor"). Até 100.
+     */
+    public function buscarPorFiltro(?string $status, ?string $setor, int $tenantId): Collection
+    {
+        return Cobranca::query()
+            ->join('agendamentos', 'agendamentos.id', '=', 'cobrancas.agendamento_id')
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')
+            ->join('catalogo_itens', 'catalogo_itens.id', '=', 'agendamentos.catalogo_item_id')
+            ->where('cobrancas.tenant_id', $tenantId)
+            ->when($status, fn ($query) => $query->where('cobrancas.status', $status))
+            ->when($setor, fn ($query) => $query->where('cobrancas.setor', $setor))
+            ->orderByDesc('cobrancas.id')
+            ->limit(100)
+            ->get(['cobrancas.*', 'pets.nome as pet', 'catalogo_itens.nome_comercial as servico', 'agendamentos.inicio as atendimento_em']);
+    }
+
+    /**
+     * Acha a cobrança por id ou pelo nome do pet, só no tenant e só nos status dados (receber: fechada; cancelar:
+     * aberta ou fechada). Até 6, para o agente saber se ficou ambíguo.
+     *
+     * @param  string[]  $status
+     */
+    public function localizar(?int $id, ?string $busca, int $tenantId, array $status): Collection
+    {
+        return Cobranca::query()
+            ->join('agendamentos', 'agendamentos.id', '=', 'cobrancas.agendamento_id')
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')
+            ->where('cobrancas.tenant_id', $tenantId)
+            ->whereIn('cobrancas.status', $status)
+            ->when($id, fn ($query) => $query->where('cobrancas.id', $id), fn ($query) => $this->nomeContem($query, (string) $busca, 'pets.nome'))
+            ->orderByDesc('cobrancas.id')
+            ->limit(6)
+            ->get(['cobrancas.*', 'pets.nome as pet']);
+    }
+
+    /** Atendimentos REALIZADOS e ainda sem cobrança viva, por id ou pelo nome do pet, só no tenant. Até 6. */
+    public function atendimentosParaCobrar(?int $id, ?string $busca, int $tenantId): Collection
+    {
+        return Agendamento::query()
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')
+            ->where('agendamentos.tenant_id', $tenantId)
+            ->where('agendamentos.status', 'realizado')
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('cobrancas')
+                ->whereColumn('cobrancas.agendamento_id', 'agendamentos.id')->where('cobrancas.status', '!=', 'cancelada'))
+            ->when($id, fn ($query) => $query->where('agendamentos.id', $id), fn ($query) => $this->nomeContem($query, (string) $busca, 'pets.nome'))
+            ->orderByDesc('agendamentos.inicio')
+            ->limit(6)
+            ->get(['agendamentos.*', 'pets.nome as pet']);
+    }
+
+    /**
+     * Lança na cobrança os itens do prontuário assinado que ainda não estão nela; devolve quantas linhas entraram.
+     * O serviço do agendamento já entrou ao abrir (1 unidade): se o prontuário traz o mesmo item, essa unidade
+     * não é cobrada de novo; o que passar disso (2 vacinas, 3 diárias...) é cobrado.
+     */
+    private function lancarDoProntuario(Cobranca $cobranca, Prontuario $prontuario, int $tenantId): int
+    {
+        $jaLancados = CobrancaItem::whereNotNull('prontuario_item_id')->where('cobranca_id', $cobranca->id)->pluck('prontuario_item_id')->all();
+        // Em ordem de item do catálogo: a baixa de estoque trava na mesma ordem da venda (sem deadlock).
+        $novos = $prontuario->itens()->whereNotIn('id', $jaLancados)->orderBy('catalogo_item_id')->orderBy('id')->get();
+
+        $abatido = false;
+        $paraLancar = [];
+        foreach ($novos as $itemDoProntuario) {
+            $item = CatalogoItem::withTrashed()->where('tenant_id', $tenantId)->findOrFail($itemDoProntuario->catalogo_item_id);
+            // Diária: os dias de calendário da internação; sem entrada/alta, vale a quantidade registrada.
+            $quantidade = $item->cobranca_por === 'diaria' ? ($prontuario->diarias() ?? $itemDoProntuario->quantidade) : $itemDoProntuario->quantidade;
+
+            if (! $abatido && $item->id === $cobranca->agendamento->catalogo_item_id) {
+                $abatido = true;
+                $quantidade--;
+            }
+
+            if ($quantidade >= 1) {
+                $paraLancar[] = [$itemDoProntuario, $item, $quantidade];
+            }
+        }
+
+        foreach ($paraLancar as [$itemDoProntuario, $item, $quantidade]) {
+            // Já consumido numa cobrança cancelada antes (lá ficou baixou_estoque = true e não voltou): não baixa de novo.
+            $jaConsumido = CobrancaItem::where('tenant_id', $tenantId)->where('prontuario_item_id', $itemDoProntuario->id)->where('baixou_estoque', true)->exists();
+            $this->lancar($cobranca, $item, $quantidade, $itemDoProntuario->id, baixar: ! $jaConsumido);
+        }
+
+        return count($paraLancar);
     }
 
     public function fechar(int $id, int $tenantId): Cobranca
@@ -232,6 +364,10 @@ class CobrancaService
             if ($autorizador->id === $solicitante->id && ! $dono) {
                 throw new RegraDeNegocioException('Quem pede o estorno não pode autorizá-lo: chame o dono ou outro supervisor do setor.');
             }
+            // Papel que saiu da lista de papéis válidos não autoriza nada, mesmo com a marcação e o PIN ainda gravados.
+            if (! in_array($autorizador->papel, (array) config('sentinel.papeis', []), true)) {
+                throw new RegraDeNegocioException('Quem autorizou não tem um perfil válido no sistema: o estorno não pode ser autorizado por essa pessoa.');
+            }
             if ($autorizador->papel !== 'dono') {
                 if ($autorizador->supervisor_setor !== $cobranca->setor) {
                     throw new RegraDeNegocioException('Só o dono ou um supervisor do setor '.$cobranca->setor.' autoriza este estorno.');
@@ -262,7 +398,7 @@ class CobrancaService
      */
     private function devolverEstoqueDe(Cobranca $cobranca): void
     {
-        foreach ($cobranca->itens()->where('baixou_estoque', true)->whereNull('prontuario_item_id')->orderBy('catalogo_item_id')->get() as $linha) {
+        foreach ($cobranca->itens()->where('baixou_estoque', true)->whereNull('prontuario_item_id')->orderBy('catalogo_item_id')->lockForUpdate()->get() as $linha) {
             $this->catalogo->devolverEstoque($linha->catalogo_item_id, $linha->quantidade, $cobranca->tenant_id);
         }
     }

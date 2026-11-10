@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\ComArquivamento;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /** Serviços e produtos dos dois setores. Preço em centavos (inteiro), nunca float. */
@@ -26,6 +27,26 @@ class CatalogoItem extends Model
     public const COBRANCA_POR = ['unidade', 'diaria'];
 
     protected $table = 'catalogo_itens';
+
+    public function agendamentos(): HasMany
+    {
+        return $this->hasMany(Agendamento::class);
+    }
+
+    public function prontuarioItens(): HasMany
+    {
+        return $this->hasMany(ProntuarioItem::class);
+    }
+
+    public function cobrancaItens(): HasMany
+    {
+        return $this->hasMany(CobrancaItem::class);
+    }
+
+    public function vendaItens(): HasMany
+    {
+        return $this->hasMany(VendaItem::class);
+    }
 
     protected function casts(): array
     {

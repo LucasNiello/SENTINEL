@@ -18,6 +18,18 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
+    protected static function booted(): void
+    {
+        // Mudou o papel: a marcação de supervisor e o PIN de autorização não acompanham. Quem passa a ter outro
+        // papel (ou perde o acesso) não continua autorizando estorno com o que tinha antes.
+        static::updating(function (User $usuario) {
+            if ($usuario->isDirty('papel') && ! $usuario->isDirty('supervisor_setor') && ! $usuario->isDirty('pin_autorizacao')) {
+                $usuario->supervisor_setor = null;
+                $usuario->pin_autorizacao = null;
+            }
+        });
+    }
+
     /**
      * Get the attributes that should be cast.
      *

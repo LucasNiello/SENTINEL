@@ -52,26 +52,31 @@ class VendaServiceTest extends TestCase
         $this->assertSame(['Ração 10 kg', 21000, 2, 42000], [$linha->descricao, $linha->preco_unitario_centavos, $linha->quantidade, $linha->subtotal_centavos]);
     }
 
-    public function test_estoque_insuficiente_nao_grava_nada_nem_baixa_os_outros_itens(): void
+    // Decisão de 10/11: o estoque PODE ficar negativo (o saldo do sistema pode estar errado em relação à prateleira).
+    // Estes dois testes provavam a recusa por falta de saldo ("Estoque insuficiente") e passaram a provar o contrário.
+    public function test_venda_sem_saldo_acontece_e_deixa_o_estoque_negativo(): void
     {
         $racao = $this->produto();
         $cama = $this->produto(['categoria' => 'cama', 'nome_comercial' => 'Caminha M', 'estoque' => 1]);
 
-        $this->recusa(fn () => $this->vendas->registrar([['catalogo_item_id' => $racao->id, 'quantidade' => 3], ['catalogo_item_id' => $cama->id, 'quantidade' => 2]],
-            $this->usuarioClinica('vendedor')->id, null, 'pix', self::T), 'Estoque insuficiente de Caminha M: há 1 e foram pedidos 2. Nada foi gravado.');
+        $venda = $this->vendas->registrar([['catalogo_item_id' => $racao->id, 'quantidade' => 3], ['catalogo_item_id' => $cama->id, 'quantidade' => 2]],
+            $this->usuarioClinica('vendedor')->id, null, 'pix', self::T);
 
-        $this->assertSame([10, 1], [$racao->fresh()->estoque, $cama->fresh()->estoque]);
-        $this->assertSame([0, 0], [Venda::count(), VendaItem::count()]);
+        $this->assertSame([7, -1], [$racao->fresh()->estoque, $cama->fresh()->estoque]);
+        $this->assertSame([1, 2], [Venda::count(), VendaItem::count()]);
+        $this->assertSame([true, true], $venda->itens()->orderBy('catalogo_item_id')->pluck('baixou_estoque')->all());
     }
 
-    public function test_estoque_nunca_fica_negativo_vendendo_o_saldo_exato(): void
+    public function test_saldo_negativo_continua_baixando_e_o_cancelamento_devolve_o_que_baixou(): void
     {
         $cama = $this->produto(['categoria' => 'cama', 'nome_comercial' => 'Caminha M', 'estoque' => 2]);
         $vendedor = $this->usuarioClinica('vendedor');
 
         $this->vendas->registrar([['catalogo_item_id' => $cama->id, 'quantidade' => 2]], $vendedor->id, null, null, self::T);
-        $this->recusa(fn () => $this->vendas->registrar([['catalogo_item_id' => $cama->id, 'quantidade' => 1]], $vendedor->id, null, null, self::T), 'Estoque insuficiente');
+        $segunda = $this->vendas->registrar([['catalogo_item_id' => $cama->id, 'quantidade' => 3]], $vendedor->id, null, null, self::T);
+        $this->assertSame(-3, $cama->fresh()->estoque);
 
+        $this->vendas->cancelar($segunda->id, self::T);
         $this->assertSame(0, $cama->fresh()->estoque);
     }
 
@@ -87,17 +92,93 @@ class VendaServiceTest extends TestCase
         $this->assertSame([0, 10], [Venda::count(), $antibiotico->fresh()->estoque]);
     }
 
-    public function test_venda_e_de_um_setor_so_e_na_clinica_so_farmacia_e_servico_nao_e_vendido(): void
+    // Venda avulsa (decisão de 09/11, implementada em 10/11): a venda aceita qualquer item do catálogo. Este teste
+    // provava a regra antiga ("serviço não é vendido; na clínica, só farmácia") e foi trocado pela regra nova.
+    public function test_venda_e_de_um_setor_so_e_aceita_servico_e_qualquer_item_do_setor(): void
     {
         $vermifugo = $this->produto(['setor' => 'clinica', 'categoria' => 'farmacia', 'nome_comercial' => 'Vermífugo', 'preco_centavos' => 3500]);
+        $consulta = $this->item(['preco_centavos' => 15000]);
         $vendedor = $this->usuarioClinica('recepcao');
 
         $this->recusa(fn () => $this->vendas->registrar([['catalogo_item_id' => $vermifugo->id, 'quantidade' => 1], ['catalogo_item_id' => $this->produto()->id, 'quantidade' => 1]],
             $vendedor->id, null, null, self::T), 'Uma venda é de um setor só');
-        $this->recusa(fn () => $this->vendas->registrar([['catalogo_item_id' => $this->item()->id, 'quantidade' => 1]], $vendedor->id, null, null, self::T), 'é um serviço');
 
-        $venda = $this->vendas->registrar([['catalogo_item_id' => $vermifugo->id, 'quantidade' => 1]], $vendedor->id, null, null, self::T);
-        $this->assertSame(['clinica', 'aberta', 3500], [$venda->setor, $venda->status, $venda->total_centavos]);
+        $venda = $this->vendas->registrar([['catalogo_item_id' => $vermifugo->id, 'quantidade' => 1], ['catalogo_item_id' => $consulta->id, 'quantidade' => 1]],
+            $vendedor->id, null, null, self::T);
+        $this->assertSame(['clinica', 'aberta', 18500], [$venda->setor, $venda->status, $venda->total_centavos]);
+        // Serviço não controla estoque: entra na venda e não baixa nada.
+        $this->assertSame([true, false], $venda->itens()->orderBy('catalogo_item_id')->pluck('baixou_estoque')->all());
+    }
+
+    public function test_quem_vende_depende_do_setor_dos_itens(): void
+    {
+        $vermifugo = $this->produto(['setor' => 'clinica', 'categoria' => 'farmacia', 'nome_comercial' => 'Vermífugo', 'estoque' => 20]);
+        $racao = $this->produto(['estoque' => 20]);
+
+        foreach (['recepcao', 'veterinario', 'dono'] as $papel) {
+            $this->vendas->registrar([['catalogo_item_id' => $vermifugo->id, 'quantidade' => 1]], $this->usuarioClinica($papel)->id, null, 'pix', self::T);
+        }
+        foreach (['vendedor', 'atendente'] as $papel) {
+            $this->recusa(fn () => $this->vendas->registrar([['catalogo_item_id' => $vermifugo->id, 'quantidade' => 1]], $this->usuarioClinica($papel)->id, null, 'pix', self::T),
+                'Itens da clínica são vendidos pela recepção');
+        }
+
+        foreach (['vendedor', 'atendente', 'dono'] as $papel) {
+            $this->vendas->registrar([['catalogo_item_id' => $racao->id, 'quantidade' => 1]], $this->usuarioClinica($papel)->id, null, 'pix', self::T);
+        }
+        foreach (['recepcao', 'veterinario'] as $papel) {
+            $this->recusa(fn () => $this->vendas->registrar([['catalogo_item_id' => $racao->id, 'quantidade' => 1]], $this->usuarioClinica($papel)->id, null, 'pix', self::T),
+                'Itens do petshop são vendidos pela loja');
+        }
+
+        $this->assertSame([6, 17, 17], [Venda::count(), $vermifugo->fresh()->estoque, $racao->fresh()->estoque]);
+    }
+
+    public function test_venda_ligada_ao_atendimento_e_ao_pet_do_mesmo_tenant_e_coerentes(): void
+    {
+        $vet = $this->usuarioClinica('veterinario');
+        $tutor = $this->tutor();
+        $thor = $this->pet($tutor);
+        $mel = $this->pet($this->tutor(nome: 'Outra Tutora'), extra: ['nome' => 'Mel']);
+        $atendimento = $this->agendamentoDireto($thor, $vet, $this->item());
+        $vermifugo = $this->produto(['setor' => 'clinica', 'categoria' => 'farmacia', 'nome_comercial' => 'Vermífugo', 'estoque' => 20]);
+        $itens = [['catalogo_item_id' => $vermifugo->id, 'quantidade' => 1]];
+
+        // Só o atendimento: o pet e o tutor vêm dele.
+        $venda = $this->vendas->registrar($itens, $vet->id, null, 'pix', self::T, agendamentoId: $atendimento->id);
+        $this->assertSame([$atendimento->id, $thor->id, $tutor->id], [$venda->agendamento_id, $venda->pet_id, $venda->tutor_id]);
+
+        // Só o pet: o tutor vem dele.
+        $this->assertSame($mel->tutor_id, $this->vendas->registrar($itens, $vet->id, null, 'pix', self::T, petId: $mel->id)->tutor_id);
+
+        $this->recusa(fn () => $this->vendas->registrar($itens, $vet->id, null, 'pix', self::T, petId: $mel->id, agendamentoId: $atendimento->id), 'não é o do atendimento');
+        $this->recusa(fn () => $this->vendas->registrar($itens, $vet->id, $tutor->id, 'pix', self::T, petId: $mel->id), 'é de outro tutor');
+
+        $deFora = $this->agendamentoDireto($this->pet(null, self::OUTRO_TENANT), $this->usuarioClinica('veterinario', self::OUTRO_TENANT), $this->item([], self::OUTRO_TENANT));
+        $this->recusa(fn () => $this->vendas->registrar($itens, $vet->id, null, 'pix', self::T, agendamentoId: $deFora->id), 'Não encontrei o atendimento');
+        $this->recusa(fn () => $this->vendas->registrar($itens, $vet->id, null, 'pix', self::T, petId: $this->pet(null, self::OUTRO_TENANT)->id), 'Não encontrei o pet');
+
+        $this->assertSame([2, 18], [Venda::count(), $vermifugo->fresh()->estoque]);
+    }
+
+    public function test_previa_mostra_as_linhas_e_o_total_sem_gravar_nada(): void
+    {
+        $racao = $this->produto(['preco_centavos' => 21000, 'estoque' => 10]);
+        $banho = $this->item(['setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho', 'preco_centavos' => 5000]);
+
+        $previa = $this->vendas->previa([['catalogo_item_id' => $racao->id, 'quantidade' => 2], ['catalogo_item_id' => $banho->id, 'quantidade' => 1]],
+            $this->usuarioClinica('vendedor')->id, null, self::T);
+
+        $this->assertSame(['setor' => 'petshop', 'linhas' => [
+            ['descricao' => 'Ração 10 kg', 'quantidade' => 2, 'subtotal_centavos' => 42000],
+            ['descricao' => 'Banho', 'quantidade' => 1, 'subtotal_centavos' => 5000],
+        ], 'total_centavos' => 47000, 'avisos' => []], $previa);
+        $this->assertSame([0, 0, 10], [Venda::count(), VendaItem::count(), $racao->fresh()->estoque], 'a prévia não grava nem baixa estoque');
+
+        // Sem saldo, a prévia não recusa: avisa (o card mostra em aviso, sem bloquear) e continua sem gravar.
+        $semSaldo = $this->vendas->previa([['catalogo_item_id' => $racao->id, 'quantidade' => 12]], $this->usuarioClinica('vendedor')->id, null, self::T);
+        $this->assertSame(['Estoque de Ração 10 kg ficará em -2. Confira a prateleira; a operação não é bloqueada.'], $semSaldo['avisos']);
+        $this->assertSame([0, 10], [Venda::count(), $racao->fresh()->estoque]);
     }
 
     public function test_quantidade_precisa_ser_inteira_e_itens_repetidos_sao_somados(): void

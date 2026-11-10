@@ -95,7 +95,7 @@ class AgendaServiceTest extends TestCase
 
     public function test_encaixe_de_emergencia_nao_confere_conflito_mas_so_aceita_inicio_ate_agora(): void
     {
-        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:30', 'fim' => '2026-11-10 10:30']), self::T);
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 10:00', 'fim' => '2026-11-10 11:00']), self::T);
 
         $encaixe = $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:45', 'fim' => '2026-11-10 10:15', 'origem' => 'encaixe_emergencia']), self::T);
         $this->assertSame('encaixe_emergencia', $encaixe->origem);
@@ -109,9 +109,9 @@ class AgendaServiceTest extends TestCase
 
     public function test_agendamento_normal_nao_cai_em_cima_de_um_encaixe(): void
     {
-        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 08:00', 'fim' => '2026-11-10 09:00', 'origem' => 'encaixe_emergencia']), self::T);
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:00', 'fim' => '2026-11-10 11:00', 'origem' => 'encaixe_emergencia']), self::T);
 
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 08:30', 'fim' => '2026-11-10 09:30']), self::T),
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 10:30', 'fim' => '2026-11-10 11:30']), self::T),
             'já tem um agendamento');
     }
 
@@ -159,6 +159,104 @@ class AgendaServiceTest extends TestCase
         $agendamento = $this->agenda->agendar($dados, self::T);
         $this->expectException(ModelNotFoundException::class);
         $this->agenda->alterarStatus($agendamento->id, 'confirmado', self::OUTRO_TENANT);
+    }
+
+    public function test_agendamento_normal_no_passado_e_recusado_mas_agora_vale(): void
+    {
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:59', 'fim' => '2026-11-10 10:30']), self::T),
+            'Não dá para agendar no passado');
+        $this->assertSame(0, Agendamento::count());
+
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 10:00', 'fim' => '2026-11-10 10:30']), self::T);
+        $this->assertSame(1, Agendamento::count());
+    }
+
+    public function test_duracao_maxima_vem_da_configuracao_e_vale_tambem_no_encaixe(): void
+    {
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 08:00', 'fim' => '2026-11-11 16:01']), self::T),
+            'dura no máximo 8 h');
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 08:00', 'fim' => '2026-11-11 16:00']), self::T);
+
+        // O limite não é número fixo no código: mudou a configuração, mudou a regra.
+        config(['sentinel.agenda_duracao_maxima_minutos' => 45]);
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-12 08:00', 'fim' => '2026-11-12 08:46']), self::T),
+            'dura no máximo 45 min');
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-12 08:00', 'fim' => '2026-11-12 08:45']), self::T);
+
+        // Encaixe de emergência não confere conflito, mas também não pode virar o dia inteiro do veterinário.
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:00', 'fim' => '2026-11-10 10:00', 'origem' => 'encaixe_emergencia']), self::T),
+            'dura no máximo 45 min');
+        $this->assertSame(2, Agendamento::count());
+    }
+
+    public function test_sem_duracao_configurada_o_servidor_recusa(): void
+    {
+        config(['sentinel.agenda_duracao_maxima_minutos' => null]);
+
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(), self::T), 'dura no máximo');
+        $this->assertSame(0, Agendamento::count());
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('formatosSoltos')]
+    public function test_data_em_formato_solto_ou_com_fuso_e_recusada(string $inicio): void
+    {
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => $inicio, 'fim' => '2026-11-12 18:00']), self::T),
+            'Informe o início e o fim com data e hora');
+        $this->assertSame(0, Agendamento::count());
+    }
+
+    public static function formatosSoltos(): array
+    {
+        return [
+            'dia e mês invertidos' => ['11/12/2026 15:00'],
+            'sem hora' => ['2026-11-11'],
+            'palavra do inglês' => ['tomorrow 15:00'],
+            'relativa' => ['+1 day'],
+            'amanhã' => ['amanhã às 15h'],
+            'sufixo Z' => ['2026-11-11T16:00:00Z'],
+            'fuso explícito' => ['2026-11-11 16:00:00-03:00'],
+            'dia que não existe' => ['2026-02-31 10:00'],
+            'hora que não existe' => ['2026-11-11 25:00'],
+        ];
+    }
+
+    public function test_encaixe_com_hora_de_outro_fuso_nao_fura_o_inicio_ate_agora(): void
+    {
+        // 13:00Z são 10:00 em São Paulo, mas a frase com fuso é recusada: nunca vira "13:00 local" no futuro.
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10T13:00:00Z', 'fim' => '2026-11-10T13:30:00Z', 'origem' => 'encaixe_emergencia']), self::T),
+            'Informe o início e o fim com data e hora');
+        $this->assertSame(0, Agendamento::count());
+
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10T09:00', 'fim' => '2026-11-10 09:30:00', 'origem' => 'encaixe_emergencia']), self::T);
+        $this->assertSame(1, Agendamento::count());
+    }
+
+    public function test_agendamento_com_prontuario_nao_vira_cancelado_nem_faltou(): void
+    {
+        $vet = $this->usuarioClinica('veterinario');
+        $agendamento = $this->agendamentoDireto($this->pet(), $vet, $this->item(), ['status' => 'agendado']);
+        $this->prontuarioDireto($agendamento->pet, $vet, ['agendamento_id' => $agendamento->id]);
+
+        foreach (['cancelado', 'faltou'] as $status) {
+            $this->recusa(fn () => $this->agenda->alterarStatus($agendamento->id, $status, self::T), 'já tem prontuário');
+        }
+        $this->assertSame('agendado', $agendamento->fresh()->status);
+
+        // Realizado continua valendo: é o desfecho normal de quem tem prontuário.
+        $this->agenda->alterarStatus($agendamento->id, 'realizado', self::T);
+        $this->assertSame('realizado', $agendamento->fresh()->status);
+    }
+
+    public function test_cobranca_viva_do_agendamento_e_a_nao_cancelada(): void
+    {
+        $agendamento = $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item());
+        $cancelada = \App\Models\Cobranca::create(['agendamento_id' => $agendamento->id, 'setor' => 'clinica', 'status' => 'cancelada', 'total_centavos' => 0, 'tenant_id' => self::T]);
+        $this->assertNull($agendamento->fresh()->cobranca);
+
+        $viva = \App\Models\Cobranca::create(['agendamento_id' => $agendamento->id, 'setor' => 'clinica', 'status' => 'aberta', 'total_centavos' => 0, 'tenant_id' => self::T]);
+
+        $this->assertSame($viva->id, $agendamento->fresh()->cobranca->id);
+        $this->assertEqualsCanonicalizing([$cancelada->id, $viva->id], $agendamento->fresh()->cobrancas->pluck('id')->all());
     }
 
     public function test_transicoes_de_status(): void

@@ -43,4 +43,10 @@ class Pet extends Model
     {
         return $this->hasMany(Prontuario::class);
     }
+
+    /** Vendas avulsas ligadas ao pet (vendas.pet_id): impedem a exclusão, como no tutor. */
+    public function vendas(): HasMany
+    {
+        return $this->hasMany(Venda::class);
+    }
 }

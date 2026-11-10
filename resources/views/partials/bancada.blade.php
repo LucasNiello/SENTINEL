@@ -103,7 +103,9 @@
                 return;
             }
             const colunas = colunasServidor && colunasServidor.length ? colunasServidor : ['id', 'descricao', 'valor', 'status', 'data'];
-            const temAcao = editar || linhas.some((l) => l.acao && l.acao.tool);
+            // P-B5 (caixa de entrada): a linha com "pedido" ganha "Pedir ao agente", só na tela que tem o chat.
+            const temPedido = typeof window.pedirAoAgente === 'function' && linhas.some((l) => typeof l.pedido === 'string');
+            const temAcao = editar || temPedido || linhas.some((l) => l.acao && l.acao.tool);
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const trCabecalho = document.createElement('tr');
@@ -122,6 +124,8 @@
             const tbody = document.createElement('tbody');
             linhas.forEach(l => {
                 const tr = document.createElement('tr');
+                // Linha que pede atenção (ex.: estoque negativo): fundo de aviso; o texto vem na coluna "alerta".
+                if (l.destaque === 'aviso') tr.className = 'linha--aviso';
                 colunas.forEach(c => {
                     const td = document.createElement('td');
                     td.textContent = l[c] ?? '';
@@ -144,6 +148,16 @@
                         botao.setAttribute('aria-label', 'Editar o registro ' + l.id);
                         botao.addEventListener('click', () => abrirFormulario(editar, l.id, botao));
                         td.appendChild(botao);
+                    }
+                    // O texto vira um pedido normal: o agente propõe e a escrita continua passando por Revisar e segurar.
+                    if (temPedido && typeof l.pedido === 'string') {
+                        const pedir = document.createElement('button');
+                        pedir.type = 'button';
+                        pedir.className = 'btn-editar-linha';
+                        pedir.textContent = 'Pedir ao agente';
+                        pedir.setAttribute('aria-label', 'Pedir ao agente o que a mensagem ' + l.id + ' pede');
+                        pedir.addEventListener('click', () => window.pedirAoAgente(l.pedido));
+                        td.appendChild(pedir);
                     }
                     tr.appendChild(td);
                 }
@@ -416,6 +430,7 @@
                 <div class="card-overline"><span>AÇÃO PROPOSTA</span><span class="card-risco"></span></div>
                 <strong class="card-titulo">Confirmação necessária: <span class="card-acao"></span></strong>
                 <div class="msg msg--erro card-resumo-erro" role="alert" hidden>Confira os campos destacados. Nada foi gravado.</div>
+                <div class="msg msg--aviso card-avisos" role="status" hidden></div>
                 <dl class="card-registro" hidden></dl>
                 <div class="tabela-rolagem card-lote" hidden></div>
                 <form class="card-form" novalidate>
@@ -465,6 +480,7 @@
             card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
             autorizacao.hidden = !formulario.reautenticar;
             const resumoErro = card.querySelector('.card-resumo-erro');
+            const avisos = card.querySelector('.card-avisos');
             const etapa = card.querySelector('.card-etapa');
             const btnRevisar = card.querySelector('.btn-revisar');
             const btnConfirmar = card.querySelector('.btn-confirmar');
@@ -492,6 +508,14 @@
                 });
                 registro.replaceChildren(...linhasRegistro);
                 registro.hidden = !linhasRegistro.length;
+                // Aviso que não bloqueia (ex.: "Estoque de Dipirona ficará em -2"): texto na cor de aviso, antes do segurar.
+                const frasesAviso = (formulario.avisos || []).map((frase) => {
+                    const p = document.createElement('p');
+                    p.textContent = 'Aviso: ' + frase;
+                    return p;
+                });
+                avisos.replaceChildren(...frasesAviso);
+                avisos.hidden = !frasesAviso.length;
                 montarLote(formulario.itens || []);
                 // Recusa que não é de um campo (ex.: "existem lançamentos vinculados"): vai no topo, com a frase do servidor.
                 resumoErro.textContent = formulario.erro ? formulario.erro + ' Nada foi gravado.' : 'Confira os campos destacados. Nada foi gravado.';

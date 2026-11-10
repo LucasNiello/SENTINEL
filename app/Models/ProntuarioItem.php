@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * O que foi realizado no atendimento (SEM preço). É a ponte para a cobrança. Segue a imutabilidade
  * do prontuário: depois da assinatura, nenhum item entra, muda ou sai.
  */
-#[Fillable(['prontuario_id', 'catalogo_item_id', 'quantidade', 'tenant_id'])]
+#[Fillable(['prontuario_id', 'catalogo_item_id', 'nome_item', 'quantidade', 'tenant_id'])]
 class ProntuarioItem extends Model
 {
     protected $table = 'prontuario_itens';
@@ -51,8 +51,15 @@ class ProntuarioItem extends Model
         return $this->belongsTo(Prontuario::class);
     }
 
+    /** Com lixeira: item excluído do catálogo depois de usado continua ligado ao prontuário. */
     public function catalogoItem(): BelongsTo
     {
-        return $this->belongsTo(CatalogoItem::class);
+        return $this->belongsTo(CatalogoItem::class)->withTrashed();
+    }
+
+    /** O nome que valia no lançamento (cópia); só registro anterior à cópia cai no cadastro atual. */
+    public function nomeNoLancamento(): ?string
+    {
+        return $this->nome_item ?? $this->catalogoItem?->nome_comercial;
     }
 }

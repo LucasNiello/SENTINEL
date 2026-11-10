@@ -15,7 +15,12 @@ class AuditoriaService
      * Fonte única dos campos sensíveis (LGPD): campo => método que mascara. A auditoria, a
      * leitura e o formulário do card (RF04, que só mostra a máscara) leem daqui.
      */
-    private const MASCARAS = ['cpf' => 'mascararCpf', 'salario' => 'redigir', 'documento' => 'mascararDocumento'];
+    private const MASCARAS = [
+        'cpf' => 'mascararCpf', 'salario' => 'redigir', 'documento' => 'mascararDocumento',
+        // Clínica vet: texto clínico do prontuário (e o texto livre do adendo e das mensagens) nunca fica em claro
+        // na auditoria nem no CSV; só o fato de que o campo existiu.
+        'anamnese' => 'redigir', 'exame_fisico' => 'redigir', 'diagnostico' => 'redigir', 'conduta' => 'redigir', 'texto' => 'redigir',
+    ];
 
     /** O que fica no lugar de um valor que não pode aparecer nem em parte (ex.: salário). */
     public const REDIGIDO = '[redigido]';
@@ -102,7 +107,12 @@ class AuditoriaService
         return collect($parametros)->map(function ($valor, $campo) {
             $metodo = self::MASCARAS[$campo] ?? null;
 
-            return $metodo === null ? $valor : self::$metodo($valor);
+            if ($metodo !== null) {
+                return self::$metodo($valor);
+            }
+
+            // Também dentro das listas e objetos aninhados (ex.: os itens de uma venda): CPF ali não fica em claro.
+            return is_array($valor) ? self::mascararCamposSensiveis($valor) : $valor;
         })->all();
     }
 

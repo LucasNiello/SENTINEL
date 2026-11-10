@@ -191,7 +191,8 @@ class AutenticacaoTest extends TestCase
     public function test_auditoria_grava_o_usuario_o_papel_e_o_tenant_de_quem_agiu(): void
     {
         $this->prepararAgente();
-        $usuario = $this->usuario('operador', 3);
+        // Tenant 5: o 3 passou a ser o da clínica (config sentinel.tenants_clinica), que não tem as tools de contabilidade.
+        $usuario = $this->usuario('operador', 5);
         $this->actingAs($usuario);
 
         $this->comando('consultar_lancamentos')->assertOk();
@@ -199,7 +200,7 @@ class AutenticacaoTest extends TestCase
         $log = AuditLog::query()->sole();
         $this->assertSame($usuario->id, $log->user_id);
         $this->assertSame('operador', $log->papel);
-        $this->assertSame(3, (int) $log->tenant_id);
+        $this->assertSame(5, (int) $log->tenant_id);
     }
 
     // ---- Reautenticação de admin (mecanismo; a tela de restauração é Fase 4) ----

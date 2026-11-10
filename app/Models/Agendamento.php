@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /** Sem lixeira: um agendamento se cancela (status), não se exclui. */
@@ -50,8 +51,14 @@ class Agendamento extends Model
         return $this->hasOne(Prontuario::class);
     }
 
+    /** A cobrança VIVA (não cancelada): um agendamento pode ter várias, as canceladas ficam no histórico. */
     public function cobranca(): HasOne
     {
-        return $this->hasOne(Cobranca::class);
+        return $this->hasOne(Cobranca::class)->where('status', '!=', 'cancelada');
+    }
+
+    public function cobrancas(): HasMany
+    {
+        return $this->hasMany(Cobranca::class);
     }
 }
