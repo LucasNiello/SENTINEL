@@ -71,8 +71,8 @@ Todo card de ação do agente tem borda de 2px com a cor do risco:
 | Risco | Tools | Borda |
 |---|---|---|
 | Leitura | `consultar_*` | `tinta-2` |
-| Escrita | `criar_*`, `atualizar_status_lancamento` | `aviso` |
-| Exclusão | mover para lixeira (ainda não existe como tool; Fase 4) | `erro` |
+| Escrita | `criar_*`, `atualizar_*`, `restaurar_*` e as ações da clínica (agendar, cobrar, vender...) | `aviso` |
+| Exclusão | `excluir_*`, `excluir_definitivo_*` (lixeira) | `erro` |
 
 Tool nova entra na linha do seu efeito, não do seu nome.
 

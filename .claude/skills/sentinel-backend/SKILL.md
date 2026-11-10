@@ -36,7 +36,11 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
   Nenhum outro arquivo chama a API do Foundry.
 - **Tool de escrita** só está pronta com os quatro itens. Faltou um → a tool
   não está pronta:
-  1. RBAC mínimo: papel mínimo declarado na entrada da tool no `catalogo()`.
+  1. RBAC mínimo: papel mínimo declarado na entrada da tool no catálogo do
+     domínio (`toolsDeContabilidade()` no `AiAgentService`;
+     `toolsDaClinica()` em `Services/Agente/CatalogoDaClinica.php`, com
+     `definirCadastro`/`definirAcao` de `ConstrutoresDeTool`). O catálogo é
+     escolhido por tenant em `ContextoUsuario::dominio()`.
   2. Confirmação humana: o agente só devolve `confirmacao_pendente`; a escrita
      roda no `/agente/confirmar`, com o token de sessão do `AgenteController`:
      espera mínima de 2 s; validade de 10 s na interface; o servidor aceita até
@@ -53,15 +57,15 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
 - **Classe de risco**: toda tool declara sua classe de risco (leitura /
   escrita / exclusão), que a interface usa na borda do card (skill
   `sentinel-visual`, seção 5). Tool nova entra na classe do seu efeito, não do
-  seu nome. (pendente: o catálogo e a resposta confirmacao_pendente ainda não
-  levam a classe; entra na Tarefa B)
+  seu nome. O campo `risco` (leitura / escrita / exclusao) já vai no catálogo
+  e na resposta `confirmacao_pendente`.
 - **Datas**: use o timezone da config da aplicação (`now()`/Carbon seguem
   `config('app.timezone')`); nunca assuma UTC.
 - **Teste**: toda mudança vem com teste (ver skill `sentinel-testes`).
 
 # FLUXO
 1. Antes de codar, releia o service/tool análogo já existente (ex.:
-   `LancamentoService`, a entrada da tool em `AiAgentService::catalogo()`) e
+   `LancamentoService`, a entrada da tool no catálogo do domínio) e
    siga o mesmo padrão — não invente convenção nova.
 2. Toda tool de escrita nova precisa dos quatro itens de "Tool de escrita"
    acima. Se algum faltar, pare e sinalize antes de considerar a tool pronta —

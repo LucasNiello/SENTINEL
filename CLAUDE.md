@@ -61,9 +61,17 @@ Notion, quando todas as fases/etapas do projeto estiverem concluídas.
 
 ## Comportamento do agente (vale para qualquer tarefa, com ou sem subagente)
 
-- Mudança cirúrgica: tocar só o necessário pra tarefa pedida — nunca
+- Autonomia: com o plano aprovado, siga até o fim do bloco sem parar.
+- Suposição não confirmada ou decisão de implementação, escopo, UX ou
+  comportamento do agente: decida pela opção mais simples e coerente com a
+  Documentação 1.2, registre em `.claude/decisoes/AAAA-MM-DD.md` (o que
+  decidiu, a alternativa descartada, por quê) e siga.
+- Pare só em: (1) ação irreversível (perda de dado que os seeders não
+  recriam, apagar arquivo fora da tarefa); (2) conflito com decisão de
+  arquitetura documentada.
+- Testes sempre pelo subagente `test-runner`; revisão pelo `reviewer`, 1
+  passada por bloco (2 se mexer em senha, permissão ou exportação).
+- Mudança cirúrgica: tocar só o necessário para a tarefa pedida — nunca
   refatorar código que já funciona "já que estou aqui".
 - Se a solução ficou grande ou complexa, questionar antes de entregar: dava
-  pra ser mais simples?
-- Toda suposição não confirmada no pedido vira pergunta, nunca decisão
-  silenciosa.
+  para ser mais simples?

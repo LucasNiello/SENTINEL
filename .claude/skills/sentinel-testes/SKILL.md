@@ -11,21 +11,25 @@ simulada com `Http::fake`. O RNF09 exige cobertura automatizada de RBAC,
 validação e bloqueio por dependência.
 
 # ONDE FICAM
-Arquivos que existem hoje em `tests/Feature/`:
-- `AgenteTest.php` — fluxo do /agente: comando, confirmação (espera, validade, uso único), falha do Foundry.
-- `AgenteGovernancaTest.php` — auditoria (RF06/RF07), RBAC, tenant fixado no servidor, whitelist de tools.
-- `AtualizarStatusLancamentoTest.php` — tool `atualizar_status_lancamento`.
-- `AuditoriaMascaraTest.php` — máscara LGPD (CPF, salário, CPF no documento) em `audit_logs` e no log de arquivo.
-- `AutenticacaoTest.php` — login/logout, throttle, `ContextoUsuario`, reautenticação de admin.
-- `CategoriaLancamentoToolsTest.php`, `ClienteFornecedorToolsTest.php`, `CriarLancamentoToolTest.php`, `FuncionarioNotaFiscalToolsTest.php` — tools por entidade (consulta, criação, validação, RBAC).
-- `GovernancaTest.php` — RF08-RF12 nos services e validação de Form Request.
-- `ExampleTest.php` — exemplo padrão do Laravel.
+A lista de arquivos cresce a cada bloco; descubra por pasta e padrão de nome
+(`Glob` em `tests/**/*Test.php`), não por uma lista fixa:
+- `tests/Feature/*Test.php` — domínio contábil e transversais (agente,
+  governança/RBAC, tenant, auditoria e máscara LGPD, autenticação, lixeira,
+  exportação, tools por entidade). Um arquivo por assunto, nome descritivo em
+  PascalCase com sufixo `Test`.
+- `tests/Feature/Clinica/*Test.php` — domínio da clínica/petshop (serviços como
+  agenda, cobrança, venda, prontuário, estoque; tools da clínica; RBAC por
+  papel; isolamento de tenant; construtores de tool). Mesmo padrão de nome.
+- `tests/Unit/*Test.php` — poucos testes sem banco nem fluxo HTTP.
+- `tests/Concerns/` — apoio reutilizável, sem sufixo `Test`: `SimulaAgente`
+  (Foundry simulado e os passos `comando()`, `propor()`, `confirmar()`),
+  `CenarioClinica` (dados-base da clínica) e `ProvaDeTravas` (prova que a
+  leitura usa trava), mais a classe auxiliar da gramática SQLite que mostra
+  a trava.
+- `logarComo($papel, $tenantId)` em `tests/TestCase.php`.
 
-Apoio: `tests/Concerns/SimulaAgente.php` (Foundry simulado e os passos
-`comando()`, `propor()`, `confirmar()`) e `logarComo($papel, $tenantId)` em
-`tests/TestCase.php`.
-
-Siga o padrão do arquivo mais parecido com o que você vai testar.
+Siga o padrão do arquivo mais parecido com o que você vai testar, na pasta do
+domínio dele.
 
 # PERMISSÕES
 | Ação | Permitido |
