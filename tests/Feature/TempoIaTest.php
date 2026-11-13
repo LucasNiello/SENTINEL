@@ -29,7 +29,6 @@ class TempoIaTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         Http::fake(function () {
             usleep(self::ATRASO_MS * 1000);
 

@@ -49,7 +49,7 @@ class MemoriaListaTest extends TestCase
 
         // O que foi para a IA no 2º pedido: a frase com a quantidade, sem id nem nome das linhas.
         $corpo = (string) Http::recorded()->last()[0]->body();
-        $this->assertStringContainsString('Mostrei ao usuário uma tabela com 3 linhas (consultar_clientes)', json_decode($corpo, true)['messages'][2]['content'] ?? '');
+        $this->assertStringContainsString('Mostrei ao usuário uma tabela com 3 linhas (consultar_clientes)', json_encode(json_decode($corpo, true)['messages'], JSON_UNESCAPED_UNICODE));
         foreach (['Alfa Ltda', 'Beta Comércio', 'Gama Serviços'] as $nome) {
             $this->assertStringNotContainsString($nome, $corpo);
         }

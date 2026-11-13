@@ -29,7 +29,6 @@ class AnthropicAdaptadorTest extends TestCase
         config([
             'services.ia_provedor' => 'anthropic',
             'services.anthropic' => ['api_key' => 'chave-teste-anthropic', 'model' => 'claude-sonnet-5-5', 'versao' => '2026-10-21', 'max_tokens' => 8000, 'effort' => 'low'],
-            'services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd'],
         ]);
         Http::preventStrayRequests();
         $this->logarComo('operador', 1);
@@ -257,19 +256,32 @@ class AnthropicAdaptadorTest extends TestCase
         $this->assertSame(0, AuditLog::count());
     }
 
-    public function test_sem_configuracao_o_provedor_continua_o_azure(): void
+    public function test_sem_configuracao_o_provedor_e_a_anthropic(): void
     {
         config(['services.ia_provedor' => null]);
-        Http::fake(['foundry.test/*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'oi'], 'finish_reason' => 'stop']]])]);
+        Http::fake(['api.anthropic.com/*' => Http::response(['type' => 'message', 'content' => [['type' => 'text', 'text' => 'oi']], 'stop_reason' => 'end_turn'])]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'texto');
 
-        // O corpo do Azure continua o de antes: as mesmas chaves, na mesma ordem, nada da Anthropic.
-        Http::assertSent(fn (Request $r) => $r->url() === 'https://foundry.test/openai/v1/chat/completions' && $r->hasHeader('api-key', 'k')
-            && ! $r->hasHeader('x-api-key') && array_keys($r->data()) === ['model', 'messages', 'tools', 'tool_choice']
-            && $r['model'] === 'd' && $r['tool_choice'] === 'auto' && $r['messages'][0]['role'] === 'system'
-            && isset($r['tools'][0]['function']['parameters']));
+        Http::assertSent(fn (Request $r) => $r->url() === 'https://api.anthropic.com/v1/messages' && $r->hasHeader('x-api-key', 'chave-teste-anthropic'));
     }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('provedoresRemovidos')]
+    public function test_provedor_azure_ou_desconhecido_falha_fechado_sem_chamar_a_rede(string $provedor): void
+    {
+        config(['services.ia_provedor' => $provedor]);
+        Http::fake();
+
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
+
+        Http::assertNothingSent();
+    }
+
+    public static function provedoresRemovidos(): array
+    {
+        return [['azure'], ['antropic']];
+    }
+
 
     public function test_chave_vazia_no_env_cai_no_padrao_do_modelo(): void
     {
@@ -286,7 +298,7 @@ class AnthropicAdaptadorTest extends TestCase
             putenv($put === false ? 'ANTHROPIC_MODEL' : 'ANTHROPIC_MODEL='.$put);
         }
 
-        $this->assertSame('claude-sonnet-5-5', $config['anthropic']['model']);
+        $this->assertSame('claude-haiku-5-5', $config['anthropic']['model']);
         $this->assertSame('2026-10-21', $config['anthropic']['versao']);
         $this->assertSame(8000, $config['anthropic']['max_tokens']);
     }

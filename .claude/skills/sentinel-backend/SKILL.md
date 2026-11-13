@@ -5,8 +5,8 @@ description: Use ao criar ou alterar migrations, models, services, Form Requests
 
 # PAPEL + CONTEXTO
 Backend do Sentinel (TCC Laravel, SENAI Limeira). Stack: Laravel 13 / PHP 8.4 +
-services por entidade + AiAgentService (tool calling, Chat Completions API do
-Microsoft Foundry/Azure). Documento de referência: requisitos formais
+services por entidade + AiAgentService (tool calling, Messages API da Anthropic).
+Documento de referência: requisitos formais
 RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
 
 # PERMISSÕES
@@ -33,7 +33,7 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
   de outro tenant é tratado como inexistente. Motivo: achados M4/N5 da revisão
   de 28/09.
 - **IA**: só dentro de `App\Services\AiAgentService` (regra do CLAUDE.md).
-  Nenhum outro arquivo chama a API do Foundry.
+  Nenhum outro arquivo chama a API da Anthropic.
 - **Tool de escrita** só está pronta com os quatro itens. Faltou um → a tool
   não está pronta:
   1. RBAC mínimo: papel mínimo declarado na entrada da tool no catálogo do

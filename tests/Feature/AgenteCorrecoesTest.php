@@ -20,7 +20,7 @@ class AgenteCorrecoesTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'secret-marker', 'deployment' => 'd']]);
+        config(['services.anthropic.api_key' => 'secret-marker']);
         $this->logarComo();
         Http::preventStrayRequests();
     }
@@ -115,8 +115,8 @@ class AgenteCorrecoesTest extends TestCase
         $this->postJson('/agente/comando', ['mensagem' => 'Mercado Central'])->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente');
         $requests = Http::recorded();
         $messages = $requests[1][0]['messages'];
-        $this->assertSame('cadastre um cliente', $messages[1]['content']);
-        $this->assertSame('Qual o nome?', $messages[2]['content']);
+        $this->assertSame('cadastre um cliente', $messages[0]['content']);
+        $this->assertSame('Qual o nome?', $messages[1]['content']);
         $this->assertSame(['role' => 'user', 'content' => 'Mercado Central'], $messages[array_key_last($messages)]);
         $this->assertSame(0, \App\Models\Cliente::count());
         $this->assertStringNotContainsString('token', json_encode(session('agente_conversa')));
@@ -132,8 +132,8 @@ class AgenteCorrecoesTest extends TestCase
         $user->save();
         $this->postJson('/agente/comando', ['mensagem' => 'tenant C'])->assertOk();
         $requests = Http::recorded();
-        $this->assertCount(2, $requests[1][0]['messages']);
-        $this->assertCount(2, $requests[2][0]['messages']);
+        $this->assertCount(1, $requests[1][0]['messages']);
+        $this->assertCount(1, $requests[2][0]['messages']);
     }
 
     public function test_historico_limitado_e_logout_limpa_contexto(): void
@@ -161,8 +161,8 @@ class AgenteCorrecoesTest extends TestCase
     {
         Http::fake(['*' => Http::response(['choices' => [['finish_reason' => 'stop', 'message' => ['content' => 'Cadastro de usuários não está disponível.']]]])]);
         $this->postJson('/agente/comando', ['mensagem' => 'cadastre um usuario para mim'])->assertOk()->assertJsonPath('tipo', 'texto');
-        Http::assertSent(fn ($r) => str_contains($r['messages'][0]['content'], 'usuário e funcionário são conceitos diferentes')
-            && str_contains($r['messages'][0]['content'], 'operação não é suportada'));
+        Http::assertSent(fn ($r) => str_contains($r['system'], 'usuário e funcionário são conceitos diferentes')
+            && str_contains($r['system'], 'operação não é suportada'));
         $this->assertEmpty(session('confirmacoes', []));
         $this->assertSame(0, AuditLog::count());
     }

@@ -25,7 +25,6 @@ class AgenteTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         $this->logarComo('admin', 1);
     }
 
@@ -224,7 +223,7 @@ class AgenteTest extends TestCase
 
     public function test_sem_credencial_do_foundry_devolve_erro_sem_chamar_a_rede(): void
     {
-        config(['services.azure_foundry.api_key' => '']);
+        config(['services.anthropic.api_key' => '']);
         Http::fake();
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
@@ -240,7 +239,7 @@ class AgenteTest extends TestCase
 
         $this->postJson('/agente/comando', ['mensagem' => 'que dia é hoje?'])->assertOk();
 
-        Http::assertSent(fn ($req) => str_contains($req['messages'][0]['content'], 'A data de hoje é 2026-09-28'));
+        Http::assertSent(fn ($req) => str_contains($req['system'], 'A data de hoje é 2026-09-28'));
     }
 
     /** @param  array<int, array{string, array}>  $chamadas  [tool, argumentos] na ordem em que o modelo pediu */
@@ -407,17 +406,17 @@ class AgenteTest extends TestCase
         $this->assertSame(0, AuditLog::count(), 'nenhuma tool foi executada');
     }
 
-    public function test_n1_content_nulo_sem_tool_calls_continua_texto_vazio(): void
+    public function test_n1_resposta_vazia_sem_texto_e_sem_tool_vira_erro_amigavel(): void
     {
+        // Contrato da Anthropic (adaptador): fim normal sem texto e sem tool não é resposta (antes, no Azure, virava texto vazio).
         Log::spy();
-        Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => null]]]])]);
+        Http::fake(['*' => Http::response(['type' => 'message', 'content' => [], 'stop_reason' => 'end_turn'])]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])
-            ->assertOk()
-            ->assertJsonPath('tipo', 'texto')
-            ->assertJsonPath('mensagem', '');
+            ->assertStatus(502)
+            ->assertJsonPath('codigo', 'AI_PROVIDER_RESPONSE_INVALID');
 
-        Log::shouldNotHaveReceived('warning');
+        $this->assertSame(0, AuditLog::count());
     }
 
     // ---- Tarefa B: classe de risco no card (skill sentinel-visual, seção 5) ----
@@ -447,14 +446,14 @@ class AgenteTest extends TestCase
             ->assertJsonPath('risco', 'escrita');
     }
 
-    public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
+    public function test_requisicao_a_anthropic_envia_x_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'texto');
 
-        Http::assertSent(fn ($req) => $req->hasHeader('api-key', 'k')
-            && $req->url() === 'https://foundry.test/openai/v1/chat/completions'
-            && collect($req['tools'])->pluck('function.name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'conciliar_lancamentos_em_lote', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento', 'atualizar_cliente', 'atualizar_fornecedor', 'atualizar_funcionario', 'atualizar_nota_fiscal', 'atualizar_categoria_lancamento', 'consultar_lixeira', 'excluir_lancamento', 'restaurar_lancamento', 'excluir_definitivo_lancamento', 'excluir_cliente', 'restaurar_cliente', 'excluir_definitivo_cliente', 'excluir_fornecedor', 'restaurar_fornecedor', 'excluir_definitivo_fornecedor', 'excluir_funcionario', 'restaurar_funcionario', 'excluir_definitivo_funcionario', 'excluir_nota_fiscal', 'restaurar_nota_fiscal', 'excluir_definitivo_nota_fiscal', 'excluir_categoria_lancamento', 'restaurar_categoria_lancamento', 'excluir_definitivo_categoria_lancamento']);
+        Http::assertSent(fn ($req) => $req->hasHeader('x-api-key', 'k')
+            && $req->url() === 'https://api.anthropic.com/v1/messages'
+            && collect($req['tools'])->pluck('name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'conciliar_lancamentos_em_lote', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento', 'atualizar_cliente', 'atualizar_fornecedor', 'atualizar_funcionario', 'atualizar_nota_fiscal', 'atualizar_categoria_lancamento', 'consultar_lixeira', 'excluir_lancamento', 'restaurar_lancamento', 'excluir_definitivo_lancamento', 'excluir_cliente', 'restaurar_cliente', 'excluir_definitivo_cliente', 'excluir_fornecedor', 'restaurar_fornecedor', 'excluir_definitivo_fornecedor', 'excluir_funcionario', 'restaurar_funcionario', 'excluir_definitivo_funcionario', 'excluir_nota_fiscal', 'restaurar_nota_fiscal', 'excluir_definitivo_nota_fiscal', 'excluir_categoria_lancamento', 'restaurar_categoria_lancamento', 'excluir_definitivo_categoria_lancamento']);
     }
 }

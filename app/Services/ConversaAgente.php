@@ -115,7 +115,7 @@ class ConversaAgente
         if (preg_match('/senha|password|api.?key|app.?key|csrf|cookie|session.?id|bearer/i', $texto)) {
             return '[Mensagem com credenciais omitida do histórico]';
         }
-        foreach ([config('services.azure_foundry.api_key'), config('services.anthropic.api_key'), config('app.key')] as $segredo) {
+        foreach ([config('services.anthropic.api_key'), config('app.key')] as $segredo) {
             if (is_string($segredo) && $segredo !== '') $texto = str_replace($segredo, '[credencial omitida]', $texto);
         }
         $texto = preg_replace('/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/', '[documento omitido]', $texto);

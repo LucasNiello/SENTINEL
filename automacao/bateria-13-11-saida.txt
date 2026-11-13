@@ -1,0 +1,44 @@
+﻿ 1 consulta S consultar_clientes resultado_leitura 
+ 2 consulta S consultar_fornecedores resultado_leitura 
+ 3 consulta S consultar_lancamentos resultado_leitura 
+ 4 consulta S consultar_lancamentos resultado_leitura 
+ 5 consulta S consultar_categorias_lancamento resultado_leitura 
+ 6 consulta S consultar_notas_fiscais resultado_leitura 
+ 7 consulta S consultar_clientes resultado_leitura 
+ 8 consulta S consultar_lixeira resultado_leitura 
+ 9 consulta S consultar_lancamentos resultado_leitura 
+10 consulta S consultar_fornecedores resultado_leitura 
+11 cadastro S criar_cliente confirmacao_pendente 
+12 cadastro S criar_cliente confirmacao_pendente 
+13 cadastro S criar_fornecedor confirmacao_pendente 
+14 cadastro S criar_fornecedor confirmacao_pendente 
+15 cadastro S criar_lancamento confirmacao_pendente 
+16 cadastro S criar_lancamento confirmacao_pendente 
+17 cadastro S criar_categoria_lancamento confirmacao_pendente 
+18 cadastro S criar_nota_fiscal confirmacao_pendente 
+19 cadastro S criar_cliente confirmacao_pendente 
+20 cadastro S criar_funcionario negado AI_FORBIDDEN
+21 atualizacao S atualizar_cliente confirmacao_pendente 
+22 atualizacao S atualizar_fornecedor confirmacao_pendente 
+23 atualizacao S atualizar_categoria_lancamento confirmacao_pendente 
+24 atualizacao N consultar_lancamentos resultado_leitura 
+25 atualizacao S atualizar_cliente confirmacao_pendente 
+26 atualizacao S atualizar_fornecedor confirmacao_pendente 
+27 continuacao S atualizar_cliente confirmacao_pendente 
+28 continuacao S atualizar_fornecedor confirmacao_pendente 
+29 continuacao S atualizar_status_lancamento confirmacao_pendente 
+30 continuacao S atualizar_categoria_lancamento confirmacao_pendente 
+31 exclusao S excluir_cliente negado AI_FORBIDDEN
+32 exclusao S excluir_fornecedor negado AI_FORBIDDEN
+33 exclusao S restaurar_cliente erro AI_TOOL_REFUSED
+34 exclusao S restaurar_lancamento erro AI_TOOL_REFUSED
+35 lote S conciliar_lancamentos_em_lote texto 
+36 lote S conciliar_lancamentos_em_lote texto 
+37 ambiguo S - texto 
+38 ambiguo S - texto 
+39 ambiguo S - texto 
+40 ambiguo N - texto 
+
+Acertos: 38/40 | consulta 10/10, cadastro 10/10, atualizacao 5/6, continuacao 4/4, exclusao 4/4, lote 2/2, ambiguo 3/4
+tempo_ia_ms (38 pedidos com IA): p50 1709 | p90 3938 | máx 9542
+Chamadas reais: 38 | tokens entrada 292062 / saída 5701

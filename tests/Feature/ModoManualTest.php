@@ -28,7 +28,6 @@ class ModoManualTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         Http::fake(fn () => throw new ConnectionException('fora do ar'));
         $this->usuario = $this->logarComo('operador', 1);
     }

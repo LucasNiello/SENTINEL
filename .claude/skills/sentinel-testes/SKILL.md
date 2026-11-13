@@ -6,7 +6,7 @@ description: Use ao escrever ou rodar testes do Sentinel (PHPUnit/Feature): gove
 # PAPEL + CONTEXTO
 Testes do Sentinel. A suíte roda com `php artisan test` (PHPUnit) em SQLite na
 memória (`phpunit.xml`: `DB_CONNECTION=sqlite`, `DB_DATABASE=:memory:`) —
-nenhum teste toca o MySQL de desenvolvimento, e a API do Foundry é sempre
+nenhum teste toca o MySQL de desenvolvimento, e a API da Anthropic é sempre
 simulada com `Http::fake`. O RNF09 exige cobertura automatizada de RBAC,
 validação e bloqueio por dependência.
 
@@ -22,7 +22,7 @@ A lista de arquivos cresce a cada bloco; descubra por pasta e padrão de nome
   papel; isolamento de tenant; construtores de tool). Mesmo padrão de nome.
 - `tests/Unit/*Test.php` — poucos testes sem banco nem fluxo HTTP.
 - `tests/Concerns/` — apoio reutilizável, sem sufixo `Test`: `SimulaAgente`
-  (Foundry simulado e os passos `comando()`, `propor()`, `confirmar()`),
+  (IA simulada e os passos `comando()`, `propor()`, `confirmar()`),
   `CenarioClinica` (dados-base da clínica) e `ProvaDeTravas` (prova que a
   leitura usa trava), mais a classe auxiliar da gramática SQLite que mostra
   a trava.

@@ -14,7 +14,6 @@ class ConversaMarcadorTest extends TestCase
     public function test_novo_pedido_preserva_contexto_sem_reenviar_marcador_de_interface_como_resposta_da_ia(): void
     {
         $this->logarComo();
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         $conversa = app(ConversaAgente::class);
         $conversa->guardar(session()->driver(), 'Cadastre Mercado QA', ['tipo' => 'confirmacao_pendente']);
         $conversa->registrarResultado(session()->driver(), 'Cliente cadastrado.');
@@ -28,9 +27,8 @@ class ConversaMarcadorTest extends TestCase
             return str_contains($texto, 'Cadastre Mercado QA')
                 && str_contains($texto, 'Cliente cadastrado.')
                 && ! str_contains($texto, 'Sem pendentes neste filtro.')
-                && collect($request['messages'])->contains(fn ($m) =>
-                    $m['role'] === 'system' && str_contains($m['content'], 'não é o estado atual do banco'))
-                && ! collect($request['messages'])->skip(1)->contains(fn ($m) =>
+                && str_contains($request['system'], 'não é o estado atual do banco')
+                && ! collect($request['messages'])->contains(fn ($m) =>
                     ($m['content'] ?? '') === 'Proposta pendente de confirmação humana. Nenhuma escrita foi executada.');
         });
     }

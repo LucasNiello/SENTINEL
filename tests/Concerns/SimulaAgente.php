@@ -18,7 +18,6 @@ trait SimulaAgente
 
     protected function prepararAgente(): void
     {
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         Http::fake(fn () => Http::response($this->respostaFoundry));
     }
 

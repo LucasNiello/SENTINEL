@@ -17,7 +17,6 @@ class RoteamentoIntencaoTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'fake', 'deployment' => 'test']]);
         Http::preventStrayRequests();
     }
 
@@ -57,7 +56,7 @@ class RoteamentoIntencaoTest extends TestCase
     public function test_negativa_independe_de_azure_configurado_e_nao_revela_outro_tenant(): void
     {
         $this->logarComo('operador');
-        config(['services.azure_foundry.api_key' => '']);
+        config(['services.anthropic.api_key' => '']);
         $cliente = Cliente::create(['nome' => 'Outro tenant', 'tenant_id' => 2]);
         $this->postJson('/agente/comando', ['mensagem' => 'exclua o cliente Outro tenant'])->assertForbidden();
         Http::assertNothingSent();
@@ -79,8 +78,8 @@ class RoteamentoIntencaoTest extends TestCase
         Http::fake(fn () => Http::response($body));
         $this->postJson('/agente/comando', ['mensagem' => 'Por favor, quero excluir o cliente Mercado Horizonte'])
             ->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('tool', 'excluir_cliente');
-        Http::assertSent(fn ($r) => array_column(array_column($r['tools'], 'function'), 'name') === ['excluir_cliente']
-            && $r['tool_choice']['function']['name'] === 'excluir_cliente');
+        Http::assertSent(fn ($r) => array_column($r['tools'], 'name') === ['excluir_cliente']
+            && $r['tool_choice'] === ['type' => 'auto'] && str_contains($r['system'], 'use a ferramenta excluir_cliente'));
         $this->assertDatabaseHas('clientes', ['id' => $cliente->id, 'deleted_at' => null]);
     }
 
@@ -171,7 +170,7 @@ class RoteamentoIntencaoTest extends TestCase
         $this->logarComo('operador');
         Http::fake(fn () => Http::response($this->respostaTool('consultar_clientes')));
         $this->postJson('/agente/comando', ['mensagem' => $pedido])->assertOk()->assertJsonPath('tipo', 'resultado_leitura');
-        Http::assertSent(fn ($r) => $r['tool_choice'] === 'auto');
+        Http::assertSent(fn ($r) => $r['tool_choice'] === ['type' => 'auto']);
         $this->assertDatabaseHas('audit_logs', ['tool' => 'consultar_clientes', 'resultado' => 'sucesso']);
     }
 
@@ -204,8 +203,8 @@ class RoteamentoIntencaoTest extends TestCase
         $this->postJson('/agente/comando', ['mensagem' => 'exclua de vez o cliente '.$cliente->id])
             ->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('tool', 'excluir_definitivo_cliente')
             ->assertJsonPath('formulario.reautenticar', true);
-        Http::assertSent(fn ($r) => array_column(array_column($r['tools'], 'function'), 'name') === ['excluir_definitivo_cliente']
-            && $r['tool_choice']['function']['name'] === 'excluir_definitivo_cliente');
+        Http::assertSent(fn ($r) => array_column($r['tools'], 'name') === ['excluir_definitivo_cliente']
+            && $r['tool_choice'] === ['type' => 'auto'] && str_contains($r['system'], 'use a ferramenta excluir_definitivo_cliente'));
         $this->assertTrue(Cliente::withTrashed()->whereKey($cliente->id)->exists());
     }
 

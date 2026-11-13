@@ -205,9 +205,9 @@ class AiAgentService
     }
 
     /**
-     * Ponto único de contato com a Chat Completions API do Microsoft Foundry
-     * (Azure OpenAI) — chamada HTTP REST stateless, sem SDK, na rota
-     * unificada /openai/v1/chat/completions (versionamento implícito).
+     * Ponto único de contato com a Messages API da Anthropic — chamada HTTP REST
+     * stateless, sem SDK. O corpo interno segue o formato de chat/tools e o
+     * adaptador (chamarAnthropic/traduzirAnthropic) faz a conversão.
      *
      * Tools de leitura (consultar_lancamentos) são executadas direto e o
      * resultado volta como tabela crua — uma única chamada à API por
@@ -228,13 +228,9 @@ class AiAgentService
         }
 
         $provedor = $this->provedor();
-        $endpoint = rtrim((string) config('services.azure_foundry.endpoint'), '/');
-        $apiKey = (string) config('services.azure_foundry.api_key');
-        $deployment = (string) config('services.azure_foundry.deployment');
         $configurado = match ($provedor) {
             'anthropic' => (string) config('services.anthropic.api_key') !== '' && (string) config('services.anthropic.model') !== '',
-            'azure' => $endpoint !== '' && $apiKey !== '' && $deployment !== '',
-            default => false, // provedor desconhecido (erro de digitação): falha fechada, nunca cai no Azure calado
+            default => false, // provedor desconhecido ou removido (ex.: azure): falha fechada
         };
 
         if (! $configurado) {
@@ -248,9 +244,9 @@ class AiAgentService
         $decorrido = fn () => (int) round((hrtime(true) - $inicio) / 1e6);
 
         try {
-            // O corpo é montado no formato do Azure; o adaptador da Anthropic traduz a partir dele.
+            // O corpo é montado no formato interno de chat/tools; o adaptador da Anthropic traduz a partir dele.
             $corpo = [
-                    'model' => $deployment,
+                    'model' => (string) config('services.anthropic.model'),
                     'messages' => [
                         [
                             'role' => 'system',
@@ -268,9 +264,7 @@ class AiAgentService
                     'tool_choice' => $toolSolicitada === null ? 'auto' : ['type' => 'function', 'function' => ['name' => $toolSolicitada]],
                 ];
 
-            $resposta = $provedor === 'anthropic'
-                ? $this->chamarAnthropic($corpo, $toolSolicitada)
-                : Http::withHeaders(['api-key' => $apiKey])->timeout(30)->post("{$endpoint}/openai/v1/chat/completions", $corpo);
+            $resposta = $this->chamarAnthropic($corpo, $toolSolicitada);
         } catch (\Throwable $e) {
             $anterior = $e->getPrevious();
             $timeout = $e instanceof \GuzzleHttp\Exception\NetworkTimeoutException
@@ -287,9 +281,7 @@ class AiAgentService
 
         $tempoIaMs = $decorrido();
 
-        if ($provedor === 'anthropic') {
-            $resposta = $this->traduzirAnthropic($resposta);
-        }
+        $resposta = $this->traduzirAnthropic($resposta);
 
         // Tudo o que esta resposta auditar (leitura, negado, tool fora do catálogo) leva o tempo da IA.
         return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada, $lista));
@@ -324,7 +316,7 @@ class AiAgentService
                 $localStatus, ['status' => $status, 'tempo_ia_ms' => $tempoIaMs]);
         }
 
-        // N1: o corpo da Azure é dado externo. Fora do formato esperado (message que não é objeto, choices
+        // N1: o corpo do provedor é dado externo. Fora do formato esperado (message que não é objeto, choices
         // vazio, HTML com 200, name/arguments que não são texto...) vira erro amigável, nunca 500.
         $mensagemResposta = $resposta->json('choices.0.message');
 
@@ -339,7 +331,7 @@ class AiAgentService
             return $this->respostaForaDoFormato($resposta->status());
         }
 
-        // Em seleção nominal, o Azure observado termina com stop + tool_calls.
+        // Em seleção nominal, o provedor termina com stop + tool_calls.
         // Só esse modo aceita a combinação; nome, argumentos e schema ainda são conferidos abaixo.
         $fim = $resposta->json('choices.0.finish_reason');
         if ($fim === 'length' || $fim === 'content_filter') {
@@ -541,17 +533,17 @@ class AiAgentService
         ];
     }
 
-    /** Provedor configurado: 'azure' (padrão, também quando vazio) ou 'anthropic'. Valor desconhecido = null (falha fechada). */
+    /** Provedor configurado: 'anthropic' (padrão, também quando vazio). Qualquer outro valor (inclusive 'azure', removido) = null (falha fechada). */
     private function provedor(): ?string
     {
-        $provedor = (string) (config('services.ia_provedor') ?: 'azure');
+        $provedor = (string) (config('services.ia_provedor') ?: 'anthropic');
 
-        return in_array($provedor, ['azure', 'anthropic'], true) ? $provedor : null;
+        return $provedor === 'anthropic' ? $provedor : null;
     }
 
     /**
      * Adaptador da Anthropic (Messages API, POST /v1/messages, HTTP REST sem SDK). Recebe o corpo
-     * já montado no formato do Azure e traduz: as mensagens system (a principal e a do meio do
+     * já montado no formato interno de chat/tools e traduz: as mensagens system (a principal e a do meio do
      * histórico) vão para o campo system; do histórico só passam user/assistant com texto não vazio,
      * sem nenhuma outra chave. Tool solicitada: tool_choice auto + só essa tool + instrução no system,
      * porque o modelo padrão (claude-sonnet-5-5) recusa tool_choice forçado com 400. A conferência no
@@ -631,7 +623,7 @@ class AiAgentService
 
     /**
      * Converte a resposta 2xx da Anthropic para o MESMO formato interno que o interpretar() já lê
-     * do Azure (choices.0.message com content/tool_calls e finish_reason). Não 2xx passa como veio
+     * interno (choices.0.message com content/tool_calls e finish_reason). Não 2xx passa como veio
      * (o interpretar trata o status). O corpo é decodificado com objetos: input {} continua "{}" e
      * input que não é objeto continua não sendo, para o interpretar recusar. Fora do formato (sem
      * content em lista, stop_reason ausente ou desconhecido, end_turn com tool_use) vira resposta
@@ -805,7 +797,7 @@ class AiAgentService
     /**
      * Definições das tools expostas ao modelo, no formato de function
      * calling da Chat Completions API. Enviadas no parâmetro `tools` da
-     * chamada ao Azure OpenAI.
+     * chamada ao provedor de IA.
      *
      * Derivadas de catalogo() — a fonte única de tools: o que não está lá
      * não é oferecido ao modelo nem executável.
@@ -1224,7 +1216,7 @@ class AiAgentService
 
     /**
      * Modo manual (B2, RF05/RNF05): a mesma consulta da tool, SEM chamar a IA — para quando a
-     * Azure está fora do ar ou o usuário prefere a tela. Só tool de leitura do catálogo; os
+     * a IA está fora do ar ou o usuário prefere a tela. Só tool de leitura do catálogo; os
      * filtros são conferidos contra o esquema da própria tool (nenhuma chave a mais, enum e data
      * no formato) e a execução é o executarTool de sempre: RBAC, tenant, colunas, máscara LGPD e
      * auditoria (origem "manual").

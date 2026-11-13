@@ -27,9 +27,8 @@ class PromptPorDominioTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         Http::preventStrayRequests();
-        Http::fake(['foundry.test/*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Ok.'], 'finish_reason' => 'stop']]])]);
+        Http::fake(['api.anthropic.com/*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Ok.'], 'finish_reason' => 'stop']]])]);
         Carbon::setTestNow('2026-11-13 10:00:00');
     }
 
@@ -44,9 +43,13 @@ class PromptPorDominioTest extends TestCase
         $this->withSession($historico)->postJson('/agente/comando', ['mensagem' => 'obrigado'])->assertOk();
 
         $corpo = Http::recorded()->last()[0]->data();
-        $sistemas = array_values(array_filter($corpo['messages'], fn ($m) => $m['role'] === 'system'));
+        // O adaptador junta as mensagens system no campo system; a do meio entra com este prefixo.
+        $partes = explode("
 
-        return [$sistemas[0]['content'], $sistemas[1]['content'] ?? null];
+Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):
+", $corpo['system'], 2);
+
+        return [$partes[0], $partes[1] ?? null];
     }
 
     public function test_contabilidade_continua_com_o_mesmo_prompt_byte_a_byte(): void

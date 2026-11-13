@@ -28,7 +28,6 @@ class ConciliarLoteTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         $this->logarComo('operador', 1);
     }
 

@@ -148,7 +148,7 @@ function Ensure-VC {
     if ($p.ExitCode -notin 0,1638,3010) { throw 'Falha no runtime Visual C++. Verifique o UAC.' }
 }
 function Set-TempoMaximo([string]$content) {
-    # N3: on Windows the limit is wall-clock; php.ini-development's 30 s ties with the Azure timeout(30).
+    # N3: on Windows the limit is wall-clock; php.ini-development's 30 s ties with the AI timeout(30).
     # Ensures 60 s and never lowers: 0 (no limit) or >= 60 stay; a commented line counts as absent.
     $pattern='(?m)^[ \t]*max_execution_time[ \t]*=[ \t]*"?(\d+)"?[ \t]*(?=\r?$)'
     $active=[regex]::Matches($content,$pattern)
@@ -206,7 +206,7 @@ function Ensure-Php {
     $valores=((Run $php @('-r',"echo PHP_VERSION,'|',ini_get('session.upload_progress.enabled'),'|',ini_get('curl.cainfo'),'|',ini_get('openssl.cafile');")).Text.Trim().Split("`n")[-1]) -split '\|'
     if ([version]$valores[0] -lt [version]'8.4.27') { Aviso "PHP $($valores[0]) e anterior a 8.4.27 (correcoes de seguranca). No Laragon: menu PHP > Version > 8.4.27 ou mais nova; depois execute instalar.bat novamente." }
     if ($valores[1] -notin @('','0','off')) { Aviso "session.upload_progress.enabled esta ligado. Em $ini, defina session.upload_progress.enabled = 0 e execute instalar.bat novamente." }
-    if (!$valores[2] -or !(Test-Path -LiteralPath $valores[2] -PathType Leaf)) { Aviso "curl.cainfo sem certificado: a chamada a Azure falha (erro SSL). Em $ini, defina curl.cainfo apontando para um cacert.pem (no Laragon: C:\laragon\etc\ssl\cacert.pem)." }
+    if (!$valores[2] -or !(Test-Path -LiteralPath $valores[2] -PathType Leaf)) { Aviso "curl.cainfo sem certificado: a chamada a API de IA falha (erro SSL). Em $ini, defina curl.cainfo apontando para um cacert.pem (no Laragon: C:\laragon\etc\ssl\cacert.pem)." }
     if (!$valores[3] -or !(Test-Path -LiteralPath $valores[3] -PathType Leaf)) { Aviso "openssl.cafile sem certificado: downloads HTTPS feitos pelo PHP podem falhar. Em $ini, defina openssl.cafile com o mesmo cacert.pem do curl.cainfo." }
 }
 function Ensure-Composer {
@@ -432,18 +432,18 @@ try {
     $null=Run $php @($composer,'check-platform-reqs','--no-ansi'); $state.composer=$composerHash; Save-State; Ok 'Dependencias PHP'
     $script:helper=Join-Path $tmp 'bridge.php'; $self=[IO.File]::ReadAllText($env:SENTINEL_BOOTSTRAP_FILE)
     Write-Utf8 $helper (($self -split '(?m)^# PHP_PAYLOAD\r?$',2)[1]); Load-Env
-    Step '.env e Azure Foundry'
+    Step '.env e API da Anthropic'
     if ($cfg.APP_ENV -and $cfg.APP_ENV -ne 'local') { throw 'Inicializador exclusivo do ambiente local. APP_ENV existente foi preservado.' }
-    $defaults=@{APP_NAME='Sentinel'; APP_ENV='local'; APP_DEBUG='false'; APP_URL='http://127.0.0.1:8000'; DB_HOST='127.0.0.1'; DB_PORT='3306'; DB_DATABASE='sentinel'; DB_USERNAME='root'; SESSION_DRIVER='database'; SESSION_LIFETIME='120'; SESSION_ENCRYPT='true'; SESSION_PATH='/'; SESSION_DOMAIN='null'; BROADCAST_CONNECTION='log'; FILESYSTEM_DISK='local'; QUEUE_CONNECTION='database'; CACHE_STORE='database'; AZURE_FOUNDRY_ENDPOINT='https://sentinel-foundry-tcc26.openai.azure.com'; AZURE_FOUNDRY_DEPLOYMENT='gpt-4.1-mini'}
+    $defaults=@{APP_NAME='Sentinel'; APP_ENV='local'; APP_DEBUG='false'; APP_URL='http://127.0.0.1:8000'; DB_HOST='127.0.0.1'; DB_PORT='3306'; DB_DATABASE='sentinel'; DB_USERNAME='root'; SESSION_DRIVER='database'; SESSION_LIFETIME='120'; SESSION_ENCRYPT='true'; SESSION_PATH='/'; SESSION_DOMAIN='null'; BROADCAST_CONNECTION='log'; FILESYSTEM_DISK='local'; QUEUE_CONNECTION='database'; CACHE_STORE='database'; SENTINEL_IA_PROVEDOR='anthropic'; ANTHROPIC_MODEL='claude-haiku-5-5'}
     $updates=@{}; foreach ($key in $defaults.Keys) { if (!$cfg[$key]) { $updates[$key]=$defaults[$key] } }
     $updates.DB_CONNECTION='mysql'; if ($cfg.DB_URL) { $updates.DB_URL='' }; Set-Env $updates
     # .env recem-criado recebe os valores seguros (o .env.example traz APP_DEBUG=true); existente nunca e sobrescrito.
     $seguros=@{APP_DEBUG='false'; SESSION_ENCRYPT='true'}
     if ($envNovo) { Set-Env $seguros }
     else { foreach ($key in $seguros.Keys) { if ($cfg[$key] -ne $seguros[$key]) { Aviso "$key=$($cfg[$key]) no .env existente; para a apresentacao use $key=$($seguros[$key]). O instalador nao alterou o .env." } } }
-    if (!$cfg.AZURE_FOUNDRY_API_KEY -or $cfg.AZURE_FOUNDRY_API_KEY -match '^(your_|sua_|<|changeme)') {
-        $key=$env:SENTINEL_AZURE_FOUNDRY_API_KEY; if (!$key) { $key=Secret-Input 'Azure Foundry API key (entrada oculta, salva somente no .env)' }
-        if (!$key) { throw 'Azure Foundry API key nao informada.' }; Set-Env @{AZURE_FOUNDRY_API_KEY=$key}
+    if (!$cfg.ANTHROPIC_API_KEY -or $cfg.ANTHROPIC_API_KEY -match '^(your_|sua_|<|changeme)') {
+        $key=$env:SENTINEL_ANTHROPIC_API_KEY; if (!$key) { $key=Secret-Input 'Anthropic API key (entrada oculta, salva somente no .env)' }
+        if (!$key) { throw 'Anthropic API key nao informada.' }; Set-Env @{ANTHROPIC_API_KEY=$key}
     }
     # Inherited application variables must not redirect migrations to another database.
     foreach ($key in $cfg.Keys) { [Environment]::SetEnvironmentVariable($key,$null,'Process') }
