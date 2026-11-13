@@ -35,10 +35,12 @@ class EstornoNoCardTest extends TestCase
         $this->recepcao = $this->logarComo('recepcao', self::T);
     }
 
-    private function paga(): Cobranca
+    private function paga(string $setor = 'clinica'): Cobranca
     {
         $cobrancas = app(CobrancaService::class);
-        $cobranca = $cobrancas->abrir($this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item())->id, self::T);
+        $servico = $setor === 'clinica' ? $this->item() : $this->item(['setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho', 'preco_centavos' => 6000]);
+        $profissional = $this->usuarioClinica($setor === 'clinica' ? 'veterinario' : 'atendente');
+        $cobranca = $cobrancas->abrir($this->agendamentoDireto($this->pet(), $profissional, $servico)->id, self::T);
         $cobrancas->fechar($cobranca->id, self::T);
 
         return $cobrancas->registrarPagamento($cobranca->id, 'pix', self::T);
@@ -73,7 +75,8 @@ class EstornoNoCardTest extends TestCase
         $depois = $cobranca->fresh();
         $this->assertSame(['cancelada', $this->recepcao->id, $supervisor->id, 'Cobrado em duplicidade.'],
             [$depois->status, $depois->estorno_solicitado_por, $depois->estorno_autorizado_por, $depois->estorno_motivo]);
-        $this->assertSame('sucesso', AuditLog::query()->where('tool', 'estornar_cobranca')->latest('id')->value('resultado'));
+        $log = AuditLog::query()->where('tool', 'estornar_cobranca')->latest('id')->first();
+        $this->assertSame(['sucesso', $this->recepcao->id, $supervisor->id], [$log->resultado, $log->user_id, $log->autorizado_por]);
         $this->assertStringNotContainsString(self::PIN, (string) json_encode(AuditLog::all()->toArray()));
         $this->assertStringNotContainsString(self::PIN, (string) json_encode(session()->all()));
     }
@@ -86,6 +89,56 @@ class EstornoNoCardTest extends TestCase
         $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => 'password'])->assertOk();
 
         $this->assertSame([$dono->id, 'cancelada'], [$cobranca->fresh()->estorno_autorizado_por, $cobranca->fresh()->status]);
+    }
+
+    public function test_atendente_pede_estorno_do_petshop_com_o_pin_do_supervisor_do_petshop(): void
+    {
+        $cobranca = $this->paga('petshop');
+        $supervisor = $this->supervisor('petshop');
+        $atendente = $this->logarComo('atendente', self::T);
+
+        $this->estornarComCard($cobranca, ['email_admin' => $supervisor->email, 'senha_admin' => self::PIN])->assertOk();
+
+        $depois = $cobranca->fresh();
+        $this->assertSame(['cancelada', $atendente->id, $supervisor->id],
+            [$depois->status, $depois->estorno_solicitado_por, $depois->estorno_autorizado_por]);
+    }
+
+    public function test_dono_logado_pede_e_se_autoaprova_com_a_propria_senha(): void
+    {
+        $cobranca = $this->paga();
+        $dono = $this->logarComo('dono', self::T);
+
+        $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => 'password'])->assertOk();
+
+        $depois = $cobranca->fresh();
+        $this->assertSame(['cancelada', $dono->id, $dono->id], [$depois->status, $depois->estorno_solicitado_por, $depois->estorno_autorizado_por]);
+    }
+
+    public function test_pin_com_espacos_nas_pontas_vale_como_na_definicao(): void
+    {
+        $cobranca = $this->paga();
+        $supervisor = $this->supervisor();
+
+        $this->estornarComCard($cobranca, ['email_admin' => $supervisor->email, 'senha_admin' => ' '.self::PIN.' '])->assertOk();
+
+        $this->assertSame('cancelada', $cobranca->fresh()->status);
+    }
+
+    public function test_dono_ou_supervisor_de_outro_tenant_com_o_segredo_certo_nao_autorizam(): void
+    {
+        $donoDeFora = $this->usuarioClinica('dono', self::OUTRO_TENANT);
+        $supervisorDeFora = $this->usuarioClinica('veterinario', self::OUTRO_TENANT);
+        $supervisao = app(SupervisaoService::class);
+        $supervisao->marcarSupervisor($supervisorDeFora->id, 'clinica', $donoDeFora->id, self::OUTRO_TENANT);
+        $supervisao->definirProprioPin($supervisorDeFora->id, self::PIN, self::OUTRO_TENANT);
+
+        foreach ([[$donoDeFora->email, 'password'], [$supervisorDeFora->email, self::PIN]] as [$email, $segredo]) {
+            $cobranca = $this->paga();
+            $this->estornarComCard($cobranca, ['email_admin' => $email, 'senha_admin' => $segredo])
+                ->assertStatus(403)->assertJsonPath('codigo', 'AI_REAUTH_FAILED');
+            $this->assertSame('paga', $cobranca->fresh()->status);
+        }
     }
 
     public function test_senha_de_login_do_supervisor_pin_errado_ou_nada_nao_autorizam(): void

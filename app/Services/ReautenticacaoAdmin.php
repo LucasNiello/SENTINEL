@@ -166,7 +166,10 @@ class ReautenticacaoAdmin
             return null;
         }
 
-        return Hash::check($segredo, $hash) ? $usuario : null;
+        // O PIN é guardado sem espaços nas pontas (SupervisaoService::definirProprioPin); a senha do dono não muda.
+        $conferido = $usuario->papel === 'dono' ? $segredo : trim($segredo);
+
+        return Hash::check($conferido, $hash) ? $usuario : null;
     }
 
     private function adminQueConfere(string $email, string $senha): ?User
