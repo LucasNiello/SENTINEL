@@ -218,7 +218,10 @@ class AtualizarStatusLancamentoTest extends TestCase
         $this->assertNotNull($tool, 'a tool deve estar no catálogo');
         $parametros = $tool['function']['parameters'];
         $this->assertSame(['pendente', 'conciliado'], $parametros['properties']['novo_status']['enum']);
-        $this->assertSame(['id', 'novo_status'], $parametros['required']);
+        // P-C1 (13/11): o id pode vir da posição na última tabela ("marca o terceiro"), então não é obrigatório para a
+        // IA; o servidor continua exigindo o id (REGRAS_STATUS_LANCAMENTO) depois de resolver a posição.
+        $this->assertSame(['novo_status'], $parametros['required']);
+        $this->assertSame('integer', $parametros['properties']['posicao']['type']);
         $this->assertArrayNotHasKey('tenant_id', $parametros['properties']);
     }
 }

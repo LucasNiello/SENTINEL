@@ -2,6 +2,7 @@
 
 namespace App\Services\Agente;
 
+use App\Http\Requests\AgendarRequest;
 use App\Http\Requests\AlterarStatusAgendamentoRequest;
 use App\Http\Requests\CatalogoItemAtualizacaoRequest;
 use App\Http\Requests\CatalogoItemRequest;
@@ -33,7 +34,7 @@ use App\Services\VendaService;
  *
  * Quem acessa o quê (proposta de 10/11/2026, confirmar com o Lucas): toda a equipe consulta tutores, pets e
  * catálogo e mantém o cadastro de tutores e pets; o catálogo (preços!) é só do dono; excluir, restaurar e excluir
- * de vez dependem do que a entidade permite (restaurar e excluir de vez pedem a senha do dono no card).
+ * de vez são só do dono (item C, 12/11), e restaurar e excluir de vez pedem a senha do dono no card.
  */
 trait CatalogoDaClinica
 {
@@ -162,8 +163,9 @@ trait CatalogoDaClinica
     }
 
     /**
-     * Agenda, cobrança (P-B4: cobrar, receber, cancelar), venda avulsa e caixa de entrada (P-B5). Agendar e o
-     * encaixe de emergência entram com a P-C4 (data e hora separadas, duração do serviço, horários livres).
+     * Agenda (consultar, mudar status, agendar e encaixe de emergência: P-C4), cobrança (P-B4: cobrar, receber,
+     * cancelar), venda avulsa e caixa de entrada (P-B5). Fora da P-C4 (ficam para depois): data e hora separadas no
+     * card, duração vinda do serviço e sugestão de horários livres.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -233,6 +235,43 @@ trait CatalogoDaClinica
                 campos: ['novo_status'],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDoAgendamento((int) ($v['id'] ?? 0), $tenantId),
             ),
+            // F (P-C4): agendar e encaixe de emergência. A origem é fixada pelo servidor em cada tool (a IA não escolhe):
+            // a regra (pet, serviço e profissional do tenant, setor, passado, conflito, duração) é toda do AgendaService.
+            ...array_map(fn (array $t) => $this->definirAcao(
+                nome: $t['nome'],
+                descricao: $t['descricao'].' Pet, serviço do catálogo e profissional pelo id; início e fim no formato AAAA-MM-DD HH:MM (horário de São Paulo).',
+                acao: 'agendar',
+                entidade: 'Agendamento',
+                papeis: $t['papeis'],
+                propriedades: [
+                    'pet_id' => ['type' => 'integer'],
+                    'catalogo_item_id' => ['type' => 'integer', 'description' => 'Id do serviço do catálogo (não produto).'],
+                    'profissional_id' => ['type' => 'integer', 'description' => 'Id do veterinário (clínica) ou do atendente (banho e tosa).'],
+                    'inicio' => ['type' => 'string', 'description' => 'AAAA-MM-DD HH:MM'],
+                    'fim' => ['type' => 'string', 'description' => 'AAAA-MM-DD HH:MM'],
+                ],
+                obrigatorios: ['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio', 'fim'],
+                formRequest: AgendarRequest::class,
+                executar: fn (array $d, int $tenantId) => $agenda->agendar([
+                    ...array_intersect_key($d, array_flip(['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio', 'fim'])),
+                    'origem' => $t['origem'],
+                ], $tenantId),
+                mensagemErro: 'Não consegui agendar agora. Nada foi gravado.',
+                titulo: $t['titulo'],
+                sucesso: $t['sucesso'],
+                conferir: function (array $a) use ($agenda, $t): ?array {
+                    $motivo = $agenda->motivoParaNaoAgendar([...$a, 'origem' => $t['origem']], (int) $a['tenant_id']);
+
+                    return $motivo === null ? null : ['campo' => 'inicio', 'motivo' => $motivo];
+                },
+            ), [
+                ['nome' => 'agendar_atendimento', 'origem' => 'normal', 'papeis' => ['atendente', 'recepcao', 'veterinario', 'dono'],
+                    'titulo' => 'Agendar', 'sucesso' => 'Atendimento agendado',
+                    'descricao' => 'Agenda um atendimento da clínica ou do banho e tosa, de agora em diante, sem conflito com outro horário do mesmo profissional.'],
+                ['nome' => 'registrar_encaixe_emergencia', 'origem' => 'encaixe_emergencia', 'papeis' => ['recepcao', 'veterinario', 'dono'],
+                    'titulo' => 'Registrar encaixe de emergência', 'sucesso' => 'Encaixe de emergência registrado',
+                    'descricao' => 'Registra na agenda da clínica um atendimento de emergência que já começou (início agora ou antes); não confere conflito de horário. Só da clínica.'],
+            ]),
 
             // ---------------------------------------------------------------- cobrança (P-B4)
             $this->definirTool(

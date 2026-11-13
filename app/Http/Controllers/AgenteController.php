@@ -86,13 +86,19 @@ class AgenteController extends Controller
 
         $mensagem = $validador->validated()['mensagem'];
         try {
-            $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()));
+            $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()), $this->conversa->lerLista($request->session()));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
             $resposta = $this->aiAgentService->erroTecnicoTool($e);
         }
         $this->conversa->guardar($request->session(), $mensagem, $resposta);
+
+        // P-C1: a tabela mostrada fica congelada na sessão (ids em ordem); o front não recebe esta chave.
+        if (isset($resposta['lista'])) {
+            $this->conversa->guardarLista($request->session(), $resposta['lista']);
+            unset($resposta['lista']);
+        }
 
         // A3: a consulta (tool + argumentos) fica na sessão; o front só recebe o id para o Exportar.
         if (isset($resposta['consulta'])) {

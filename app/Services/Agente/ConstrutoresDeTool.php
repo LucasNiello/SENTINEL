@@ -164,6 +164,7 @@ trait ConstrutoresDeTool
             $propriedades = [
                 'id' => ['type' => 'integer', 'description' => 'Número (id) do registro, se o usuário informou.'],
                 'busca' => ['type' => 'string', 'description' => Str::ucfirst($buscaPor).', quando o número não foi informado.'],
+                ...\App\Services\AiAgentService::PROPRIEDADE_POSICAO, // P-C1
                 ...$propriedades,
             ];
         }

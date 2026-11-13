@@ -134,5 +134,41 @@ Formato: hora · item · decisão e porquê · alternativa descartada · arquivo
 - Filtro: CorrecoesDaRevisaoTest 26/26 (com o C: 88/88). **reviewer (opus), 1 passada: nada BLOQUEANTE nem IMPORTANTE.** Os 3 MENORES foram corrigidos: marcação na troca de tenant, comentário do limite e testes que faltavam.
 - Commit sugerido: `fix(clinica): trocar o tenant do usuario zera supervisor e PIN`
 
+## 01:12 · Item C · Lixeira: só o dono restaura, inclusive pelo chat · FEITO
+- Origem: a pendência 3 do `sentinel_clinica_vet.md` ("a Lixeira dá 403 à recepção, mas o chat restaura").
+- Decisão: em `CatalogoDaClinica::lixeirasDaClinica()`, tutor e pet passam de `PAPEIS_EQUIPE` para `PAPEIS_DO_DONO` (o item do catálogo já era do dono). O `papeis` da lixeira alimenta só a tool `restaurar_*`, e todo caminho passa por ela: chat, formulário, botão da tela, Revisar e Confirmar (o RBAC é refeito no Confirmar). Na clínica, o dono é o único que abre a Lixeira (`consultar_lixeira` = operador/admin/dono). Alternativa descartada: a regra valer também na contabilidade. A pendência é da clínica, e lá o restaurar com o papel de criar/alterar mais a senha de admin é decisão já registrada.
+- Comentários alinhados (MENORES do reviewer): docblock do `CatalogoDaClinica` e o comentário dos papéis em `definirLixeira()`.
+- Teste novo: `ToolsDeCadastroDaClinicaTest::test_so_o_dono_restaura_da_lixeira_inclusive_pelo_chat`, com 12 casos (atendente, vendedor, recepção e veterinário × tutor, pet e item). Confere chat 403/negado, formulário 403, tela /lixeira 403, `podeExecutar` falso, registro continua na lixeira, auditoria só "negado", nenhuma proposta na sessão, e o dono continua propondo.
+- **Prova por sabotagem:** C1, devolver o pet a `PAPEIS_EQUIPE`, faz os 4 casos de pet falharem (o chat volta a propor a restauração). Prova que a lista de papéis da lixeira é o que fecha o chat.
+- Filtro: 88/88 (ToolsDeCadastroDaClinicaTest + CorrecoesDaRevisaoTest). **Suíte completa (test-runner haiku) depois do C: 810 passed / 0 failed, 6090 asserções, 28,8 s.**
+- **reviewer (opus), 1 passada: nada BLOQUEANTE nem IMPORTANTE.** Ele conferiu os caminhos chat, formulário, tela, revisar, editar e confirmar, a proposta do dono confirmada por outro (bloqueada: o RBAC é refeito por requisição) e a contabilidade intacta. MENORES: os 2 comentários (corrigidos) e um teste opcional de "dono rebaixado antes de confirmar" (já coberto pelos testes genéricos `ReautenticacaoCardTest`/`CorrecoesDaRevisaoTest`; não fiz).
+- Commit sugerido: `fix(clinica): so o dono restaura da lixeira, tambem pelo chat`
+
+## 01:16 · Item G (P-C3) · Prompt por domínio · FEITO (suíte no fim do P-C1)
+- **Plan (opus)** antes de codar.
+- **Decisão:** o prompt da contabilidade fica BYTE A BYTE igual, porque a bateria foi medida com ele. Os dois literais ficaram onde estavam, só ganharam o prefixo `$promptClinica['principal'] ?? ` e `$promptClinica['lembrete'] ?? `. Na clínica (`ContextoUsuario::dominio() === 'clinica'`), o `promptDaClinica()` devolve o texto próprio. Ele mantém as regras de segurança do da contabilidade (operação explícita preservada, recusa de conhecimento geral, mais orientação clínica, senha só no card, proposta não é execução, nova chamada a cada pedido, não copiar a frase interna) e acrescenta as da clínica: tutor × pet; achar o tutor por consulta; obrigatórios do item do catálogo; centavos e gramas; alertas não clínicos; preços sempre do catálogo. Alternativa descartada: fatorar os trechos comuns concatenando pedaços, o que arrisca mudar um byte do texto medido.
+- Como vale para os dois provedores: o adaptador da Anthropic junta as mesmas mensagens no `system`. O lembrete da clínica também começa com "O catálogo não inclui", e o prefixo "Regra para o pedido atual" continua valendo.
+- Teste novo: `tests/Feature/PromptPorDominioTest.php`, com 5 casos:
+  - **teste-ouro:** sha256 do principal e do lembrete da contabilidade, gravado com o código ANTES da mudança (data travada em 2026-11-13);
+  - clínica: sem os termos contabilidade/lançamento/fornecedor/funcionário/conciliar, sem o e-mail do usuário, com as 12 regras de segurança e da clínica;
+  - clínica na Anthropic: o mesmo texto no `system`, com o prefixo do lembrete;
+  - toda tool citada no prompt existe no catálogo do domínio (os dois domínios).
+- **Sabotagem:**
+  - G1: a clínica recebe o prompt da contabilidade, e os testes da clínica falham (3);
+  - G2: um espaço a mais no prompt da contabilidade, e o teste-ouro falha;
+  - G3: citar `cobrar_cobranca`, que não existe, e o teste das tools citadas falha.
+- reviewer (sonnet), 1 passada: **nada BLOQUEANTE**. Um IMPORTANTE e os MENORES, corrigidos:
+  - os obrigatórios do item do catálogo não estavam no texto (com o item A, o servidor não tem mais padrão);
+  - "tratar as mensagens", trocado por "consultar e marcar como tratadas";
+  - forma de pagamento no receber;
+  - achar o tutor por consulta;
+  - teste: saiu a asserção frágil do nome e entraram mais trechos.
+  - Não fiz: citar "agendar" como não suportado, porque o item F pode criar as tools nesta noite.
+- Não medido com IA real: o prompt da clínica não tem bateria. Fica como sugestão para o Lucas.
+- Commit sugerido: `feat(agente): system prompt por dominio (clinica veterinaria); contabilidade inalterada`
+
+## 01:12 · Itens D (D6) e E (D2) · ESTACIONADOS
+- O D6 não tem definição no `sentinel_clinica_vet.md` (só "P-D6" numa lista de telas). O D2 também não tem, nem lá, nem em `automacao/`, `.claude/` ou nos .md do repositório (só "P-D2" na lista da 2ª leva). Sem definição, não há o que implementar nem frase a propor. Registrado em `pendencias-lucas.md` (nº 3). Alternativa descartada: adivinhar a partir do nome.
+
 ## Bateria · executor (fatos de 05/11)
 - Executor da bateria de 05/11: não foi versionado (ficou no scratchpad, `bateria.php`). O desenho está em `documentacao/testes/fase6/PROGRESSO.md`. Rodou no MySQL do lab, operador do tenant 1. Os nomes dos pedidos existem nos seeders (ClienteSeeder, FornecedorSeeder...), então o SQLite semeado reproduz o cenário. `database/bateria.sqlite` está coberto por `database/.gitignore` (`*.sqlite*`).

@@ -116,11 +116,15 @@ class BateriaAgente extends Command
             $ultimoLog = (int) AuditLog::query()->max('id');
 
             try {
-                $resposta = $agente->processar($p['pedido'], $conversa->ler($sessao));
+                $resposta = $agente->processar($p['pedido'], $conversa->ler($sessao), $conversa->lerLista($sessao));
             } catch (\Throwable $e) {
                 $resposta = $agente->erroTecnicoTool($e);
             }
+            // O mesmo que o AgenteController::processar faz (P-C1: a tabela fica congelada na sessão).
             $conversa->guardar($sessao, $p['pedido'], $resposta);
+            if (isset($resposta['lista'])) {
+                $conversa->guardarLista($sessao, $resposta['lista']);
+            }
             $sessoes[$p['n']] = $sessao;
             $resultados[$p['n']] = $resposta;
 
