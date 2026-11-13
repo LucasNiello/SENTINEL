@@ -534,6 +534,8 @@ trait CatalogoDaClinica
     /**
      * A lixeira da clínica: o vínculo tool ↔ entidade ↔ service, no mesmo formato de lixeiras() do domínio antigo.
      * "papeis" é quem restaura (a senha do dono é pedida no card); excluir e excluir de vez são sempre do dono.
+     * Item C (12/11): só o dono restaura, em toda entidade, pelo chat e pela tela: é o mesmo papel que abre a Lixeira
+     * (consultar_lixeira). Antes, a recepção (e o resto da equipe) recebia 403 na tela, mas restaurava tutor e pet pelo chat.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -541,9 +543,9 @@ trait CatalogoDaClinica
     {
         return [
             'tutor' => ['entidade' => 'Tutor', 'modelo' => Tutor::class, 'rotulo' => 'o tutor', 'servico' => app(TutorService::class),
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papeis' => self::PAPEIS_EQUIPE],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papeis' => self::PAPEIS_DO_DONO],
             'pet' => ['entidade' => 'Pet', 'modelo' => Pet::class, 'rotulo' => 'o pet', 'servico' => app(PetService::class),
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'especie', 'raca', 'microchip'], 'papeis' => self::PAPEIS_EQUIPE],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'especie', 'raca', 'microchip'], 'papeis' => self::PAPEIS_DO_DONO],
             'item_catalogo' => ['entidade' => 'CatalogoItem', 'modelo' => CatalogoItem::class, 'rotulo' => 'o item do catálogo', 'servico' => app(CatalogoService::class),
                 'busca_por' => 'nome', 'coluna_rotulo' => 'nome_comercial', 'colunas' => ['nome_comercial', 'setor', 'categoria', 'preco_centavos'], 'papeis' => self::PAPEIS_DO_DONO],
         ];

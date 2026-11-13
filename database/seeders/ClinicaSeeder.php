@@ -107,9 +107,10 @@ class ClinicaSeeder extends Seeder
     {
         $catalogo = app(CatalogoService::class);
         $servico = fn (string $setor, string $categoria, string $nome, int $preco, string $por = 'unidade') => $catalogo->criar(
-            ['tipo' => 'servico', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco, 'cobranca_por' => $por], self::TENANT);
+            ['tipo' => 'servico', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco, 'cobranca_por' => $por,
+                'controla_estoque' => false, 'exige_receita' => false], self::TENANT);
         $produto = fn (string $setor, string $categoria, string $nome, int $preco, int $estoque, bool $receita = false) => $catalogo->criar(
-            ['tipo' => 'produto', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco,
+            ['tipo' => 'produto', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco, 'cobranca_por' => 'unidade',
                 'controla_estoque' => true, 'estoque' => $estoque, 'exige_receita' => $receita], self::TENANT);
 
         $this->itens = [

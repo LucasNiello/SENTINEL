@@ -398,6 +398,60 @@ class CorrecoesDaRevisaoTest extends TestCase
         $this->recusa(fn () => app(CobrancaService::class)->estornar($cobranca->id, 'Duplicidade.', $recepcao->id, $depois->id, self::T, true), 'Só o dono ou um supervisor');
     }
 
+    /** Item B (12/11): trocar o tenant zera a supervisão e o PIN, como trocar o papel. */
+    public function test_trocar_o_tenant_do_usuario_zera_a_marcacao_de_supervisor_e_o_pin(): void
+    {
+        $cobranca = $this->pagaDaClinica();
+        $supervisor = $this->supervisor('veterinario');
+        $recepcao = $this->usuarioClinica('recepcao');
+        $this->assertNotNull($supervisor->pin_autorizacao);
+
+        $supervisor->update(['tenant_id' => self::T + 100]);
+        $this->assertSame([null, null], [$supervisor->fresh()->supervisor_setor, $supervisor->fresh()->pin_autorizacao]);
+
+        // De volta ao tenant de antes, nada volta sozinho (o banco já guardou null): precisa ser marcado e ter PIN de novo.
+        $supervisor->fresh()->update(['tenant_id' => self::T]);
+        $depois = $supervisor->fresh();
+        $this->assertSame([null, null], [$depois->supervisor_setor, $depois->pin_autorizacao]);
+        $this->recusa(fn () => app(CobrancaService::class)->estornar($cobranca->id, 'Duplicidade.', $recepcao->id, $depois->id, self::T, true), 'Só o dono ou um supervisor');
+    }
+
+    public function test_na_troca_de_tenant_nem_a_marcacao_gravada_junto_fica(): void
+    {
+        // Marcar supervisor é ato do dono do tenant novo: a marcação e o PIN gravados junto com a troca também zeram.
+        $supervisor = $this->supervisor('veterinario');
+        $supervisor->tenant_id = self::T + 100;
+        $supervisor->supervisor_setor = 'petshop';
+        $supervisor->pin_autorizacao = 'hash-qualquer';
+        $supervisor->save();
+
+        $this->assertSame([null, null], [$supervisor->fresh()->supervisor_setor, $supervisor->fresh()->pin_autorizacao]);
+    }
+
+    public function test_na_troca_de_papel_so_fica_o_que_foi_gravado_junto(): void
+    {
+        // Marcação gravada junto fica; o PIN antigo não sobrevive por causa dela.
+        $remarcado = $this->supervisor('veterinario');
+        $remarcado->papel = 'dono';
+        $remarcado->supervisor_setor = 'petshop';
+        $remarcado->save();
+        $this->assertSame(['petshop', null], [$remarcado->fresh()->supervisor_setor, $remarcado->fresh()->pin_autorizacao]);
+
+        // Regravar o mesmo setor não conta como gravado (o Eloquent não vê mudança): zera também.
+        $mesmoSetor = $this->supervisor('veterinario');
+        $mesmoSetor->papel = 'dono';
+        $mesmoSetor->supervisor_setor = 'clinica';
+        $mesmoSetor->save();
+        $this->assertSame([null, null], [$mesmoSetor->fresh()->supervisor_setor, $mesmoSetor->fresh()->pin_autorizacao]);
+
+        // PIN novo gravado junto com a troca de papel fica (a marcação, não gravada, zera).
+        $comPinNovo = $this->supervisor('veterinario');
+        $comPinNovo->papel = 'dono';
+        $comPinNovo->pin_autorizacao = 'hash-novo';
+        $comPinNovo->save();
+        $this->assertSame([null, 'hash-novo'], [$comPinNovo->fresh()->supervisor_setor, $comPinNovo->fresh()->pin_autorizacao]);
+    }
+
     public function test_atualizar_outro_campo_do_usuario_nao_zera_a_supervisao(): void
     {
         $supervisor = $this->supervisor('veterinario');

@@ -148,7 +148,8 @@ class IsolamentoDeTenantTest extends TestCase
             'PetService::excluirDefinitivo' => fn () => $this->inexistente(fn () => $pets->excluirDefinitivo($this->arquivado($this->pet())->id, self::B, $this->usuarioClinica('dono', self::B)->id)),
 
             'CatalogoService::criar' => function () use ($catalogo) {
-                $criado = $catalogo->criar(['tipo' => 'servico', 'setor' => 'clinica', 'categoria' => 'consulta', 'nome_comercial' => 'Novo', 'preco_centavos' => 100], self::B);
+                $criado = $catalogo->criar(['tipo' => 'servico', 'setor' => 'clinica', 'categoria' => 'consulta', 'nome_comercial' => 'Novo', 'preco_centavos' => 100,
+                    'cobranca_por' => 'unidade', 'controla_estoque' => false, 'exige_receita' => false], self::B); // item A: sem padrão no service
                 $this->assertSame([self::B, 0], [$criado->tenant_id, CatalogoItem::where('tenant_id', self::T)->count()], 'grava no tenant que o servidor passou');
             },
             'CatalogoService::atualizar' => function () use ($catalogo) {

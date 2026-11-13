@@ -123,7 +123,9 @@ class CadastrosClinicaTest extends TestCase
     public function test_regras_do_catalogo(): void
     {
         $catalogo = app(CatalogoService::class);
-        $base = ['tipo' => 'produto', 'setor' => 'petshop', 'categoria' => 'racao', 'nome_comercial' => 'Ração', 'preco_centavos' => 21000];
+        // Item A (12/11): o service não tem mais padrão para estes três; a base os informa.
+        $base = ['tipo' => 'produto', 'setor' => 'petshop', 'categoria' => 'racao', 'nome_comercial' => 'Ração', 'preco_centavos' => 21000,
+            'cobranca_por' => 'unidade', 'controla_estoque' => false, 'exige_receita' => false];
 
         $this->recusa(fn () => $catalogo->criar([...$base, 'preco_centavos' => 210.5], self::T), 'número inteiro de centavos');
         $this->recusa(fn () => $catalogo->criar([...$base, 'preco_centavos' => '21000'], self::T), 'número inteiro de centavos');
@@ -131,11 +133,33 @@ class CadastrosClinicaTest extends TestCase
         $this->recusa(fn () => $catalogo->criar([...$base, 'cobranca_por' => 'diaria'], self::T), 'Só serviço (ex.: internação) é cobrado por diária.');
         $this->recusa(fn () => $catalogo->criar([...$base, 'categoria' => 'vacina'], self::T), 'Categoria inválida para o setor petshop');
         $this->recusa(fn () => $catalogo->criar([...$base, 'exige_receita' => true], self::T), 'Só item de farmácia pode exigir receita.');
-        $this->recusa(fn () => $catalogo->criar(['tipo' => 'servico', 'setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho', 'preco_centavos' => 5000, 'controla_estoque' => true], self::T),
+        $this->recusa(fn () => $catalogo->criar(['tipo' => 'servico', 'setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho', 'preco_centavos' => 5000,
+            'cobranca_por' => 'unidade', 'controla_estoque' => true, 'exige_receita' => false], self::T),
             'Serviço não tem estoque nem receita.');
 
         $item = $catalogo->criar([...$base, 'controla_estoque' => true, 'estoque' => 5, 'tenant_id' => 999], self::T);
         $this->assertSame([self::T, 21000, 5], [$item->tenant_id, $item->preco_centavos, $item->estoque]);
+    }
+
+    /** Item A (12/11): na criação, os três campos são obrigatórios também no service (sem valor padrão). */
+    public function test_criacao_sem_um_dos_tres_campos_e_recusada_no_service(): void
+    {
+        $catalogo = app(CatalogoService::class);
+        $completo = ['tipo' => 'produto', 'setor' => 'petshop', 'categoria' => 'racao', 'nome_comercial' => 'Ração', 'preco_centavos' => 21000,
+            'cobranca_por' => 'unidade', 'controla_estoque' => true, 'exige_receita' => false];
+
+        $this->recusa(fn () => $catalogo->criar(\Illuminate\Support\Arr::except($completo, 'cobranca_por'), self::T), 'Informe a forma de cobrança');
+        $this->recusa(fn () => $catalogo->criar(\Illuminate\Support\Arr::except($completo, 'controla_estoque'), self::T), 'Informe se o item controla estoque');
+        $this->recusa(fn () => $catalogo->criar(\Illuminate\Support\Arr::except($completo, 'exige_receita'), self::T), 'Informe se o item exige receita');
+        $this->recusa(fn () => $catalogo->criar([...$completo, 'cobranca_por' => null], self::T), 'Informe a forma de cobrança');
+        $this->recusa(fn () => $catalogo->criar([...$completo, 'controla_estoque' => 'sim'], self::T), 'Informe se o item controla estoque');
+        $this->recusa(fn () => $catalogo->criar([...$completo, 'exige_receita' => null], self::T), 'Informe se o item exige receita');
+        $this->assertSame(0, \App\Models\CatalogoItem::count(), 'nada foi gravado com padrão');
+
+        $item = $catalogo->criar($completo, self::T);
+        $this->assertSame(['unidade', true, false, 0], [$item->cobranca_por, $item->controla_estoque, $item->exige_receita, $item->estoque]);
+        // A edição continua parcial: o que não veio fica como estava.
+        $this->assertSame(23000, $catalogo->atualizar($item->id, ['preco_centavos' => 23000], self::T)->preco_centavos);
     }
 
     public function test_estoque_so_muda_por_entrada_ou_venda_nunca_pelo_atualizar(): void

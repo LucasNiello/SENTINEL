@@ -73,6 +73,7 @@ class AnthropicAdaptadorTest extends TestCase
                 && ! property_exists($corpo, 'temperature')
                 && str_contains($corpo->system, 'Você é o assistente do Sentinel')
                 && $corpo->messages == [(object) ['role' => 'user', 'content' => 'liste meus clientes']]
+                && count($corpo->tools) > 5
                 && collect($corpo->tools)->every(fn ($t) => is_string($t->name) && ! property_exists($t, 'function')
                     && $t->input_schema->type === 'object' && $t->input_schema->properties instanceof \stdClass);
         });
@@ -115,10 +116,35 @@ class AnthropicAdaptadorTest extends TestCase
 
     public function test_timeout_vira_504(): void
     {
-        Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out after 30000 milliseconds'));
+        Log::spy();
+        $urls = [];
+        Http::fake(function (Request $r) use (&$urls) {
+            $urls[] = $r->url();
+            throw new ConnectionException('cURL error 28: Operation timed out after 30000 milliseconds');
+        });
 
         $this->postJson('/agente/comando', ['mensagem' => 'liste meus clientes'])
             ->assertStatus(504)->assertJsonPath('codigo', 'AI_PROVIDER_TIMEOUT');
+
+        $this->assertSame(['https://api.anthropic.com/v1/messages'], $urls);
+        Log::shouldHaveReceived('warning')->with('AiAgentService: falha controlada', Mockery::on(
+            fn (array $c) => $c['categoria'] === 'provider_timeout' && $c['provider'] === 'anthropic' && is_int($c['tempo_ia_ms']),
+        ));
+    }
+
+    public function test_texto_na_tool_solicitada_nao_grava_nada(): void
+    {
+        // Consequência aceita do tool_choice auto: a IA pode só falar. Fala não é escrita: nada gravado nem auditado.
+        $this->logarComo('admin', 1);
+        $cliente = Cliente::create(['nome' => 'Mercado Horizonte', 'tenant_id' => 1]);
+        $this->fingir($this->resposta([['type' => 'text', 'text' => 'Excluí o cliente Mercado Horizonte.']], 'end_turn'));
+
+        $this->postJson('/agente/comando', ['mensagem' => 'exclua o cliente Mercado Horizonte'])
+            ->assertOk()->assertJsonPath('tipo', 'texto');
+
+        $this->assertDatabaseHas('clientes', ['id' => $cliente->id, 'deleted_at' => null]);
+        $this->assertSame(0, AuditLog::count());
+        $this->assertEmpty(session('confirmacoes', []));
     }
 
     public function test_tool_solicitada_vai_com_tool_choice_auto_so_essa_tool_e_a_instrucao_no_system(): void
@@ -191,7 +217,8 @@ class AnthropicAdaptadorTest extends TestCase
             ['role' => 'user', 'content' => 'liste meus clientes'],
             ['role' => 'assistant', 'content' => 'Mostrei os clientes.'],
             ['role' => 'user', 'content' => 'obrigado'],
-        ] && str_contains($r['system'], 'O histórico acima é apenas contexto') && ! str_contains($r->body(), 'nao-enviar'));
+        ] && str_contains($r['system'], "Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):\nO catálogo não inclui")
+            && str_contains($r['system'], 'O histórico acima é apenas contexto') && ! str_contains($r->body(), 'nao-enviar'));
     }
 
     public static function foraDoFormato(): array
@@ -208,6 +235,12 @@ class AnthropicAdaptadorTest extends TestCase
             'input que é lista' => [['type' => 'message', 'content' => [[...$toolUse, 'input' => [1, 2]]], 'stop_reason' => 'tool_use'], 'AI_PROVIDER_RESPONSE_INVALID'],
             'input fora do esquema' => [['type' => 'message', 'content' => [[...$toolUse, 'input' => ['inventado' => 1]]], 'stop_reason' => 'tool_use'], 'AI_PROVIDER_RESPONSE_INVALID'],
             'nome que não é texto' => [['type' => 'message', 'content' => [[...$toolUse, 'name' => 7]], 'stop_reason' => 'tool_use'], 'AI_PROVIDER_RESPONSE_INVALID'],
+            'content vazio' => [['type' => 'message', 'content' => [], 'stop_reason' => 'end_turn'], 'AI_PROVIDER_RESPONSE_INVALID'],
+            'só thinking' => [['type' => 'message', 'content' => [['type' => 'thinking', 'thinking' => '']], 'stop_reason' => 'end_turn'], 'AI_PROVIDER_RESPONSE_INVALID'],
+            'text que não é texto' => [['type' => 'message', 'content' => [['type' => 'text', 'text' => 'oi'], ['type' => 'text', 'text' => ['x']]], 'stop_reason' => 'end_turn'], 'AI_PROVIDER_RESPONSE_INVALID'],
+            'tool_use sem input' => [['type' => 'message', 'content' => [['type' => 'tool_use', 'id' => 't', 'name' => 'consultar_clientes']], 'stop_reason' => 'tool_use'], 'AI_PROVIDER_RESPONSE_INVALID'],
+            'input em texto' => [['type' => 'message', 'content' => [[...$toolUse, 'input' => '{}']], 'stop_reason' => 'tool_use'], 'AI_PROVIDER_RESPONSE_INVALID'],
+            'segundo tool_use malformado' => [['type' => 'message', 'content' => [$toolUse, [...$toolUse, 'input' => [1]]], 'stop_reason' => 'tool_use'], 'AI_PROVIDER_RESPONSE_INVALID'],
             'max_tokens' => [['type' => 'message', 'content' => [['type' => 'text', 'text' => 'mei']], 'stop_reason' => 'max_tokens'], 'AI_RESPONSE_TRUNCATED'],
             'refusal' => [['type' => 'message', 'content' => [], 'stop_reason' => 'refusal'], 'AI_CONTENT_FILTERED'],
         ];
@@ -231,7 +264,31 @@ class AnthropicAdaptadorTest extends TestCase
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'texto');
 
-        Http::assertSent(fn (Request $r) => $r->url() === 'https://foundry.test/openai/v1/chat/completions' && $r->hasHeader('api-key', 'k'));
+        // O corpo do Azure continua o de antes: as mesmas chaves, na mesma ordem, nada da Anthropic.
+        Http::assertSent(fn (Request $r) => $r->url() === 'https://foundry.test/openai/v1/chat/completions' && $r->hasHeader('api-key', 'k')
+            && ! $r->hasHeader('x-api-key') && array_keys($r->data()) === ['model', 'messages', 'tools', 'tool_choice']
+            && $r['model'] === 'd' && $r['tool_choice'] === 'auto' && $r['messages'][0]['role'] === 'system'
+            && isset($r['tools'][0]['function']['parameters']));
+    }
+
+    public function test_chave_vazia_no_env_cai_no_padrao_do_modelo(): void
+    {
+        // Como o .env.example traz ANTHROPIC_MODEL= vazio: o config usa o padrão em vez de "".
+        $antes = [$_ENV['ANTHROPIC_MODEL'] ?? null, $_SERVER['ANTHROPIC_MODEL'] ?? null, getenv('ANTHROPIC_MODEL')];
+        $_ENV['ANTHROPIC_MODEL'] = $_SERVER['ANTHROPIC_MODEL'] = '';
+        putenv('ANTHROPIC_MODEL=');
+        try {
+            $config = require config_path('services.php');
+        } finally {
+            [$env, $server, $put] = $antes;
+            if ($env === null) unset($_ENV['ANTHROPIC_MODEL']); else $_ENV['ANTHROPIC_MODEL'] = $env;
+            if ($server === null) unset($_SERVER['ANTHROPIC_MODEL']); else $_SERVER['ANTHROPIC_MODEL'] = $server;
+            putenv($put === false ? 'ANTHROPIC_MODEL' : 'ANTHROPIC_MODEL='.$put);
+        }
+
+        $this->assertSame('claude-sonnet-5-5', $config['anthropic']['model']);
+        $this->assertSame('2026-10-21', $config['anthropic']['versao']);
+        $this->assertSame(8000, $config['anthropic']['max_tokens']);
     }
 
     public static function semConfiguracao(): array

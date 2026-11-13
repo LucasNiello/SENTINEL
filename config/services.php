@@ -58,11 +58,12 @@ return [
     */
     'anthropic' => [
         'api_key' => env('ANTHROPIC_API_KEY'),
-        'model' => env('ANTHROPIC_MODEL', 'claude-sonnet-5-5'),
-        'versao' => env('ANTHROPIC_VERSION', '2026-10-21'),
+        // "?:": a chave vazia no .env (como no .env.example) também cai no padrão.
+        'model' => env('ANTHROPIC_MODEL') ?: 'claude-sonnet-5-5',
+        'versao' => env('ANTHROPIC_VERSION') ?: '2026-10-21',
         // O pensamento adaptativo consome este teto; o limite real de tempo é o timeout de 30 s.
-        'max_tokens' => (int) env('ANTHROPIC_MAX_TOKENS', 8000),
-        'effort' => env('ANTHROPIC_EFFORT', 'low'),
+        'max_tokens' => (int) (env('ANTHROPIC_MAX_TOKENS') ?: 8000),
+        'effort' => env('ANTHROPIC_EFFORT') ?: 'low',
     ],
 
 ];

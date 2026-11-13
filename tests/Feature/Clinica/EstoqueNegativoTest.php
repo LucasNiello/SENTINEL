@@ -131,7 +131,7 @@ class EstoqueNegativoTest extends TestCase
         $this->expectExceptionMessage('O estoque deve ser um número inteiro, de zero a');
 
         app(CatalogoService::class)->criar(['tipo' => 'produto', 'setor' => 'petshop', 'categoria' => 'racao', 'nome_comercial' => 'X', 'preco_centavos' => 100,
-            'controla_estoque' => true, 'estoque' => -1], self::T);
+            'cobranca_por' => 'unidade', 'controla_estoque' => true, 'exige_receita' => false, 'estoque' => -1], self::T); // item A: sem padrão no service
     }
 
     /** Revisão de 10/11 (achado 4): pet com venda não vai para a lixeira. */

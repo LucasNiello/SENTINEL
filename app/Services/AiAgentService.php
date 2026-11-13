@@ -505,6 +505,7 @@ class AiAgentService
     {
         $sistema = [];
         $mensagens = [];
+        $houveConversa = false;
 
         foreach ($corpo['messages'] as $item) {
             $papel = is_array($item) ? ($item['role'] ?? null) : null;
@@ -516,9 +517,14 @@ class AiAgentService
             }
 
             if ($papel === 'system') {
-                $sistema[] = $conteudo;
+                // A do meio (depois do histórico) fala em "histórico acima" e "pedido abaixo": no campo system,
+                // a referência tem de dizer a que mensagem ela vale.
+                $sistema[] = $houveConversa
+                    ? "Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):\n".$conteudo
+                    : $conteudo;
             } elseif ($papel === 'user' || $papel === 'assistant') {
                 $mensagens[] = ['role' => $papel, 'content' => $conteudo];
+                $houveConversa = true;
             }
         }
 
@@ -587,12 +593,15 @@ class AiAgentService
             $textos = [];
             $chamadas = [];
 
+            $malformado = false;
+
             foreach ($corpo->content as $bloco) {
                 $tipo = $bloco instanceof \stdClass ? ($bloco->type ?? null) : null;
 
                 // thinking, fallback e outros blocos não são resposta ao usuário: ignorados.
-                if ($tipo === 'text' && is_string($bloco->text ?? null)) {
-                    $textos[] = $bloco->text;
+                // Bloco de texto sem texto não some calado: a resposta inteira fica fora do formato.
+                if ($tipo === 'text') {
+                    is_string($bloco->text ?? null) ? $textos[] = $bloco->text : $malformado = true;
                 } elseif ($tipo === 'tool_use') {
                     $chamadas[] = ['id' => $bloco->id ?? null, 'type' => 'function', 'function' => [
                         'name' => $bloco->name ?? null,
@@ -602,8 +611,9 @@ class AiAgentService
             }
 
             $mensagem = ['role' => 'assistant', 'content' => $textos === [] ? null : implode("\n\n", $textos), 'tool_calls' => $chamadas];
-            $fim = match ($corpo->stop_reason ?? null) {
-                'end_turn', 'stop_sequence' => $chamadas === [] ? 'stop' : 'fora_do_formato',
+            // Fim normal sem texto e sem tool (content vazio, só thinking) não é resposta: fora do formato.
+            $fim = $malformado ? 'fora_do_formato' : match ($corpo->stop_reason ?? null) {
+                'end_turn', 'stop_sequence' => $chamadas === [] && $textos !== [] ? 'stop' : 'fora_do_formato',
                 'tool_use' => 'tool_calls',
                 'max_tokens' => 'length',
                 'refusal' => 'content_filter',

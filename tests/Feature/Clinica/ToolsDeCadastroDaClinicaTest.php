@@ -425,6 +425,46 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
         $this->assertNotNull(Pet::withTrashed()->find($pet->id)->deleted_at);
     }
 
+    /** @return array<string, array{string, string}> */
+    public static function equipeSemDonoNaLixeira(): array
+    {
+        $casos = [];
+        foreach (['atendente', 'vendedor', 'recepcao', 'veterinario'] as $papel) {
+            foreach (['tutor', 'pet', 'item_catalogo'] as $tipo) {
+                $casos["{$papel} {$tipo}"] = [$papel, $tipo];
+            }
+        }
+
+        return $casos;
+    }
+
+    /** Item C (12/11): só o dono restaura, pelo chat e pela tela (a recepção já recebia 403 na Lixeira e restaurava pelo chat). */
+    #[DataProvider('equipeSemDonoNaLixeira')]
+    public function test_so_o_dono_restaura_da_lixeira_inclusive_pelo_chat(string $papel, string $tipo): void
+    {
+        $registro = match ($tipo) {
+            'tutor' => Tutor::create(['nome' => 'Na Lixeira', 'tenant_id' => self::T]),
+            'pet' => Pet::create(['tutor_id' => Tutor::create(['nome' => 'Dono do Pet', 'tenant_id' => self::T])->id, 'nome' => 'Na Lixeira', 'especie' => 'cao', 'tenant_id' => self::T]),
+            'item_catalogo' => CatalogoItem::create(['tipo' => 'servico', 'setor' => 'clinica', 'categoria' => 'consulta', 'nome_comercial' => 'Na Lixeira',
+                'preco_centavos' => 100, 'cobranca_por' => 'unidade', 'controla_estoque' => false, 'exige_receita' => false, 'estoque' => 0, 'tenant_id' => self::T]),
+        };
+        $registro->delete();
+
+        $this->logarComo($papel, self::T);
+        $this->assertFalse(app(AiAgentService::class)->podeExecutar("restaurar_{$tipo}"), 'a tela não mostra o botão');
+        $this->comando("restaurar_{$tipo}", ['busca' => 'Na Lixeira'])->assertStatus(403)->assertJsonPath('tipo', 'negado');
+        $this->postJson('/agente/formulario', ['tool' => "restaurar_{$tipo}", 'id' => $registro->id])->assertStatus(403);
+        $this->get('/lixeira')->assertForbidden();
+
+        $this->assertNotNull($registro::withTrashed()->find($registro->id)->deleted_at, 'continua na lixeira');
+        $this->assertSame(['negado'], AuditLog::query()->where('tool', "restaurar_{$tipo}")->pluck('resultado')->unique()->values()->all());
+        $this->assertEmpty(session('confirmacoes', []));
+
+        // O dono continua podendo propor a restauração (a senha do dono é pedida no card).
+        $this->logarComo('dono', self::T);
+        $this->comando("restaurar_{$tipo}", ['busca' => 'Na Lixeira'])->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente');
+    }
+
     /** O passo "Revisar" de uma proposta já existente (sem editar nada). */
     private function revisarEPegarToken(string $proposta): string
     {

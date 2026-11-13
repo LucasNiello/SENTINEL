@@ -7,9 +7,9 @@ Sessão automática de 13/11 (00:32 às 06:00, pc-talita, PHP 8.4.27). Registro 
 |---|---|---|---|
 | 0 | Etapa 0: PHP 8.4 + branch | php 8.4, extensões, composer install, branch no GitHub | feito |
 | 1 | Etapa 1: base verde | suíte completa 757/757 | feito |
-| 2 | Adaptador da Anthropic (AiAgentService) | Plan opus; testes Http::fake + sabotagem; reviewer opus; suíte verde | em andamento |
-| 3 | Bateria Sonnet × Haiku × Azure | 2 CSVs; tabela; decisão do modelo | pendente |
-| 4 | A. Catálogo: `exige_receita`, `controla_estoque` e `cobranca_por` obrigatórios na criação também no service (sem valor padrão) | teste novo por campo; suíte verde; reviewer sonnet | pendente |
+| 2 | Adaptador da Anthropic (AiAgentService) | Plan opus; testes Http::fake + sabotagem; reviewer opus; suíte verde | feito (794/794) |
+| 3 | Bateria Sonnet × Haiku × Azure | 2 CSVs; tabela; decisão do modelo | em andamento |
+| 4 | A. Catálogo: `exige_receita`, `controla_estoque` e `cobranca_por` obrigatórios na criação também no service (sem valor padrão) | teste novo por campo; suíte verde; reviewer sonnet | em andamento |
 | 5 | B. Trocar o tenant de um usuário zera supervisor e PIN | teste + sabotagem; reviewer opus | pendente |
 | 6 | C. Lixeira: só o dono restaura, inclusive pelo chat | teste + sabotagem; suíte completa; reviewer opus | pendente |
 | 7 | G. P-C3: prompt do agente por domínio (ContextoUsuario::dominio()) | Plan opus; teste do prompt por domínio; reviewer sonnet | pendente |
