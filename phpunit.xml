@@ -32,5 +32,6 @@
         <env name="PULSE_ENABLED" value="false" force="true"/>
         <env name="TELESCOPE_ENABLED" value="false" force="true"/>
         <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>
+        <env name="SENTINEL_IA_PROVEDOR" value="azure" force="true"/>
     </php>
 </phpunit>

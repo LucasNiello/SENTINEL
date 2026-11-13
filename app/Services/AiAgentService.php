@@ -211,11 +211,17 @@ class AiAgentService
             return $this->negar($toolSolicitada, $compativeis[$toolSolicitada], []);
         }
 
+        $provedor = $this->provedor();
         $endpoint = rtrim((string) config('services.azure_foundry.endpoint'), '/');
         $apiKey = (string) config('services.azure_foundry.api_key');
         $deployment = (string) config('services.azure_foundry.deployment');
+        $configurado = match ($provedor) {
+            'anthropic' => (string) config('services.anthropic.api_key') !== '' && (string) config('services.anthropic.model') !== '',
+            'azure' => $endpoint !== '' && $apiKey !== '' && $deployment !== '',
+            default => false, // provedor desconhecido (erro de digitação): falha fechada, nunca cai no Azure calado
+        };
 
-        if ($endpoint === '' || $apiKey === '' || $deployment === '') {
+        if (! $configurado) {
             return $this->falha('provider_configuration_error', 'AI_PROVIDER_UNAVAILABLE', 503);
         }
 
@@ -224,9 +230,8 @@ class AiAgentService
         $decorrido = fn () => (int) round((hrtime(true) - $inicio) / 1e6);
 
         try {
-            $resposta = Http::withHeaders(['api-key' => $apiKey])
-                ->timeout(30)
-                ->post("{$endpoint}/openai/v1/chat/completions", [
+            // O corpo é montado no formato do Azure; o adaptador da Anthropic traduz a partir dele.
+            $corpo = [
                     'model' => $deployment,
                     'messages' => [
                         [
@@ -242,7 +247,11 @@ class AiAgentService
                     ],
                     'tools' => $toolSolicitada === null ? $this->tools() : [$compativeis[$toolSolicitada]['definicao']],
                     'tool_choice' => $toolSolicitada === null ? 'auto' : ['type' => 'function', 'function' => ['name' => $toolSolicitada]],
-                ]);
+                ];
+
+            $resposta = $provedor === 'anthropic'
+                ? $this->chamarAnthropic($corpo, $toolSolicitada)
+                : Http::withHeaders(['api-key' => $apiKey])->timeout(30)->post("{$endpoint}/openai/v1/chat/completions", $corpo);
         } catch (\Throwable $e) {
             $anterior = $e->getPrevious();
             $timeout = $e instanceof \GuzzleHttp\Exception\NetworkTimeoutException
@@ -258,6 +267,10 @@ class AiAgentService
         }
 
         $tempoIaMs = $decorrido();
+
+        if ($provedor === 'anthropic') {
+            $resposta = $this->traduzirAnthropic($resposta);
+        }
 
         // Tudo o que esta resposta auditar (leitura, negado, tool fora do catálogo) leva o tempo da IA.
         return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada));
@@ -275,8 +288,10 @@ class AiAgentService
             $status = $resposta->status();
             $categoria = match ($status) {
                 401 => 'provider_authentication_error',
+                402 => 'provider_billing_error',
                 403 => 'provider_authorization_error',
                 429 => 'provider_rate_limit',
+                529 => 'provider_overloaded',
                 408, 504 => 'provider_timeout',
                 default => 'provider_http_error',
             };
@@ -468,6 +483,141 @@ class AiAgentService
         }
     }
 
+    /** Provedor configurado: 'azure' (padrão, também quando vazio) ou 'anthropic'. Valor desconhecido = null (falha fechada). */
+    private function provedor(): ?string
+    {
+        $provedor = (string) (config('services.ia_provedor') ?: 'azure');
+
+        return in_array($provedor, ['azure', 'anthropic'], true) ? $provedor : null;
+    }
+
+    /**
+     * Adaptador da Anthropic (Messages API, POST /v1/messages, HTTP REST sem SDK). Recebe o corpo
+     * já montado no formato do Azure e traduz: as mensagens system (a principal e a do meio do
+     * histórico) vão para o campo system; do histórico só passam user/assistant com texto não vazio,
+     * sem nenhuma outra chave. Tool solicitada: tool_choice auto + só essa tool + instrução no system,
+     * porque o modelo padrão (claude-sonnet-5-5) recusa tool_choice forçado com 400. A conferência no
+     * servidor (AI_INTENT_MISMATCH) continua igual. Sem temperature: o modelo recusa valor não padrão.
+     *
+     * @param  array<string, mixed>  $corpo
+     */
+    private function chamarAnthropic(array $corpo, ?string $toolSolicitada): \Illuminate\Http\Client\Response
+    {
+        $sistema = [];
+        $mensagens = [];
+
+        foreach ($corpo['messages'] as $item) {
+            $papel = is_array($item) ? ($item['role'] ?? null) : null;
+            $conteudo = is_array($item) ? ($item['content'] ?? null) : null;
+
+            // Texto vazio é recusado pela API; não é conteúdo.
+            if (! is_string($conteudo) || trim($conteudo) === '') {
+                continue;
+            }
+
+            if ($papel === 'system') {
+                $sistema[] = $conteudo;
+            } elseif ($papel === 'user' || $papel === 'assistant') {
+                $mensagens[] = ['role' => $papel, 'content' => $conteudo];
+            }
+        }
+
+        // A primeira mensagem tem de ser do usuário.
+        while ($mensagens !== [] && $mensagens[0]['role'] !== 'user') {
+            array_shift($mensagens);
+        }
+
+        if ($toolSolicitada !== null) {
+            $sistema[] = "Para este pedido, use a ferramenta {$toolSolicitada} nesta resposta; não a troque por outra operação nem por consulta.";
+        }
+
+        $tools = array_map(function (array $definicao) {
+            $funcao = $definicao['function'];
+            $esquema = $funcao['parameters'] ?? ['type' => 'object'];
+
+            // Lista vazia em PHP vira [] no JSON; o esquema exige objeto.
+            if (($esquema['properties'] ?? null) === []) {
+                $esquema['properties'] = new \stdClass;
+            }
+
+            return [
+                'name' => $funcao['name'],
+                ...(isset($funcao['description']) ? ['description' => $funcao['description']] : []),
+                'input_schema' => $esquema,
+            ];
+        }, $corpo['tools']);
+
+        $esforco = (string) config('services.anthropic.effort');
+
+        return Http::withHeaders([
+            'x-api-key' => (string) config('services.anthropic.api_key'),
+            'anthropic-version' => (string) config('services.anthropic.versao'),
+        ])
+            ->timeout(30)
+            ->post('https://api.anthropic.com/v1/messages', [
+                'model' => (string) config('services.anthropic.model'),
+                'max_tokens' => (int) config('services.anthropic.max_tokens'),
+                'system' => implode("\n\n", $sistema),
+                'messages' => $mensagens,
+                'tools' => $tools,
+                'tool_choice' => ['type' => 'auto'],
+                ...($esforco === '' ? [] : ['output_config' => ['effort' => $esforco]]),
+            ]);
+    }
+
+    /**
+     * Converte a resposta 2xx da Anthropic para o MESMO formato interno que o interpretar() já lê
+     * do Azure (choices.0.message com content/tool_calls e finish_reason). Não 2xx passa como veio
+     * (o interpretar trata o status). O corpo é decodificado com objetos: input {} continua "{}" e
+     * input que não é objeto continua não sendo, para o interpretar recusar. Fora do formato (sem
+     * content em lista, stop_reason ausente ou desconhecido, end_turn com tool_use) vira resposta
+     * que o interpretar recusa; nunca null, que ele aceitaria.
+     */
+    private function traduzirAnthropic(\Illuminate\Http\Client\Response $resposta): \Illuminate\Http\Client\Response
+    {
+        if (! $resposta->successful()) {
+            return $resposta;
+        }
+
+        $corpo = json_decode($resposta->body(), false, 64);
+        $mensagem = null;
+        $fim = 'fora_do_formato';
+
+        if ($corpo instanceof \stdClass && ($corpo->type ?? null) === 'message' && is_array($corpo->content ?? null)) {
+            $textos = [];
+            $chamadas = [];
+
+            foreach ($corpo->content as $bloco) {
+                $tipo = $bloco instanceof \stdClass ? ($bloco->type ?? null) : null;
+
+                // thinking, fallback e outros blocos não são resposta ao usuário: ignorados.
+                if ($tipo === 'text' && is_string($bloco->text ?? null)) {
+                    $textos[] = $bloco->text;
+                } elseif ($tipo === 'tool_use') {
+                    $chamadas[] = ['id' => $bloco->id ?? null, 'type' => 'function', 'function' => [
+                        'name' => $bloco->name ?? null,
+                        'arguments' => json_encode($bloco->input ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    ]];
+                }
+            }
+
+            $mensagem = ['role' => 'assistant', 'content' => $textos === [] ? null : implode("\n\n", $textos), 'tool_calls' => $chamadas];
+            $fim = match ($corpo->stop_reason ?? null) {
+                'end_turn', 'stop_sequence' => $chamadas === [] ? 'stop' : 'fora_do_formato',
+                'tool_use' => 'tool_calls',
+                'max_tokens' => 'length',
+                'refusal' => 'content_filter',
+                default => 'fora_do_formato',
+            };
+        }
+
+        return new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(
+            $resposta->status(),
+            ['Content-Type' => 'application/json'],
+            (string) json_encode(['choices' => [['message' => $mensagem, 'finish_reason' => $fim]]]),
+        ));
+    }
+
     /**
      * Acrescenta o campo "aviso" à resposta quando o modelo pediu mais de uma
      * tool na mesma mensagem (só a primeira é processada).
@@ -502,7 +652,7 @@ class AiAgentService
     private function falha(string $categoria, string $codigo, int $status, array $metadados = [], ?Throwable $e = null, ?string $mensagem = null): array
     {
         $correlacao = (string) Str::uuid();
-        $contexto = ['correlation_id' => $correlacao, 'categoria' => $categoria, 'provider' => 'azure', ...$metadados];
+        $contexto = ['correlation_id' => $correlacao, 'categoria' => $categoria, 'provider' => $this->provedor() ?? 'desconhecido', ...$metadados];
         // B1 (RNF04): dentro do interpretar() (resposta truncada, filtrada ou fora do formato) o tempo vem do escopo.
         $tempoIaMs = $contexto['tempo_ia_ms'] ?? $this->detalhesAuditoria->atuais()['tempo_ia_ms'] ?? null;
         if ($tempoIaMs !== null) {
