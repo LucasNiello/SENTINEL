@@ -15,8 +15,8 @@ Sessão automática de 13/11 (00:32 às 06:00, pc-talita, PHP 8.4.27). Registro 
 | 7 | G. P-C3: prompt do agente por domínio (ContextoUsuario::dominio()) | Plan opus; teste do prompt por domínio; reviewer sonnet | feito |
 | 8 | P-C1: memória da última lista ("edite o segundo") | Plan opus; ids congelados no servidor; sabotagem; suíte completa; reviewer opus | feito (continuações 3/4 com Haiku) |
 | 9 | F. P-C4: tools de agendar e de encaixe | Plan opus; RBAC, Revisar/segurar, auditoria; reviewer sonnet | feito |
-| 10 | H. Estorno no card com PIN (só back + JSON; tela vira nota para o Matheus) | teste + sabotagem; reviewer opus | em andamento: **código pronto, EstornoNoCardTest 6/6, sabotagens H1-H4 provadas (ver decisoes-13-11.md, entrada 01:35). FALTA: reviewer opus (1 passada) → corrigir → suíte completa → marcar feito. Nota para o Matheus: no card do estorno, o campo "senha_admin" é o PIN do supervisor ou a senha do dono (rótulo da tela).** |
-| 11 | I. Endpoints do supervisor e do PIN | teste + sabotagem; reviewer opus | pendente |
+| 10 | H. Estorno no card com PIN (só back + JSON; tela vira nota para o Matheus) | teste + sabotagem; reviewer opus | feito (843/843; reviewer opus 0 bloqueantes; o IMPORTANTE 1, chave nova no JSON do card, ficou estacionado; ver pendências nº 4) |
+| 11 | I. Endpoints do supervisor e do PIN | teste + sabotagem; reviewer opus | feito (852/852; rotas JSON `/supervisao/*`; reviewer opus 0 bloqueantes) |
 | 12 | D. D6 | sem definição no sentinel_clinica_vet.md: estacionar | estacionado (sem definição) |
 | 13 | E. D2: frase proposta em pendencias-lucas.md | frase registrada | estacionado (D2 sem definição; ver pendências nº 3) |
-| — | J. Comprovação (D4, D5, venda avulsa, M5-M7, D7, senha do root) | fora da lista desta noite | não iniciado |
+| — | J. Comprovação (D4, D5, venda avulsa, M5-M7, D7, senha do root) | fora da lista desta noite | feito (`automacao/comprovacao.md`: 5 comprovados; D4, D5, M6 e M7 sem definição; histórico do memoria-claude não comprovado, acesso negado) |

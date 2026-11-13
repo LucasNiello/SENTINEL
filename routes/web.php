@@ -3,6 +3,7 @@
 use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
+use App\Http\Controllers\SupervisaoController;
 use App\Http\Controllers\TelasController;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
@@ -47,5 +48,11 @@ Route::middleware('auth')->group(function () {
         Route::post('/agente/consultar', [AgenteController::class, 'consultar'])->middleware('throttle:agente-sem-ia');
         // A3 (RF02): CSV de uma tabela de consulta, reexecutada no servidor.
         Route::post('/agente/exportar', [AgenteController::class, 'exportar'])->middleware('throttle:exportar');
+
+        // Item I (clínica): supervisores de setor e PIN do estorno, em JSON (a tela é do Matheus).
+        Route::get('/supervisao/supervisores', [SupervisaoController::class, 'listar'])->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/supervisores/{id}/zerar-pin', [SupervisaoController::class, 'zerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/meu-pin', [SupervisaoController::class, 'definirMeuPin'])->middleware('throttle:pin');
     });
 });

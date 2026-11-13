@@ -70,12 +70,21 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
+        // Item I: definir o próprio PIN confere a senha de login. Teto curto, por usuário, contra quem pegou a sessão aberta.
+        RateLimiter::for('pin', function (Request $request) {
+            return Limit::perMinutes(10, 5)->by('pin:'.$request->user()->id)->response(
+                fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
+                    'http_status' => 429, 'mensagem' => 'Muitas tentativas. Aguarde alguns minutos.'], 429, $headers),
+            );
+        });
+
         // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
-        // volta à sessão como "valor antigo" num redirecionamento de erro de validação.
-        TrimStrings::except(['senha_admin']);
+        // volta à sessão como "valor antigo" num redirecionamento de erro de validação. Item I: idem para
+        // a senha de login da rota /supervisao/meu-pin (o PIN é aparado no SupervisaoService).
+        TrimStrings::except(['senha_admin', 'senha_atual']);
         $tratador = $this->app->make(ExceptionHandler::class);
         if ($tratador instanceof Handler) {
-            $tratador->dontFlash('senha_admin');
+            $tratador->dontFlash(['senha_admin', 'senha_atual']);
         }
     }
 }

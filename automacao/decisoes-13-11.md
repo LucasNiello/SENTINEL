@@ -252,6 +252,86 @@ Formato: hora · item · decisão e porquê · alternativa descartada · arquivo
 - Suíte completa com F + P-C1 corrigido (antes do H): **833/833** (test-runner haiku).
 - Commit sugerido (depois do reviewer): `feat(clinica): estorno de cobranca paga no card com PIN do supervisor ou senha do dono`
 
+## 04:27 · Item H · Estorno no card com PIN · FEITO (retomada depois do limite de uso)
+- `git status --short` ao retomar: limpo (o script já tinha commitado o código do H em `25852fc`).
+- **reviewer (opus, alto), 1 passada:** 0 BLOQUEANTES, 2 IMPORTANTES, 7 MENORES. Também confirmou que o `comLimite()` não mudou o `autorizar()` da lixeira.
+- **IMPORTANTE 1, ESTACIONADO:** o card do estorno manda só `reautenticar: true` (igual ao da lixeira), e a tela pede "senha do administrador". A correção do reviewer era uma chave nova no JSON (`tipo_autorizacao: 'estorno'`). Isso muda o contrato do JSON do agente, o que o prompt proíbe, então não fiz. Vai para `pendencias-lucas.md` e vira nota para o Matheus.
+- **IMPORTANTE 2, CORRIGIDO:** testes do atendente do petshop (com o PIN do supervisor do petshop) e do dono logado que se autoaprova.
+- **MENOR 3, CORRIGIDO:** o PIN é aparado na conferência, como na definição. Só no ramo do supervisor; a senha do dono continua sem trim (`ReautenticacaoAdmin::autorizadorDeEstorno`).
+- **MENOR 6, CORRIGIDO (só teste):** dono e supervisor de outro tenant, com o segredo certo, recebem 403 `AI_REAUTH_FAILED`.
+- **MENOR 8, CORRIGIDO (só teste):** o teste de sucesso confere `audit_logs.user_id` (recepção) e `autorizado_por` (supervisor).
+- **MENORES 4, 5, 7 e 9, só registrados**, sem mudança:
+  - 4: chave do limitador pelo e-mail × collation do MySQL;
+  - 5: não há teste de que o PIN fica fora do log;
+  - 7: não há teste de que o contador é compartilhado com a lixeira;
+  - 9: "setor clinica" cru nas mensagens e frase de admin numa linha não alcançada.
+  Ver pendências.
+- **Sabotagem:**
+  - H5: tirar o `trim` do PIN faz cair só `test_pin_com_espacos_nas_pontas_vale_como_na_definicao`;
+  - H6: tirar o `where('tenant_id')` do `autorizadorDeEstorno` faz cair só `test_dono_ou_supervisor_de_outro_tenant_com_o_segredo_certo_nao_autorizam`;
+  - as duas restauradas, com o diff conferido.
+- Arquivos alterados nesta retomada: `app/Services/ReautenticacaoAdmin.php`, `tests/Feature/Clinica/EstornoNoCardTest.php`.
+- **Testes novos (4):**
+  - atendente do petshop;
+  - dono se autoaprova;
+  - PIN com espaços;
+  - outro tenant.
+  Mais a conferência da auditoria no teste de sucesso.
+- **Testes:**
+  - filtrado: EstornoNoCardTest 10/10;
+  - suíte completa (test-runner haiku): **843/843**;
+  - a 1ª chamada do test-runner estourou 120 s em segundo plano sem resultado; rodei o filtro direto, com timeout (6 s).
+- Commit sugerido: `feat(clinica): estorno de cobranca paga no card com PIN do supervisor ou senha do dono`
+
+## 04:35 · Item I · Endpoints do supervisor e do PIN · FEITO
+- **Decisão:** 4 rotas JSON no `routes/web.php`, sem tela (a tela é do Matheus), todas atrás de `auth`, com um `SupervisaoController` fino sobre o `SupervisaoService` (que não mudou):
+  - `GET /supervisao/supervisores`: só o dono. Devolve `id`, `nome`, `papel`, `supervisor_setor` e `tem_pin` (bool), sem e-mail nem hash.
+  - `POST /supervisao/supervisores/{id}` com `{setor: clinica|petshop|null}`: o dono marca ou desmarca. Desmarcar ou trocar o setor zera o PIN (regra do service).
+  - `POST /supervisao/supervisores/{id}/zerar-pin`: só o dono, que só zera e nunca vê o PIN.
+  - `POST /supervisao/meu-pin` com `{pin, pin_confirmacao, senha_atual}`: o alvo é sempre o usuário logado. Exige a senha de login atual, o que fecha o "PIN trocado sem senha" da revisão de 10/11. Throttle `pin`: 5 a cada 10 min por usuário.
+- **Regras comuns:**
+  - fora do domínio clínica, 404;
+  - quem não é o dono recebe 403, auditado;
+  - o service reconfere o dono e o tenant;
+  - o sucesso é auditado na mesma transação da escrita; a recusa (422) e a negação também são auditadas, com `origem` "manual";
+  - o PIN e a senha nunca vão para a resposta nem para a auditoria;
+  - `senha_atual` fica fora do `TrimStrings` e do flash.
+- **Alternativas descartadas:**
+  - tools do agente no lugar de rotas: o PIN passaria pelo fluxo da IA;
+  - definir o PIN sem a senha atual: quem pegasse a sessão aberta trocaria o PIN;
+  - deixar `pin` e `pin_confirmacao` fora do `TrimStrings`: o reviewer viu que era inútil (o service já apara), e `pin` é um nome genérico demais para uma regra global.
+- **Arquivos:**
+  - novos: `app/Http/Controllers/SupervisaoController.php` e `tests/Feature/Clinica/SupervisaoEndpointsTest.php`;
+  - alterados: `routes/web.php` e `app/Providers/AppServiceProvider.php` (limiter `pin`; `senha_atual` no `TrimStrings::except`/`dontFlash`).
+- **Testes novos (9):**
+  - dono marca, lista, desmarca e zera, com auditoria e as chaves da lista;
+  - não-dono negado nas 3 rotas do dono;
+  - outro tenant (recusa auditada e lista do tenant);
+  - setor inválido;
+  - fora da clínica, 404;
+  - definir o próprio PIN (o `usuario_id` do corpo é ignorado; PIN e senha fora da resposta e da auditoria);
+  - senha errada (negação auditada), confirmação diferente, PIN igual à senha, quem não é supervisor;
+  - teto de 5 (ainda vale aos 9 min; é por usuário);
+  - senha com espaços nas pontas.
+- **Sabotagem:**
+  - I1: tirar o "só o dono" do controller faz cair `test_quem_nao_e_dono_e_negado_e_nada_muda` (o service dá 422 em vez de 403);
+  - I2: tirar a conferência da `senha_atual` faz cair `test_senha_errada_...`;
+  - I3: tirar o filtro de domínio faz cair `test_fora_da_clinica_as_rotas_nao_existem`;
+  - I4: tirar o `throttle:pin` faz cair `test_tentativas_do_pin_tem_teto`;
+  - I5: tirar a auditoria da senha errada e a da recusa faz cair `test_senha_errada_...` e `test_dono_nao_alcanca_usuario_de_outro_tenant_...`;
+  - tudo restaurado e conferido.
+- **reviewer (opus, alto), 1 passada:** 0 BLOQUEANTES, 2 IMPORTANTES e 10 MENORES.
+  - Corrigidos: os IMPORTANTES 1 e 2 (testes que provam a auditoria da negação e da recusa) e os MENORES 3 (origem "manual"), 8 (janela e chave do teto), 9 (senha com espaços), 10 (regra global só para `senha_atual`), 11 (chaves da lista) e 12 (o comentário diz que a listagem só audita a negação).
+  - Só registrados (ver `pendencias-lucas.md` nº 6):
+    - 4: desmarcar não grava o setor anterior;
+    - 5: o dono pode marcar a si mesmo, mas no estorno ele confere pela senha;
+    - 6: o "é dono" não cruza com `sentinel.papeis`;
+    - 7: tentativas em paralelo passam do teto do middleware.
+- **Testes:**
+  - filtrado: 9/9;
+  - suíte completa (test-runner haiku): **852/852**.
+- Commit sugerido: `feat(clinica): endpoints do dono para supervisores e PIN, e do supervisor para o proprio PIN (com senha)`
+
 ## 01:35 · Estado da bateria (para retomar)
 - **Chamadas reais usadas na noite: 123 de 200** (fumaça 1 + Sonnet descartado 38 + Sonnet 38 + Haiku 38 + continuações do P-C1 8). Custo estimado ~US$ 1,25. Nenhum 401/402/403.
 - Feito: Sonnet e Haiku completos com o adaptador final; modelo escolhido Haiku 5.5 (no .env); continuações com o P-C1: 3/4.
