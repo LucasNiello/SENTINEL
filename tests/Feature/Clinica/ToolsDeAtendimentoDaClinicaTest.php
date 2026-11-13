@@ -17,7 +17,7 @@ use Tests\Concerns\SimulaAgente;
 use Tests\TestCase;
 
 /**
- * Item 3 da 1ª leva: as tools de atendimento da clínica pelo fluxo do agente (Foundry simulado): agenda (consulta e
+ * Item 3 da 1ª leva: as tools de atendimento da clínica pelo fluxo do agente (Anthropic simulada): agenda (consulta e
  * status), cobrança (P-B4: cobrar, receber, cancelar), venda avulsa e caixa de entrada (P-B5). Toda escrita passa por
  * papel, tenant, Revisar → segurar e auditoria; o card mostra o que vai acontecer (resumo) antes do segurar.
  */

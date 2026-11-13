@@ -15,7 +15,7 @@ use Tests\TestCase;
 /**
  * B2 (RF05/RNF05) — modo manual sem IA: listar e buscar cada entidade pelo
  * /agente/consultar e abrir os formulários pelo /agente/formulario, com o mesmo
- * RBAC, tenant, máscara, Revisar → segurar e auditoria. A Azure simulada fica
+ * RBAC, tenant, máscara, Revisar → segurar e auditoria. A Anthropic simulada fica
  * FORA DO AR em todos os testes: nenhum passo do modo manual depende dela.
  */
 class ModoManualTest extends TestCase

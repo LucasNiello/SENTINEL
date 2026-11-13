@@ -23,7 +23,7 @@ use Tests\TestCase;
 /**
  * Bloco 1 (Fase 4, Tarefa 2): toda proposta de escrita tem um desfecho só —
  * confirmada, cancelada ou expirada. O desfecho fica em audit_logs com o que a
- * IA propôs (mascarado) e a proposta sai da sessão (R3). Foundry sempre simulado.
+ * IA propôs (mascarado) e a proposta sai da sessão (R3). Anthropic sempre simulada.
  */
 class ConfirmacaoDesfechoTest extends TestCase
 {

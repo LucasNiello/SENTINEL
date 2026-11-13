@@ -14,8 +14,8 @@ use Tests\TestCase;
 
 /**
  * Fluxo do agente (/agente): as 2 tools existentes, confirmação humana antes
- * de qualquer escrita (RNF02) e degradação graciosa se o Foundry falhar (RNF05).
- * A API do Foundry é sempre simulada com Http::fake — nenhum teste chama a rede.
+ * de qualquer escrita (RNF02) e degradação graciosa se a Anthropic falhar (RNF05).
+ * A API da Anthropic é sempre simulada com Http::fake — nenhum teste chama a rede.
  */
 class AgenteTest extends TestCase
 {
@@ -370,7 +370,7 @@ class AgenteTest extends TestCase
         Http::assertSentCount(10);
     }
 
-    // ---- N1: corpo da Azure fora do formato esperado ----
+    // ---- N1: corpo da Anthropic fora do formato esperado ----
 
     public static function respostasForaDoFormato(): array
     {

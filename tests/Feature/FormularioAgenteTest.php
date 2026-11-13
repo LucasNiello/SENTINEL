@@ -20,7 +20,7 @@ use Tests\TestCase;
 /**
  * Bloco 2 (Fase 4, Tarefa 1) — RF04: a proposta de escrita chega como formulário
  * pré-preenchido (o próprio card de confirmação), o humano edita e confirma, e a
- * governança é reaplicada sobre os valores editados. Foundry sempre simulado.
+ * governança é reaplicada sobre os valores editados. Anthropic sempre simulada.
  */
 class FormularioAgenteTest extends TestCase
 {

@@ -38,7 +38,7 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by(Str::lower(is_string($email) ? $email : '').'|'.$request->ip());
         });
 
-        // RNF10: cada pedido ao agente gasta crédito do Foundry. 10 por minuto por usuário logado,
+        // RNF10: cada pedido ao agente gasta crédito da Anthropic. 10 por minuto por usuário logado,
         // com o 429 no mesmo formato {tipo, mensagem} que o front já exibe.
         RateLimiter::for('agente', function (Request $request) {
             return Limit::perMinute(10)->by((string) $request->user()->id)->response(

@@ -1,3 +1,7 @@
+# Atualização do fim da tarde de 13/11 — leia primeiro
+- **Feito hoje:** remoção do Azure (Anthropic é o único provedor), bateria 38/40 e padrão Anthropic; comentários com "Foundry/Azure" corrigidos em `AppServiceProvider` e nos cabeçalhos dos testes (só texto). Suíte 863/863, duas rodadas seguidas estáveis.
+- **Abertos, pulados por tocarem RBAC/PIN/rate limit (fora da permissão da sessão):** nº 5 item 4, nº 6 itens 4, 6 e 7, e o login com `RateLimiter::hit` antes do `Auth::attempt`. Precisam do Lucas.
+
 # Atualização da tarde 2 de 13/11 — leia primeiro
 - **Resolvidas:** pendência 1 (CLAUDE.md "Provedor de IA" trocado, só esse item; falta conferir Documentação 1.2 e Notion), pendência 2 (cadastro: reforço do prompt, bateria 14/16/18 = 3/3), nº 6 itens 5 (dono não marca supervisor) e 7 (PIN conta antes de conferir; o estorno já contava).
 - **Segue aberto, só registrado:** o login (`AutenticacaoController`) tem a mesma fraqueza do item 7: o throttle confere antes de contar, e rajadas em paralelo passam do teto de 5. Proposta, se quiser: `RateLimiter::hit` antes do `Auth::attempt`, como no `ReautenticacaoAdmin`. Também abertos: nº 5 item 4 e nº 6 itens 4 e 6.
@@ -90,3 +94,11 @@ O `sentinel_clinica_vet.md` só cita o D6 em listas ("Telas 13-15/11 = C11, D4-D
 A escrita em `.claude/commands/leva.md` é negada no modo não interativo.
 - **Opções:** (a) liberar `Write(.claude/commands/leva.md)` no `settings.json`; (b) copiar à mão.
 - **Recomendação:** (b), uma vez só. Não é preciso abrir permissão permanente.
+
+
+# Pendências do Lucas acrescentadas em 13/11 (fim da tarde)
+- Apagar as linhas `AZURE_*` do `.env`, se ainda houver.
+- Trocar a chave da Anthropic antes de apresentar.
+- Redefinir a 2ª leva (P-D1, P-D2, defeito 11, P-C9, P-C8, P-C6, P-C7, P-D3): sem definição escrita.
+- Decidir o merge da `main`.
+- Conferir Documentação 1.2 e Notion ("Arquitetura") para a troca de provedor.

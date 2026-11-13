@@ -5,7 +5,7 @@ namespace Tests\Concerns;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Helpers para testar o fluxo do agente (/agente) com o Foundry simulado.
+ * Helpers para testar o fluxo do agente (/agente) com a Anthropic simulada.
  * Chame prepararAgente() no setUp() da classe de teste.
  *
  * Http::fake acumula stubs (o primeiro vence), então faz-se o fake uma vez só

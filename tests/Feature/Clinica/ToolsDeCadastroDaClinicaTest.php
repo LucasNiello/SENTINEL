@@ -16,7 +16,7 @@ use Tests\TestCase;
  * P-B7: os testes padrão de tool, rodados para CADA entidade que nasce de definirCadastro (tutor, pet, item do
  * catálogo). Entidade nova da clínica entra aqui com uma linha em entidades() e uma em ficha(). Cobre: consulta
  * (tenant, auditoria), criar (confirmação, tenant do servidor, validação com frase amigável, auditoria), atualizar,
- * RBAC por lista de papéis e o esquema enviado à IA. Foundry sempre simulado.
+ * RBAC por lista de papéis e o esquema enviado à IA. Anthropic sempre simulada.
  */
 class ToolsDeCadastroDaClinicaTest extends TestCase
 {
