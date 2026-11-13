@@ -174,6 +174,12 @@ class AiAgentService
     /** P-C1: até quantas linhas da última tabela ficam guardadas para "o segundo", "a última". */
     private const LIMITE_LISTA = 50;
 
+    /**
+     * P-C1: tools cujo id NÃO é da entidade delas (o localizar acha outra coisa). cobrar_atendimento é da Cobranca,
+     * mas acha o ATENDIMENTO (agendamento): "cobre o segundo" vale para a tabela da agenda, nunca para a de cobranças.
+     */
+    private const ENTIDADE_DO_ID = ['cobrar_atendimento' => 'Agendamento'];
+
     /** P-C1: o campo de posição nas tools que alteram um registro achado (atualizar_*). */
     public const PROPRIEDADE_POSICAO = ['posicao' => ['type' => 'integer', 'description' => 'Linha da última tabela mostrada ao usuário, quando ele se refere a ela ("o segundo" = 2, "a última" = -1). Nunca use o número da linha como id.']];
 
@@ -436,7 +442,7 @@ class AiAgentService
             // P-C1: "edite o segundo", "a última": a IA manda só a posição na última tabela mostrada, e o servidor
             // troca pelo id congelado na sessão (depois do RBAC, antes de localizar). id e busca vindos junto são descartados.
             if (isset($argumentos['posicao'])) {
-                $resolvido = $this->resolverPosicao($definicao, $argumentos, $lista);
+                $resolvido = $this->resolverPosicao($tool, $definicao, $argumentos, $lista);
 
                 if (isset($resolvido['resposta'])) {
                     return $this->comAviso($resolvido['resposta'], $aviso);
@@ -711,11 +717,11 @@ class AiAgentService
         $n = count($linhas);
 
         return [
-            'entidade' => $definicao['entidade'] ?? null,
+            'entidade' => self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade'] ?? null,
             'linhas' => $linhas,
             'frase' => $n === 0
                 ? "A consulta ({$tool}) não encontrou registros."
-                : "Mostrei ao usuário uma tabela com {$n} ".($n === 1 ? 'linha' : 'linhas')." ({$tool}). Ela fica guardada no servidor: para se referir a uma linha dela (\"o segundo\", \"a última\"), use o campo posicao (1 = primeira, -1 = última), nunca o número da linha como id.",
+                : "Mostrei ao usuário uma tabela com {$n} ".($n === 1 ? 'linha' : 'linhas')." ({$tool}). Ela fica guardada no servidor: para alterar uma linha dela (\"edite o segundo\", \"a última\"), use o campo posicao (1 = primeira, -1 = última), nunca o número da linha como id.",
         ];
     }
 
@@ -727,7 +733,7 @@ class AiAgentService
      *
      * @return array{argumentos: array<string, mixed>}|array{resposta: array<string, mixed>}
      */
-    private function resolverPosicao(array $definicao, array $argumentos, ?array $lista): array
+    private function resolverPosicao(string $tool, array $definicao, array $argumentos, ?array $lista): array
     {
         $recusa = fn (string $mensagem) => ['resposta' => [
             'tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422, 'mensagem' => $mensagem,
@@ -738,7 +744,7 @@ class AiAgentService
         if ($linhas === []) {
             return $recusa('Não tenho uma tabela recente para saber qual é esse registro. Consulte de novo ou diga o nome.');
         }
-        if (($lista['entidade'] ?? null) !== $definicao['entidade']) {
+        if (($lista['entidade'] ?? null) !== (self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade'])) {
             return $recusa('A última tabela mostrada é de outro tipo de registro. Consulte de novo ou diga o nome.');
         }
 
@@ -971,6 +977,14 @@ class AiAgentService
     public function exigeReautenticacao(string $tool): bool
     {
         return (bool) ($this->catalogo()[$tool]['reautenticar'] ?? false);
+    }
+
+    /** H: que conferência o card faz antes de executar: 'admin' (senha de admin) ou 'estorno' (PIN do supervisor ou senha do dono). */
+    public function tipoReautenticacao(string $tool): ?string
+    {
+        $reautenticar = $this->catalogo()[$tool]['reautenticar'] ?? false;
+
+        return $reautenticar === 'estorno' ? 'estorno' : ($reautenticar === true ? 'admin' : null);
     }
 
     /** O admin que reautenticou nesta requisição — posto só pelo /agente/confirmar, depois de conferir a senha. */
@@ -2403,7 +2417,7 @@ class AiAgentService
         string $colunaRotulo = '',
         ?Closure $conferir = null,
         array $resumo = [],
-        bool $reautenticar = false,
+        bool|string $reautenticar = false, // true = senha de admin (lixeira); 'estorno' = PIN do supervisor ou senha do dono (H)
         string $feito = 'alterado',
         string $onde = '',
         string $rotuloAcao = '',

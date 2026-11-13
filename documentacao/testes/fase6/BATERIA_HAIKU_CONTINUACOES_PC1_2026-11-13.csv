@@ -1,0 +1,9 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria
+1;consulta;"liste meus clientes";"consultar_clientes / resultado_leitura";consultar_clientes;S;resultado_leitura;;1177;1;1205
+2;consulta;"quais fornecedores eu tenho?";"consultar_fornecedores / resultado_leitura";consultar_fornecedores;S;resultado_leitura;;1473;1;1475
+3;consulta;"mostre os lançamentos pendentes";"consultar_lancamentos / resultado_leitura";consultar_lancamentos;S;resultado_leitura;;967;1;968
+5;consulta;"quais são as categorias de lançamento?";"consultar_categorias_lancamento / resultado_leitura";consultar_categorias_lancamento;S;resultado_leitura;;1010;1;1011
+27;continuacao;"edita o segundo";"atualizar_cliente / confirmacao_pendente";(nenhuma);N;texto;"texto: Para editar o segundo cliente, preciso saber o que deve ser alterado: nome, documento (CPF ou CNPJ), e-mail ou telefone, e qual é o novo valor.";2016;1;
+28;continuacao;"altera o telefone do primeiro para 19 3451-0000";"atualizar_fornecedor / confirmacao_pendente";"atualizar_fornecedor id=1";S;confirmacao_pendente;;1517;1;
+29;continuacao;"marca o terceiro como conciliado";"atualizar_status_lancamento / confirmacao_pendente";"atualizar_status_lancamento id=5";S;confirmacao_pendente;;1610;1;
+30;continuacao;"renomeia a última para Taxas bancárias";"atualizar_categoria_lancamento / confirmacao_pendente";"atualizar_categoria_lancamento id=4";S;confirmacao_pendente;;1679;1;

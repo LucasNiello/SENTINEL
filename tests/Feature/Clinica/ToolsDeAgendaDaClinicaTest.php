@@ -126,6 +126,20 @@ class ToolsDeAgendaDaClinicaTest extends TestCase
         $this->assertSame(0, Agendamento::count());
     }
 
+    /** P-C1 (achado do reviewer): cobrar_atendimento acha pelo id do ATENDIMENTO; a posição vale para a agenda, não para as cobranças. */
+    public function test_cobrar_pela_posicao_usa_a_tabela_da_agenda_e_recusa_a_de_cobrancas(): void
+    {
+        $agendamento = $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item());
+        $this->assertSame([$agendamento->id], array_column($this->comando('consultar_agenda')->assertOk()->json('resultado'), 'id'));
+
+        $this->comando('cobrar_atendimento', ['posicao' => 1])->assertJsonPath('mensagem', fn ($m) => ! str_contains((string) $m, 'outro tipo de registro'));
+
+        app(\App\Services\CobrancaService::class)->abrir($agendamento->id, self::T);
+        $this->comando('consultar_cobrancas')->assertOk();
+        $this->comando('cobrar_atendimento', ['posicao' => 1])
+            ->assertStatus(422)->assertJsonPath('mensagem', fn ($m) => str_contains($m, 'outro tipo de registro'));
+    }
+
     public function test_encaixe_registra_emergencia_ja_comecada_mesmo_em_horario_ocupado(): void
     {
         $dados = $this->dados(['inicio' => '2026-11-10 09:30', 'fim' => '2026-11-10 10:30']);

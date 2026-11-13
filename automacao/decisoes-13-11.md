@@ -167,6 +167,99 @@ Formato: hora · item · decisão e porquê · alternativa descartada · arquivo
 - Não medido com IA real: o prompt da clínica não tem bateria. Fica como sugestão para o Lucas.
 - Commit sugerido: `feat(agente): system prompt por dominio (clinica veterinaria); contabilidade inalterada`
 
+## 01:28 · P-C1 · Memória da última lista · FEITO
+- **Plan (opus)** antes de codar. Ficou a opção (a) dele, mas SEM nomes no histórico: nomes de clientes e fornecedores seriam dado pessoal novo indo para a IA, e o `sanitizar()` corta em 1000 caracteres. Alternativa descartada: (b), só nomes no histórico com busca por nome. Ela não resolve "o segundo" e não serve no status do lançamento, que não tem busca.
+- **Como funciona:**
+  - depois de uma leitura (e da lista de "vários encontrados"), o `interpretar()` devolve `lista` = entidade + ids EM ORDEM (até 50) + uma frase sem dados;
+  - o `AgenteController` (e o `sentinel:bateria`) chama `ConversaAgente::guardarLista()`, na chave de sessão `agente_ultima_lista`, com identidade usuário:tenant e hora, e tira a chave antes do JSON;
+  - o histórico ganha a frase ("Mostrei ao usuário uma tabela com N linhas (tool)… use o campo posicao…"), sem id, nome nem documento, e não interna;
+  - no pedido seguinte, o `lerLista()` (mesma identidade, até 30 min) chega ao `interpretar()`;
+  - a IA manda `posicao` (1..N ou -1), e o `resolverPosicao()` troca pelo id congelado DEPOIS do RBAC e ANTES do `localizarRegistro()`, que reconfere no tenant e na situação. id e busca vindos junto são descartados. Revisar → segurar → Confirmar e auditoria não mudam.
+- **Onde existe `posicao`:**
+  - tools com `localizar`: `definirAtualizacao`, `definirCadastro` e `definirAcao` da clínica;
+  - `atualizar_status_lancamento`: o `id` saiu dos obrigatórios do esquema da IA, mas o servidor continua exigindo `id` nas regras;
+  - fora: excluir, restaurar e excluir de vez (a lixeira mistura entidades; ali a `posicao` cai em fora do formato).
+- **Recusas** (422 AI_TOOL_REFUSED, sem rascunho nem auditoria, como as do localizar): sem tabela ou tabela vencida; tabela de outra entidade; posição fora dela; posição que não é inteiro.
+- **Teste antigo alterado** (contradição com a decisão do P-C1): `AtualizarStatusLancamentoTest::test_schema_da_tool…` esperava `required = [id, novo_status]`. Agora espera `[novo_status]` e confere o campo `posicao`. A exigência do id continua no servidor (`REGRAS_STATUS_LANCAMENTO`).
+- **Testes novos:**
+  - `tests/Feature/MemoriaListaTest.php` (10): o segundo; a última; id e busca da IA ignorados; o terceiro conciliado até confirmar, com auditoria; outra entidade; fora da tabela, sem tabela e prazo; outra identidade e id de outro tenant; RBAC antes; não inteiro; "vários encontrados"; Anthropic;
+  - `ToolsDeAgendaDaClinicaTest::test_cobrar_pela_posicao_usa_a_tabela_da_agenda_e_recusa_a_de_cobrancas`.
+- **Prova por sabotagem:**
+  - P1: o id da IA vence a posição, e "a última / id da IA ignorado" falha. Prova que a IA não escolhe o id.
+  - P2: aceitar lista de outra identidade faz "outro usuário ou tenant" falhar. Prova que a lista é por usuário e tenant.
+  - P3: aceitar tabela de outra entidade faz "outra entidade" falhar.
+  - P4: tirar o prazo faz o caso dos 31 min falhar.
+  - P5: esvaziar o `ENTIDADE_DO_ID` faz o teste da clínica falhar ("cobre a primeira" depois da tabela de cobranças passa a valer).
+- **reviewer (opus), 1 passada: nada BLOQUEANTE.**
+  - IMPORTANTE 1, corrigido: o `cobrar_atendimento` (entidade Cobranca) localiza pelo id do AGENDAMENTO. "Cobre a segunda" depois de `consultar_cobrancas` virava id de cobrança tratado como id de agendamento. Correção: `ENTIDADE_DO_ID = ['cobrar_atendimento' => 'Agendamento']`, usado ao guardar e ao resolver.
+  - IMPORTANTE 2, o risco de o modelo copiar a frase em vez de chamar a tool: medido na bateria real abaixo (as 4 consultas e as 3 continuações chamaram a tool; nenhuma resposta copiou a frase).
+  - MENORES corrigidos: a frase diz "para alterar" (antes, "exclua o segundo" levaria a `posicao` a uma tool sem o campo); testes de não inteiro e de "vários encontrados".
+  - MENORES não feitos, registrados:
+    - `propostos` guarda também o id/busca que a IA mandou junto com a posição. Mantive: a auditoria mostra o que a IA pediu, e `entidade_id` mostra o registro resolvido.
+    - Uma leitura que dá erro não apaga a tabela anterior. O card mostra o registro e o humano confere.
+    - Teste de RBAC com lista válida do mesmo usuário.
+- **Bateria real (Haiku 5.5, `--somente=27,28,29,30`, com as consultas 1, 2, 3 e 5):** `documentacao/testes/fase6/BATERIA_HAIKU_CONTINUACOES_PC1_2026-11-13.csv`. **Continuações 3/4** (eram 0/4 no Azure, no Sonnet e no Haiku), consultas 4/4, p50 1,50 s, p90 1,78 s. O 27 ("edita o segundo", sem campo) volta em texto perguntando o que mudar. É coerente com o prompt, mas a bateria esperava o card de edição (mesmo tema da pendência nº 2). **8 chamadas; total da noite: 123.**
+- Suíte completa (test-runner haiku) com o P-C1 antes das correções do reviewer: **823/823**. A suíte com as correções está na entrada do relatório final.
+- Commit sugerido: `feat(agente): memoria da ultima lista (posicao resolvida no servidor, ids congelados na sessao)`
+
+## 01:28 · Item F (P-C4) · Agendar e encaixe de emergência · FEITO
+- **Plan (opus)** antes de codar.
+- **Decisão:** duas tools com `definirAcao`, sem mudar o `AgendaService` (a regra toda já estava lá: tenant, setor, profissional, passado, conflito com trava, duração, encaixe só na clínica e com início até agora):
+  - `agendar_atendimento`: origem `normal`; papéis atendente, recepção, veterinário e dono (os do `alterar_status_agendamento`);
+  - `registrar_encaixe_emergencia`: origem `encaixe_emergencia`; papéis recepção, veterinário e dono (o atendente fica fora porque o encaixe é só da clínica).
+  - A origem é fixada pelo servidor; `origem` e `status` vindos da IA são recusados pelo esquema fechado. O autor é o usuário logado (na auditoria).
+  - `app/Http/Requests/AgendarRequest.php` (novo): `exists:` vira select do tenant no card. `inicio`/`fim` vão como texto (AAAA-MM-DD HH:MM): com `date_format`, o card viraria campo só de data e perderia a hora. O formato estrito é conferido pelo `AgendaService::momento()`.
+  - `ROTULOS_CAMPOS`: o serviço, o profissional, o início e o fim.
+- Alternativas descartadas: encaixe como "espremer em horário ocupado" (o service e a memória definem o encaixe como emergência que já começou); coluna "agendado_por" (pediria migration; quem agendou já fica na auditoria).
+- **Teste novo:** `tests/Feature/Clinica/ToolsDeAgendaDaClinicaTest.php` (8):
+  - grava só depois de confirmar, com origem, status, tenant e setor certos, e audita;
+  - recusa no Revisar: conflito, passado, mais de 8 h, profissional da recepção, produto;
+  - pet, serviço e profissional de outro tenant;
+  - a IA não escolhe origem, status nem tenant;
+  - conflito que entra entre o Revisar e o Confirmar vira "recusado";
+  - papéis (vendedor não agenda; atendente não registra encaixe);
+  - encaixe em horário ocupado, encaixe no futuro e encaixe do petshop;
+  - mais o teste do P-C1 acima.
+- Não é proteção da lista de sabotagem (A, F e G são reviewer sonnet).
+- **reviewer (sonnet), 1 passada: nada BLOQUEANTE nem IMPORTANTE.** MENORES registrados, sem mudança:
+  - o select do profissional lista todos os usuários do tenant (o errado é recusado no Revisar);
+  - o encaixe não tem limite no passado (regra do service, não alterada);
+  - lacunas de teste (papéis permitidos, formulário do card).
+- Filtro: Clínica + prompt + construtores 310/310; agenda + P-C1 18/18.
+- Commit sugerido: `feat(clinica): tools agendar_atendimento e registrar_encaixe_emergencia (P-C4)`
+
+## 01:35 · Item H · Estorno no card com PIN · EM ANDAMENTO (parado por limite de uso; retomar às 04:15)
+- **Ponto exato:** código e testes prontos, sabotagens provadas. FALTA: reviewer opus (1 passada), corrigir o que ele apontar, suíte completa, registrar "feito".
+- **Decisão:** tool `estornar_cobranca` (clínica, `definirAcao`, risco exclusão).
+  - Pedem: recepção, atendente ou dono. O `CobrancaService::estornar()` confere o setor; a cobrança é achada só entre as pagas.
+  - O card usa o JSON de reautenticação que já existe (`reautenticar: true`; `email_admin`/`senha_admin`). Para esta tool, o `senha_admin` é o PIN do supervisor ou a senha de login do dono.
+  - `ReautenticacaoAdmin::autorizarEstorno()` (novo) usa os MESMOS limites e contadores do `autorizar()`, refatorado em `comLimite()`: o dono confere pela senha de login, o supervisor marcado com PIN confere pelo PIN, e a senha de login do supervisor não serve.
+  - `definirTool`/`definirAcao` aceitam `reautenticar: 'estorno'`; `AiAgentService::tipoReautenticacao()` (novo); o `AgenteController::confirmar` escolhe a conferência e as frases de recusa do estorno.
+  - O executar passa quem pediu = usuário logado e quem autorizou = `autorizadoPor()` (posto só pelo confirmar). O service reconfere setor, autoaprovação e papel válido.
+- Arquivos: `app/Http/Requests/EstornarCobrancaRequest.php` (novo), `app/Services/ReautenticacaoAdmin.php`, `app/Services/AiAgentService.php`, `app/Services/Agente/ConstrutoresDeTool.php`, `app/Services/Agente/CatalogoDaClinica.php`, `app/Http/Controllers/AgenteController.php`.
+- **Teste novo:** `tests/Feature/Clinica/EstornoNoCardTest.php`, **6/6**:
+  - PIN do supervisor (grava quem pediu e quem autorizou; PIN fora da auditoria e da sessão);
+  - senha do dono;
+  - senha de login do supervisor, PIN errado, outro veterinário e nada → 403;
+  - supervisor de outro setor → 422 do service;
+  - limite de 5 → 429 mesmo com o PIN certo;
+  - card com `reautenticar` e só o campo motivo; vendedor negado; cobrança não paga não achada.
+- **Sabotagem:**
+  - H1: aceitar a senha de login do supervisor no lugar do PIN faz 3 testes falharem;
+  - H2: conferir o estorno como senha de admin faz 2 falharem (o supervisor não é admin);
+  - H3: tirar o limite de tentativas faz 2 falharem (limite e "faltando");
+  - H4: tirar `reautenticar: 'estorno'` da tool faz os 6 falharem.
+- Suíte completa com F + P-C1 corrigido (antes do H): **833/833** (test-runner haiku).
+- Commit sugerido (depois do reviewer): `feat(clinica): estorno de cobranca paga no card com PIN do supervisor ou senha do dono`
+
+## 01:35 · Estado da bateria (para retomar)
+- **Chamadas reais usadas na noite: 123 de 200** (fumaça 1 + Sonnet descartado 38 + Sonnet 38 + Haiku 38 + continuações do P-C1 8). Custo estimado ~US$ 1,25. Nenhum 401/402/403.
+- Feito: Sonnet e Haiku completos com o adaptador final; modelo escolhido Haiku 5.5 (no .env); continuações com o P-C1: 3/4.
+- **Obrigatório: nada falta rodar.** Opcionais, se sobrar tempo e crédito (nenhum foi pedido pelo prompt):
+  - os 5 pedidos de cadastro com dado faltando, depois que o Lucas decidir a pendência nº 2 (`--somente=12,14,16,17,18`; 5 chamadas);
+  - uma bateria do prompt da clínica, que não existe (precisa de um BATERIA_PEDIDOS da clínica).
+- Itens que ainda faltam na leva: H (reviewer + suíte), I (endpoints do supervisor e do PIN: não iniciado), autorrevisão e relatório final (`automacao/relatorio-13-11.md`, não escrito).
+
 ## 01:12 · Itens D (D6) e E (D2) · ESTACIONADOS
 - O D6 não tem definição no `sentinel_clinica_vet.md` (só "P-D6" numa lista de telas). O D2 também não tem, nem lá, nem em `automacao/`, `.claude/` ou nos .md do repositório (só "P-D2" na lista da 2ª leva). Sem definição, não há o que implementar nem frase a propor. Registrado em `pendencias-lucas.md` (nº 3). Alternativa descartada: adivinhar a partir do nome.
 

@@ -134,6 +134,27 @@ class MemoriaListaTest extends TestCase
         $this->comando('atualizar_cliente', ['posicao' => 1, 'telefone' => '1'])->assertStatus(403)->assertJsonPath('tipo', 'negado');
     }
 
+    public function test_posicao_que_nao_e_inteiro_e_recusada(): void
+    {
+        $this->listarClientes();
+
+        foreach (['2', 'segundo', [2]] as $posicao) {
+            $this->comando('atualizar_cliente', ['posicao' => $posicao, 'telefone' => '1'])
+                ->assertStatus(422)->assertJsonPath('mensagem', fn ($m) => str_contains($m, 'essa posição não existe'));
+        }
+    }
+
+    public function test_a_lista_de_varios_encontrados_tambem_vale_para_a_posicao(): void
+    {
+        Cliente::create(['nome' => 'Beta Filial', 'tenant_id' => 1]);
+
+        $ids = array_column($this->comando('atualizar_cliente', ['busca' => 'Beta', 'telefone' => '1'])
+            ->assertOk()->assertJsonPath('tipo', 'resultado_leitura')->json('resultado'), 'id');
+        $this->assertCount(2, $ids);
+
+        $this->comando('atualizar_cliente', ['posicao' => 2, 'telefone' => '2'])->assertOk()->assertJsonPath('argumentos.id', $ids[1]);
+    }
+
     public function test_pela_anthropic_a_posicao_resolve_igual(): void
     {
         $ids = $this->listarClientes();

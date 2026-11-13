@@ -251,10 +251,12 @@ class AgenteController extends Controller
         $autorizadoPor = null;
 
         if ($this->aiAgentService->exigeReautenticacao($pendente['tool']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
-            $autorizacao = $this->reautenticar($request);
+            // H: o estorno é autorizado pelo PIN do supervisor ou pela senha do dono (mesmos campos do card e mesmos limites).
+            $estorno = $this->aiAgentService->tipoReautenticacao($pendente['tool']) === 'estorno';
+            $autorizacao = $this->reautenticar($request, $estorno);
 
             if (! isset($autorizacao['admin'])) {
-                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha']);
+                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], $estorno);
             }
 
             $autorizadoPor = $autorizacao['admin'];
@@ -445,10 +447,13 @@ class AgenteController extends Controller
      *
      * @return array{admin: int}|array{falha: string}
      */
-    private function reautenticar(Request $request): array
+    private function reautenticar(Request $request, bool $estorno = false): array
     {
         try {
-            return $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin'));
+            // H: no estorno, "senha_admin" leva o PIN do supervisor ou a senha do dono (o card é o mesmo).
+            return $estorno
+                ? $this->reautenticacao->autorizarEstorno($request->input('email_admin'), $request->input('senha_admin'))
+                : $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin'));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -468,9 +473,16 @@ class AgenteController extends Controller
      * gravar — o desfecho dela é "negado", com quem estava logado e sem o e-mail digitado (ele
      * poderia ser a senha digitada no campo errado). Para tentar de novo, abre-se outro card.
      */
-    private function reautenticacaoRecusada(array $pendente, string $falha)
+    private function reautenticacaoRecusada(array $pendente, string $falha, bool $estorno = false)
     {
-        [$codigo, $status, $motivo, $mensagem] = match ($falha) {
+        [$codigo, $status, $motivo, $mensagem] = $estorno ? match ($falha) {
+            'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de autorização do estorno atingido.',
+                'Muitas tentativas com o PIN ou a senha errados. Aguarde alguns minutos. Nada foi gravado.'],
+            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e PIN (ou senha do dono) de quem autoriza o estorno.',
+                'Informe o e-mail de quem autoriza e o PIN do supervisor (ou a senha do dono). Nada foi gravado.'],
+            default => ['AI_REAUTH_FAILED', 403, 'Autorização do estorno não conferiu.',
+                'E-mail, PIN ou senha de quem autoriza inválidos. Nada foi gravado.'],
+        } : match ($falha) {
             'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de senha de administrador atingido.',
                 'Muitas tentativas com a senha errada. Aguarde alguns minutos. Nada foi gravado.'],
             'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e senha de administrador.',

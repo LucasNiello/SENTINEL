@@ -156,6 +156,7 @@ trait ConstrutoresDeTool
         string $rotuloAcao = '',
         ?array $campos = null,
         ?Closure $resumir = null,
+        bool|string $reautenticar = false, // H: 'estorno' = o card confere o PIN do supervisor ou a senha do dono
     ): array {
         $regras = (new $formRequest)->rules();
         $regrasDoFormulario = $campos === null ? $regras : array_intersect_key($regras, array_flip($campos));
@@ -198,6 +199,7 @@ trait ConstrutoresDeTool
             rotuloAcao: $rotuloAcao,
             resumir: $resumir,
             regrasRevisar: $regras,
+            reautenticar: $reautenticar,
         );
     }
 

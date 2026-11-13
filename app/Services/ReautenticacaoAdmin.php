@@ -62,6 +62,31 @@ class ReautenticacaoAdmin
      */
     public function autorizar(mixed $email, mixed $senha): array
     {
+        return $this->comLimite($email, $senha, fn (string $e, string $s) => $this->adminQueConfere($e, $s));
+    }
+
+    /**
+     * H (clínica): quem autoriza um ESTORNO, pelo mesmo card e com os MESMOS limites (os contadores são os de
+     * autorizar(): errar aqui também conta lá). O segredo é o PIN de autorização de um supervisor ou a senha de
+     * login do dono, do mesmo tenant de quem está logado. A senha de login de um supervisor NÃO serve (o PIN é
+     * diferente dela de propósito). Se a pessoa pode autorizar ESTA cobrança (setor, autoaprovação, papel válido)
+     * é conferido de novo no CobrancaService::estornar().
+     *
+     * @return array{admin: int}|array{falha: 'faltando'|'limite'|'invalido'}  "admin" = quem autorizou
+     */
+    public function autorizarEstorno(mixed $email, mixed $segredo): array
+    {
+        return $this->comLimite($email, $segredo, fn (string $e, string $s) => $this->autorizadorDeEstorno($e, $s));
+    }
+
+    /**
+     * A conferência com os dois limites de tentativas erradas por janela.
+     *
+     * @param  \Closure(string, string): ?User  $conferir
+     * @return array{admin: int}|array{falha: 'faltando'|'limite'|'invalido'}
+     */
+    private function comLimite(mixed $email, mixed $senha, \Closure $conferir): array
+    {
         $usuarioId = $this->contexto->usuario()->id;
 
         if (! is_string($email) || ! is_string($senha) || trim($email) === '' || $senha === '') {
@@ -86,7 +111,7 @@ class ReautenticacaoAdmin
                 return ['falha' => 'limite'];
             }
 
-            $admin = strlen($email) <= 255 && strlen($senha) <= 255 ? $this->adminQueConfere(trim($email), $senha) : null;
+            $admin = strlen($email) <= 255 && strlen($senha) <= 255 ? $conferir(trim($email), $senha) : null;
 
             if ($admin === null) {
                 return ['falha' => 'invalido'];
@@ -117,6 +142,31 @@ class ReautenticacaoAdmin
                 RateLimiter::decrement($chave, self::JANELA_S);
             }
         }
+    }
+
+    /** O dono pela senha de login; o supervisor (marcado, com PIN) pelo PIN. Qualquer outro: null, no mesmo tempo. */
+    private function autorizadorDeEstorno(string $email, string $segredo): ?User
+    {
+        $usuario = User::query()
+            ->where('email', $email)
+            ->where('tenant_id', $this->contexto->tenantId())
+            ->whereIn('papel', (array) config('sentinel.papeis', []))
+            ->first();
+
+        $hash = match (true) {
+            $usuario === null => null,
+            $usuario->papel === 'dono' => $usuario->password,
+            $usuario->supervisor_setor !== null && $usuario->pin_autorizacao !== null => $usuario->pin_autorizacao,
+            default => null,
+        };
+
+        if ($hash === null) {
+            Hash::check($segredo, self::HASH_FICTICIO);
+
+            return null;
+        }
+
+        return Hash::check($segredo, $hash) ? $usuario : null;
     }
 
     private function adminQueConfere(string $email, string $senha): ?User

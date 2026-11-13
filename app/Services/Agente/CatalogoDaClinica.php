@@ -6,6 +6,7 @@ use App\Http\Requests\AgendarRequest;
 use App\Http\Requests\AlterarStatusAgendamentoRequest;
 use App\Http\Requests\CatalogoItemAtualizacaoRequest;
 use App\Http\Requests\CatalogoItemRequest;
+use App\Http\Requests\EstornarCobrancaRequest;
 use App\Http\Requests\PetRequest;
 use App\Http\Requests\ReceberCobrancaRequest;
 use App\Http\Requests\RegistrarVendaRequest;
@@ -371,6 +372,35 @@ trait CatalogoDaClinica
                 rotuloAcao: 'Cancelar',
                 campos: [],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId),
+            ),
+            // H: estorno de cobrança PAGA no card. Pede: a recepção (clínica), o atendente (petshop) ou o dono; quem é do
+            // setor certo o CobrancaService confere. Autoriza: o supervisor do setor com o PIN dele, ou o dono com a senha,
+            // digitados no card (reautenticar 'estorno'); a conferência fica no /agente/confirmar e nunca vai para a IA.
+            $this->definirAcao(
+                nome: 'estornar_cobranca',
+                descricao: 'Estorna uma cobrança PAGA (volta para cancelada; o estoque dos itens avulsos volta). Precisa de motivo e da autorização de um supervisor do setor (PIN) ou do dono (senha), digitada só no card de confirmação: nunca peça nem aceite PIN ou senha no chat. Achada pelo id da cobrança ou pelo nome do pet.',
+                acao: 'estornar',
+                entidade: 'Cobranca',
+                papeis: ['recepcao', 'atendente', 'dono'],
+                propriedades: ['motivo' => ['type' => 'string', 'description' => 'Por que a cobrança paga está sendo estornada.']],
+                obrigatorios: [],
+                formRequest: EstornarCobrancaRequest::class,
+                // Quem pede é o usuário logado; quem autorizou é quem o card conferiu (autorizadoPor), nunca a IA.
+                executar: fn (array $d, int $tenantId, User $ator) => $cobrancas->estornar($d['id'], (string) $d['motivo'], $ator->id,
+                    $this->autorizadoPor() ?? 0, $tenantId, $this->autorizadoPor() !== null),
+                mensagemErro: 'Não consegui estornar a cobrança. Nada foi gravado.',
+                titulo: 'Estornar a cobrança',
+                sucesso: 'Cobrança estornada',
+                conferir: fn (array $a) => $cobrancas->localizar((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], ['paga'])->isEmpty()
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei a cobrança paga #'.(int) ($a['id'] ?? 0).'.'] : null,
+                risco: 'exclusao',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $cobrancas->localizar($id, $busca, $tenantId, ['paga']),
+                rotulo: 'a cobrança paga',
+                colunaRotulo: 'pet',
+                rotuloAcao: 'Estornar',
+                campos: ['motivo'],
+                resumir: fn (array $v, int $tenantId) => $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId),
+                reautenticar: 'estorno',
             ),
 
             // ---------------------------------------------------------------- venda avulsa (decisão de 09/11)
