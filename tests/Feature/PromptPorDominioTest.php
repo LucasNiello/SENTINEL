@@ -19,10 +19,10 @@ class PromptPorDominioTest extends TestCase
 
     private const CLINICA = 3;
 
-    /** sha256 das duas mensagens system da contabilidade, gravado com o código de antes do item G (13/11, 01:15). */
-    private const HASH_PRINCIPAL_CONTABILIDADE = '26908d970879b2cae30ed78b89a0abb9f3a30b481ceff9d59321c2d6db86f8be';
+    /** sha256 das duas mensagens system da contabilidade, gravado antes do item G (13/11, 01:15); regravado em 13/11 à tarde (pendência 2: dado faltando = chamar a tool, o card marca o campo; só a frase de dado faltando mudou, no principal e no lembrete). */
+    private const HASH_PRINCIPAL_CONTABILIDADE = 'cf8a162f36fdaba5fd351535454c486fbfbb88d2a71ecb82f7c5783b700f30e1'; // regravado na tarde 2 (B1): 3 exemplos de pedido incompleto no principal
 
-    private const HASH_LEMBRETE_CONTABILIDADE = '3410670cfd08a3049138696a434d2f81ea4cf30481b6fcea6c23bc44dc6df264';
+    private const HASH_LEMBRETE_CONTABILIDADE = '6aea2f6124c382c6f3581fa16bc7b1d16fb2f1c7d926ca80c573c337ad62d9ec';
 
     protected function setUp(): void
     {
@@ -95,6 +95,32 @@ class PromptPorDominioTest extends TestCase
         Http::assertSent(fn (Request $r) => str_contains($r['system'], 'clínica veterinária')
             && str_contains($r['system'], "Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):\nO catálogo não inclui perguntas de conhecimento geral nem orientação clínica")
             && stripos($r['system'], 'contabilidade') === false && ! str_contains($r['system'], 'conciliar_lancamentos_em_lote'));
+    }
+
+    /** Pendência 2 (RF04): dado obrigatório faltando não vira pergunta em texto; a tool é chamada e o card marca o campo. */
+    #[\PHPUnit\Framework\Attributes\DataProvider('dominios')]
+    public function test_dado_faltando_manda_chamar_a_tool_e_nao_perguntar_em_texto(string $papel, int $tenant): void
+    {
+        [$principal, $lembrete] = $this->sistemas($papel, $tenant, true);
+
+        $this->assertStringContainsString('chame a tool com o que tiver, sem inventar o que falta; o card marca o campo que falta', $principal);
+        foreach ([$principal, $lembrete] as $texto) {
+            $this->assertStringNotContainsString('pergunte', $texto);
+        }
+        $this->assertStringContainsString('chame a tool com o que tiver', $lembrete);
+        $this->assertStringContainsString('Nunca invente dados', $principal);
+    }
+
+    /** B1 (tarde 2): exemplos curtos do fluxo RF04 no prompt principal, nos dois domínios. */
+    #[\PHPUnit\Framework\Attributes\DataProvider('dominios')]
+    public function test_prompt_traz_exemplos_de_pedido_incompleto_que_chama_a_tool(string $papel, int $tenant): void
+    {
+        [$principal] = $this->sistemas($papel, $tenant, false);
+
+        $this->assertStringContainsString('Exemplos: "', $principal);
+        $this->assertStringContainsString('sem argumentos', $principal);
+        $this->assertStringContainsString('Nunca responda esses pedidos só com uma pergunta em texto', $principal);
+        $this->assertStringContainsString($papel === 'operador' ? 'chame criar_nota_fiscal só com o valor 1200' : 'chame criar_pet só com o nome Rex', $principal);
     }
 
     /** @return array<string, array{string, int}> */

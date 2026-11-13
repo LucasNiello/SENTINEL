@@ -20,3 +20,24 @@ Sessão automática de 13/11 (00:32 às 06:00, pc-talita, PHP 8.4.27). Registro 
 | 12 | D. D6 | sem definição no sentinel_clinica_vet.md: estacionar | estacionado (sem definição) |
 | 13 | E. D2: frase proposta em pendencias-lucas.md | frase registrada | estacionado (D2 sem definição; ver pendências nº 3) |
 | — | J. Comprovação (D4, D5, venda avulsa, M5-M7, D7, senha do root) | fora da lista desta noite | feito (`automacao/comprovacao.md`: 5 comprovados; D4, D5, M6 e M7 sem definição; histórico do memoria-claude não comprovado, acesso negado) |
+
+## Tarde de 13/11 (lab SENAI, 14:27 em diante, base 2cd4889, PHP 8.4.27)
+| Item | Status |
+|---|---|
+| B0: leva.md em `.claude/commands/`; base | feito (base não rodou por `.env` inválido; ver pendências A; suíte rodou com `.env.testing` + `APP_ENV=testing`) |
+| B1: pendência 2 (frase do prompt, RF04) | feito (autorizada); re-execução dos 5 pedidos PULADA, sem chave |
+| B1: pendência 3 (`tipo_autorizacao: 'estorno'`) | feito (autorizada) |
+| B2: PIN fora do log, contadores compartilhados, "setor clínica" | feito |
+| B2: demais menores das pendências 5 e 6 | só registrados |
+| B3: P-D1, P-D2, defeito 11, P-C9, P-C8, P-C6, P-C7, P-D3 | estacionados (sem definição escrita) |
+| D2, D6 | estacionados (sem definição) |
+Suíte final: 856/856.
+
+## Tarde 2 de 13/11 (lab SENAI, 15:38 em diante, PHP 8.4.27)
+| Item | Status |
+|---|---|
+| B1: exemplos de pedido incompleto no prompt (RF04), nos dois domínios | feito; bateria 14/16/18 = 3/3 (3 chamadas reais, total 131/200) |
+| B2: rate limit contado antes do `Hash::check` (`/supervisao/meu-pin`); estorno já contava | feito (sabotagem + reviewer opus, 2 passadas); login só registrado |
+| B3: dono não se marca supervisor | feito |
+| B4: CLAUDE.md, item "Provedor de IA" | feito (1 linha) |
+| 2ª leva (P-D1, P-D2, P-C6 a P-C9, P-D3, defeito 11), D2, D6 | estacionados (sem definição) |

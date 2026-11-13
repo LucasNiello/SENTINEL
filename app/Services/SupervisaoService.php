@@ -31,6 +31,12 @@ class SupervisaoService
             throw new RegraDeNegocioException('O setor do supervisor deve ser "clinica" ou "petshop".');
         }
 
+        // O dono autoriza estorno pela senha de login; marcá-lo supervisor criaria um "tem PIN" que nunca vale.
+        // Desmarcar um dono que já esteja marcado continua permitido ($setor null).
+        if ($setor !== null && $usuario->papel === 'dono') {
+            throw new RegraDeNegocioException('O dono não é marcado como supervisor: ele autoriza o estorno com a senha de login.');
+        }
+
         // Desmarcou ou trocou de setor: o PIN antigo é zerado (não volta a valer numa remarcação).
         if ($usuario->supervisor_setor !== $setor) {
             $usuario->forceFill(['supervisor_setor' => $setor, 'pin_autorizacao' => null])->save();

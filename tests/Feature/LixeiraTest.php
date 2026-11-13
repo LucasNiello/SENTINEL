@@ -189,7 +189,8 @@ class LixeiraTest extends TestCase
             ->assertOk()
             ->assertJsonPath('risco', 'escrita')
             ->assertJsonPath('formulario.titulo', "Restaurar cliente #{$cliente->id}")
-            ->assertJsonPath('formulario.reautenticar', true);
+            ->assertJsonPath('formulario.reautenticar', true)
+            ->assertJsonMissingPath('formulario.tipo_autorizacao');
         $token = $this->revisar($resposta->json('proposta'))->assertOk()->json('token');
 
         $this->confirmarComSenha($token)

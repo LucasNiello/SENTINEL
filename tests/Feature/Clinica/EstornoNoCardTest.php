@@ -165,7 +165,7 @@ class EstornoNoCardTest extends TestCase
         $doPetshop = $this->supervisor('petshop');
 
         $this->estornarComCard($cobranca, ['email_admin' => $doPetshop->email, 'senha_admin' => self::PIN])
-            ->assertStatus(422)->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'supervisor do setor clinica'));
+            ->assertStatus(422)->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'supervisor do setor clínica'));
 
         $this->assertSame('paga', $cobranca->fresh()->status);
     }
@@ -184,12 +184,50 @@ class EstornoNoCardTest extends TestCase
         $this->assertSame('paga', $cobranca->fresh()->status);
     }
 
+    /** B2 (reviewer H, menor 7): errar na lixeira e no estorno gasta os MESMOS limites, nos dois sentidos. */
+    public function test_contadores_sao_compartilhados_entre_o_estorno_e_a_lixeira(): void
+    {
+        $dono = $this->usuarioClinica('dono');
+        $reaut = app(ReautenticacaoAdmin::class);
+
+        for ($i = 0; $i < ReautenticacaoAdmin::LIMITE_POR_ADMIN; $i++) {
+            $this->assertSame(['falha' => 'invalido'], $reaut->autorizar($dono->email, 'errada'));
+        }
+        // Os 5 erros foram da lixeira; o estorno, com a senha certa, já encontra o limite estourado.
+        $this->assertSame(['falha' => 'limite'], $reaut->autorizarEstorno($dono->email, 'password'));
+
+        \Illuminate\Support\Facades\Cache::flush();
+
+        for ($i = 0; $i < ReautenticacaoAdmin::LIMITE_POR_ADMIN; $i++) {
+            $this->assertSame(['falha' => 'invalido'], $reaut->autorizarEstorno($dono->email, 'errada'));
+        }
+        // Agora o inverso: erros no estorno travam a lixeira.
+        $this->assertSame(['falha' => 'limite'], $reaut->autorizar($dono->email, 'password'));
+    }
+
+    /** B2 (reviewer H, menor 5): o PIN digitado no card não aparece em nenhuma chamada de log, no acerto nem no erro. */
+    public function test_pin_nao_vai_para_o_log_nem_no_acerto_nem_no_erro(): void
+    {
+        \Illuminate\Support\Facades\Log::spy();
+        $supervisor = $this->supervisor();
+
+        $this->estornarComCard($this->paga(), ['email_admin' => $supervisor->email, 'senha_admin' => '000000'])->assertStatus(403);
+        $this->estornarComCard($this->paga(), ['email_admin' => $supervisor->email, 'senha_admin' => self::PIN])->assertOk();
+
+        $contemPin = fn ($v) => str_contains((string) json_encode($v), self::PIN) || str_contains((string) json_encode($v), '000000');
+        foreach (['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'] as $nivel) {
+            \Illuminate\Support\Facades\Log::shouldNotHaveReceived($nivel, [\Mockery::on($contemPin)]);
+            \Illuminate\Support\Facades\Log::shouldNotHaveReceived($nivel, [\Mockery::any(), \Mockery::on($contemPin)]);
+            \Illuminate\Support\Facades\Log::shouldNotHaveReceived($nivel, [\Mockery::on($contemPin), \Mockery::any()]);
+        }
+    }
+
     public function test_so_quem_pode_pedir_propoe_e_o_card_pede_a_autorizacao_sem_campo_de_pin(): void
     {
         $cobranca = $this->paga();
 
         $resposta = $this->comando('estornar_cobranca', ['id' => $cobranca->id, 'motivo' => 'Erro.'])->assertOk()
-            ->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('formulario.reautenticar', true);
+            ->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('formulario.reautenticar', true)->assertJsonPath('formulario.tipo_autorizacao', 'estorno');
         $this->assertSame(['motivo'], array_column($resposta->json('formulario.campos'), 'nome'));
 
         $this->logarComo('vendedor', self::T);

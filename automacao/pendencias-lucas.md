@@ -1,3 +1,16 @@
+# Atualização da tarde 2 de 13/11 — leia primeiro
+- **Resolvidas:** pendência 1 (CLAUDE.md "Provedor de IA" trocado, só esse item; falta conferir Documentação 1.2 e Notion), pendência 2 (cadastro: reforço do prompt, bateria 14/16/18 = 3/3), nº 6 itens 5 (dono não marca supervisor) e 7 (PIN conta antes de conferir; o estorno já contava).
+- **Segue aberto, só registrado:** o login (`AutenticacaoController`) tem a mesma fraqueza do item 7: o throttle confere antes de contar, e rajadas em paralelo passam do teto de 5. Proposta, se quiser: `RateLimiter::hit` antes do `Auth::attempt`, como no `ReautenticacaoAdmin`. Também abertos: nº 5 item 4 e nº 6 itens 4 e 6.
+- **Bateria:** os pedidos 12 e 17 não foram reexecutados nesta tarde (limite de 3 chamadas); 14/16/18 foram a 3/3.
+
+# Atualização da tarde de 13/11 (lab SENAI) — leia primeiro
+- **A. `.env` inválido (linha 95, `ANTHROPIC_API_KEY` com o texto-modelo, espaços sem aspas).** O `php artisan` não sobe com ele. Corrigir: chave real entre aspas, ou deixar `ANTHROPIC_API_KEY=`. Sem isso a bateria não roda. Criei `.env.testing` (só um `APP_KEY` descartável, ignorado pelo git) para a suíte rodar com `APP_ENV=testing`; pode apagar depois de consertar o `.env`.
+- **B. Nº 2 abaixo (cadastro 4/10): a frase foi trocada (decisão autorizada)** no principal e nos lembretes das duas áreas. **Falta rodar** `php artisan sentinel:bateria --somente=12,14,16,17,18` (5 chamadas, total hoje 123/200) e comparar com o 4/10. Risco a olhar: o `required` do esquema das tools pode levar o modelo a inventar valor; se acontecer, tirar o `required` das tools de escrita.
+- **C. Nº 4 abaixo (estorno): feito.** O card do estorno agora traz `formulario.tipo_autorizacao: 'estorno'` (junto de `reautenticar: true`). **Nota para o Matheus:** quando `tipo_autorizacao === 'estorno'`, trocar o rótulo para "Supervisor do setor ou dono: e-mail e PIN (o dono usa a senha)". A `bancada.blade.php` ainda não lê a chave.
+- **D. Segunda leva (P-D1, P-D2, defeito 11, P-C9, P-C8, P-C6, P-C7, P-D3): sem definição escrita em lugar nenhum**, e o `sentinel_clinica_vet.md` não está neste checkout. Estacionados. Para destravar: uma linha por item, ou o arquivo no repositório. D2 e D6 continuam sem definição.
+- **E. Menores feitos (nº 5, itens 5, 7 e 9):** PIN fora do log, contadores compartilhados e "setor clínica" com acento. Seguem só registrados: nº 5 item 4 e nº 6 itens 4 a 7.
+- **F. `.claude/commands/leva.md` criado** (nº 8 do relatório da madrugada resolvido).
+
 # Pendências para o Lucas — sessão de 13/11/2026 (da mais para a menos importante)
 
 (As de 12/11 continuam abaixo, sem alteração. A nº 1 de 12/11, o PHP 8.4, foi resolvida na Etapa 0 de 13/11.)

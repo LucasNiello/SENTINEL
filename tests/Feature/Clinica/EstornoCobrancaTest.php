@@ -155,8 +155,8 @@ class EstornoCobrancaTest extends TestCase
         $cobranca = $this->paga();
         $recepcao = $this->usuarioClinica('recepcao');
 
-        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->supervisor('atendente', 'petshop')), 'Só o dono ou um supervisor do setor clinica');
-        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->usuarioClinica('veterinario')), 'Só o dono ou um supervisor do setor clinica');
+        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->supervisor('atendente', 'petshop')), 'Só o dono ou um supervisor do setor clínica');
+        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->usuarioClinica('veterinario')), 'Só o dono ou um supervisor do setor clínica');
         $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->supervisor('veterinario', 'clinica', comPin: false)), 'ainda não definiu o PIN');
 
         $deFora = $this->supervisor('veterinario', 'clinica', tenant: self::OUTRO_TENANT);

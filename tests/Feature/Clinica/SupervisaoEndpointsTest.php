@@ -91,6 +91,30 @@ class SupervisaoEndpointsTest extends TestCase
         $this->assertNotContains($deFora->id, $ids);
     }
 
+    /** B3 (tarde 2): o dono não se marca supervisor (nem outro dono); desmarcar um dono já marcado continua valendo. */
+    public function test_dono_nao_pode_ser_marcado_supervisor_mas_pode_ser_desmarcado(): void
+    {
+        $dono = $this->logarComo('dono', self::T);
+        $outroDono = $this->usuarioClinica('dono');
+
+        foreach ([$dono, $outroDono] as $alvo) {
+            foreach (['clinica', 'petshop'] as $setor) {
+                $this->postJson("/supervisao/supervisores/{$alvo->id}", ['setor' => $setor])->assertStatus(422)
+                    ->assertJsonPath('codigo', 'AI_BUSINESS_RULE')->assertJsonPath('categoria', 'business_rule')
+                    ->assertJsonPath('tipo', 'erro')->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'dono'));
+            }
+            $this->assertNull($alvo->fresh()->supervisor_setor);
+        }
+        $recusas = AuditLog::query()->where('tool', 'marcar_supervisor')->get();
+        $this->assertSame([4, ['recusado'], [$dono->id, $outroDono->id]],
+            [$recusas->count(), $recusas->pluck('resultado')->unique()->values()->all(), $recusas->pluck('entidade_id')->unique()->sort()->values()->all()]);
+
+        // Um dono que já esteja marcado (dado antigo) pode ser desmarcado.
+        $outroDono->forceFill(['supervisor_setor' => 'clinica', 'pin_autorizacao' => Hash::make(self::PIN)])->save();
+        $this->postJson("/supervisao/supervisores/{$outroDono->id}", ['setor' => null])->assertOk();
+        $this->assertSame([null, null], [$outroDono->fresh()->supervisor_setor, $outroDono->fresh()->pin_autorizacao]);
+    }
+
     public function test_setor_invalido_e_recusado(): void
     {
         $vet = $this->usuarioClinica('veterinario');
@@ -159,6 +183,7 @@ class SupervisaoEndpointsTest extends TestCase
         }
 
         $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => 'password'])->assertStatus(429);
+        $this->assertSame(5, \Illuminate\Support\Facades\RateLimiter::attempts('pin:'.$vet->id), 'o pedido barrado devolve a tentativa');
         $this->travel(9)->minutes();
         $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => 'password'])->assertStatus(429);
         $this->assertTrue(Hash::check(self::PIN, $vet->fresh()->pin_autorizacao));
@@ -166,6 +191,35 @@ class SupervisaoEndpointsTest extends TestCase
         // O teto é por usuário: outro supervisor não é barrado pelas tentativas do primeiro.
         $this->actingAs($this->supervisorComPin());
         $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => 'password'])->assertOk();
+    }
+
+    /** B2 (tarde 2): a tentativa já está contada quando a senha é conferida (rajadas em paralelo não passam do teto). */
+    public function test_tentativa_do_pin_e_contada_antes_de_conferir_a_senha(): void
+    {
+        $vet = $this->supervisorComPin();
+        $this->actingAs($vet);
+        $visto = null;
+
+        Hash::shouldReceive('check')->once()->andReturnUsing(function () use (&$visto, $vet) {
+            $visto = \Illuminate\Support\Facades\RateLimiter::attempts('pin:'.$vet->id);
+
+            return false;
+        });
+
+        $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => 'errada'])->assertStatus(403);
+
+        $this->assertSame(1, $visto, 'a tentativa precisa estar contada ANTES do Hash::check');
+        $this->assertSame(1, \Illuminate\Support\Facades\RateLimiter::attempts('pin:'.$vet->id), 'erro continua contando');
+    }
+
+    public function test_acerto_devolve_a_tentativa_do_pin(): void
+    {
+        $vet = $this->supervisorComPin();
+        $this->actingAs($vet);
+
+        $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => 'password'])->assertOk();
+
+        $this->assertSame(0, \Illuminate\Support\Facades\RateLimiter::attempts('pin:'.$vet->id));
     }
 
     public function test_senha_de_login_com_espacos_nas_pontas_nao_e_aparada(): void

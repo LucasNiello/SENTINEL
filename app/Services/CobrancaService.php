@@ -356,7 +356,7 @@ class CobrancaService
             $solicitante = $this->doTenant(User::class, $solicitanteId, $tenantId, 'quem pediu o estorno');
             $dono = $solicitante->papel === 'dono';
             if (! $dono && $solicitante->papel !== self::SOLICITANTE_DO_ESTORNO[$cobranca->setor]) {
-                throw new RegraDeNegocioException('O estorno de uma cobrança do setor '.$cobranca->setor.' é pedido pela '
+                throw new RegraDeNegocioException('O estorno de uma cobrança do setor '.($cobranca->setor === 'clinica' ? 'clínica' : $cobranca->setor).' é pedido pela '
                     .($cobranca->setor === 'clinica' ? 'recepção' : 'equipe de atendimento do petshop').' ou pelo dono.');
             }
 
@@ -370,7 +370,7 @@ class CobrancaService
             }
             if ($autorizador->papel !== 'dono') {
                 if ($autorizador->supervisor_setor !== $cobranca->setor) {
-                    throw new RegraDeNegocioException('Só o dono ou um supervisor do setor '.$cobranca->setor.' autoriza este estorno.');
+                    throw new RegraDeNegocioException('Só o dono ou um supervisor do setor '.($cobranca->setor === 'clinica' ? 'clínica' : $cobranca->setor).' autoriza este estorno.');
                 }
                 if ($autorizador->pin_autorizacao === null) {
                     throw new RegraDeNegocioException('Este supervisor ainda não definiu o PIN de autorização: não pode autorizar.');

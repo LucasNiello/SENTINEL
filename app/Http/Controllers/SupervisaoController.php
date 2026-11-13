@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -24,6 +25,11 @@ use Illuminate\Support\Facades\Validator;
  */
 class SupervisaoController extends Controller
 {
+    /** Tentativas de conferir a senha de login ao definir o PIN, por usuário, a cada JANELA_PIN_S. */
+    private const LIMITE_PIN = 5;
+
+    private const JANELA_PIN_S = 600;
+
     public function __construct(
         private ContextoUsuario $contexto,
         private SupervisaoService $supervisao,
@@ -96,15 +102,31 @@ class SupervisaoController extends Controller
         }
         $dados = $validador->validated();
 
-        // Quem pegou a sessão aberta não troca o PIN sem a senha (e o throttle "pin" limita as tentativas).
+        // Quem pegou a sessão aberta não troca o PIN sem a senha. A tentativa conta ANTES de conferir (incremento
+        // atômico, como no ReautenticacaoAdmin): rajadas em paralelo não passam do teto. Barrada ou acertada, devolve.
+        $chave = 'pin:'.$usuario->id;
+        if (RateLimiter::hit($chave, self::JANELA_PIN_S) > self::LIMITE_PIN) {
+            $this->devolverTentativa($chave);
+
+            return $this->erro(429, 'AI_RATE_LIMIT', 'rate_limit', 'Muitas tentativas. Aguarde alguns minutos.');
+        }
+
         if (! Hash::check($dados['senha_atual'], (string) $usuario->password)) {
             $this->auditar('definir_pin', $usuario->id, [], 'negado', 'Senha de login não confere.', false);
 
             return $this->erro(403, 'AI_REAUTH_FAILED', 'authorization_error', 'A senha de login não confere.');
         }
+        $this->devolverTentativa($chave);
 
         return $this->executar('definir_pin', $usuario->id, [], 'PIN definido.',
             fn () => $this->supervisao->definirProprioPin($usuario->id, $dados['pin'], $this->contexto->tenantId()));
+    }
+
+    private function devolverTentativa(string $chave): void
+    {
+        if (RateLimiter::attempts($chave) > 0) {
+            RateLimiter::decrement($chave, self::JANELA_PIN_S);
+        }
     }
 
     /** Só na clínica (fora dela, 404) e, nas rotas do dono, só o dono (403 auditado). */

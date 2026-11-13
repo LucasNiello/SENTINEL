@@ -70,13 +70,8 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
-        // Item I: definir o próprio PIN confere a senha de login. Teto curto, por usuário, contra quem pegou a sessão aberta.
-        RateLimiter::for('pin', function (Request $request) {
-            return Limit::perMinutes(10, 5)->by('pin:'.$request->user()->id)->response(
-                fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
-                    'http_status' => 429, 'mensagem' => 'Muitas tentativas. Aguarde alguns minutos.'], 429, $headers),
-            );
-        });
+        // (O limiter 'agente-sem-ia' também cobre as rotas /supervisao/*, no mesmo balde por usuário.)
+        // Item I: o teto de 5 tentativas da senha ao definir o PIN é contado no SupervisaoController, antes do Hash::check.
 
         // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
         // volta à sessão como "valor antigo" num redirecionamento de erro de validação. Item I: idem para

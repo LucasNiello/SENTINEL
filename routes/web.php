@@ -53,6 +53,6 @@ Route::middleware('auth')->group(function () {
         Route::get('/supervisao/supervisores', [SupervisaoController::class, 'listar'])->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/supervisores/{id}/zerar-pin', [SupervisaoController::class, 'zerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
-        Route::post('/supervisao/meu-pin', [SupervisaoController::class, 'definirMeuPin'])->middleware('throttle:pin');
+        Route::post('/supervisao/meu-pin', [SupervisaoController::class, 'definirMeuPin'])->middleware('throttle:agente-sem-ia');
     });
 });
