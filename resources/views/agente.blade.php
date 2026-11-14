@@ -76,11 +76,13 @@
             if (ativo) anunciar('consultando');
         }
 
-        // P-B5: "Pedir ao agente" numa mensagem da caixa de entrada manda o texto dela como um pedido normal.
+        // P-B5: "Pedir ao agente" numa mensagem da caixa de entrada põe o texto dela (com o tutor e os pets) no campo do
+        // pedido, sem enviar: o usuário vê o que vai para o agente, ajusta se quiser e envia (pendência "sem prévia", 13/11).
         window.pedirAoAgente = (texto) => {
             if (campoMensagem.disabled) return;
             campoMensagem.value = String(texto).slice(0, 1000);
-            form.requestSubmit();
+            campoMensagem.focus();
+            campoMensagem.setSelectionRange(campoMensagem.value.length, campoMensagem.value.length);
         };
 
         form.addEventListener('submit', async (e) => {

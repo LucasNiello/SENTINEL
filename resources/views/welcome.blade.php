@@ -73,12 +73,12 @@
                     <div class="chapter-intro">
                     <p class="eyebrow"><span class="chapter-number">02 /</span> Confirmação humana</p>
                     <h2 id="confirmacao-title">Nada é gravado<br><em>sem você.</em></h2>
-                    <p class="lead">Antes de qualquer cadastro, o Sentinel mostra o que vai fazer. A última palavra é sua.</p>
+                    <p class="lead">Antes de qualquer gravação, o Sentinel mostra o que vai fazer. Nas ações que apagam, cancelam ou estornam, você segura o botão para confirmar.</p>
                     </div>
                     <div class="demo confirmation" data-confirmation>
                         <div class="demo-heading"><span>REVISAR AÇÃO</span><span>Dados de demonstração</span></div>
                         <div class="confirmation-body">
-                            <dl><div class="confirmation-operation"><dt>Ação</dt><dd>Cadastrar cliente</dd></div><div><dt>Nome</dt><dd>Mercado Bom Preço</dd></div><div><dt>CNPJ</dt><dd class="mono">23.456.789/0001-10</dd></div></dl>
+                            <dl><div class="confirmation-operation"><dt>Ação</dt><dd>Excluir cliente (vai para a lixeira)</dd></div><div><dt>Nome</dt><dd>Mercado Bom Preço</dd></div><div><dt>CNPJ</dt><dd class="mono">23.456.789/0001-10</dd></div></dl>
                             <div class="confirmation-actions" data-hold-controls hidden><button class="hold-button" type="button" data-hold aria-describedby="hold-instructions hold-status"><span class="hold-fill" aria-hidden="true"></span><span class="hold-label">Segure para confirmar</span><span aria-hidden="true">↗</span></button><button class="cancel-button" type="button" data-cancel>Cancelar</button></div>
                             <p class="demo-note" id="hold-instructions">Segure por 1 segundo com mouse, toque, Espaço ou Enter. Esta demonstração não grava dados.</p>
                             <p class="hold-status" id="hold-status" role="status" aria-live="polite" aria-atomic="true">Aguardando sua confirmação.</p>

@@ -254,14 +254,14 @@ class AuditoriaConsultaTest extends TestCase
     {
         $this->prepararAgente();
         $this->propor(['nome' => 'Esquecido'], 'criar_cliente');
-        $this->travel(ConfirmacoesPendentes::VALIDADE_MAXIMA_S + 1)->seconds();
+        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
         $this->getJson('/auditoria/registros')->assertOk();
         $this->assertSame('criar_cliente', AuditLog::query()->where('resultado', 'expirado')->sole()->tool);
 
         // O detalhe também varre.
         $this->propor(['nome' => 'Outro esquecido'], 'criar_cliente');
-        $this->travel(ConfirmacoesPendentes::VALIDADE_MAXIMA_S + 1)->seconds();
+        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
         $this->getJson('/auditoria/registros/999999')->assertNotFound();
         $this->assertSame(2, AuditLog::query()->where('resultado', 'expirado')->count());
     }
@@ -289,7 +289,7 @@ class AuditoriaConsultaTest extends TestCase
 
         // Expirado pelo /agente/confirmar fora do prazo.
         $token = $this->propor(['id' => $cliente->id, 'email' => 'b@exemplo.com'], 'atualizar_cliente');
-        $this->travel(ConfirmacoesPendentes::VALIDADE_MAXIMA_S + 1)->seconds();
+        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
         $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
 
         // Expirado pela varredura (rascunho esquecido além dos 5 min), aberto sem IA.

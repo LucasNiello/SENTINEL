@@ -239,4 +239,16 @@ class EstornoNoCardTest extends TestCase
         $this->comando('estornar_cobranca', ['id' => $aberta->id, 'motivo' => 'Erro.'])->assertStatus(422)
             ->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'Não encontrei a cobrança paga'));
     }
+
+    public function test_a_tela_troca_o_rotulo_da_autorizacao_quando_o_card_e_de_estorno(): void
+    {
+        // A bancada lê formulario.tipo_autorizacao: no estorno, supervisor (PIN) ou dono (senha); sem a chave, o texto da lixeira.
+        $this->get('/agente')->assertOk()
+            ->assertSee("formulario.tipo_autorizacao === 'estorno'", false)
+            ->assertSee('Supervisor do setor ou dono: e-mail e PIN (o dono usa a senha).', false)
+            ->assertSee('PIN do supervisor (o dono usa a senha)', false)
+            ->assertSee('Autorização de um administrador', false)
+            // O campo do PIN continua de senha e sem preenchimento automático.
+            ->assertSee('class="admin-senha" autocomplete="new-password"', false);
+    }
 }

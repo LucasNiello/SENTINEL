@@ -43,8 +43,10 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
      escolhido por tenant em `ContextoUsuario::dominio()`.
   2. Confirmação humana: o agente só devolve `confirmacao_pendente`; a escrita
      roda no `/agente/confirmar`, com o token de sessão do `AgenteController`:
-     espera mínima de 2 s; validade de 10 s na interface; o servidor aceita até
-     12 s (VALIDADE_MAXIMA_S); consumo único (já implementados). Consumo
+     sem janela de tempo (decisão B do Lucas, 13/11): o token vale até o fim dos
+     5 min da proposta (PRAZO_RASCUNHO_S); consumo único; executa só os valores
+     revisados da sessão. Segurar 2 s é só visual, nas destrutivas
+     (`AiAgentService::exigeSegurar`). Consumo
      atômico do token (vale a partir do Lote 2).
   3. Auditoria real em `audit_logs` (o `executarTool()` grava na mesma
      transação da escrita).

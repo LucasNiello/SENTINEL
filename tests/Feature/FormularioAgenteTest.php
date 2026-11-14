@@ -479,7 +479,7 @@ class FormularioAgenteTest extends TestCase
     {
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
         $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
-        $this->travel(13)->seconds();
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds(); // decisão B: vence com a proposta
 
         $this->postJson('/agente/editar', ['token' => $token])
             ->assertStatus(422)
@@ -487,7 +487,7 @@ class FormularioAgenteTest extends TestCase
 
         $outra = $this->rascunho(['nome' => 'Outra'], 'criar_cliente');
         $this->revisar($outra, ['nome' => 'Outra'])->assertOk();
-        $this->travel(13)->seconds();
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
         $this->revisar($outra, ['nome' => 'Outra'])
             ->assertStatus(422)
             ->assertJsonPath('codigo', 'AI_PROPOSAL_EXPIRED');
@@ -558,7 +558,7 @@ class FormularioAgenteTest extends TestCase
         // Esquecido no segurar (a varredura audita como expirado).
         $proposta = $this->rascunho(['nome' => 'Outra'], 'criar_cliente');
         $this->revisar($proposta, ['nome' => 'Também editado'])->assertOk();
-        $this->travel(13)->seconds();
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds(); // decisão B: vence com a proposta
         $this->get('/agente')->assertOk();
 
         $desfechos = AuditLog::query()->whereIn('resultado', ['cancelado', 'expirado'])->orderBy('id')->get();
@@ -715,7 +715,7 @@ class FormularioAgenteTest extends TestCase
 
     public function test_historico_esconde_o_valor_do_salario_e_nao_mexe_em_outros_valores(): void
     {
-        $this->respostaFoundry = ['choices' => [['message' => ['role' => 'assistant', 'content' => 'Certo.']]]];
+        $this->respostaIa = ['choices' => [['message' => ['role' => 'assistant', 'content' => 'Certo.']]]];
 
         $casos = [
             'cadastre a Ana com salário de R$ 4.567,89' => 'cadastre a Ana com salário de [valor omitido]',

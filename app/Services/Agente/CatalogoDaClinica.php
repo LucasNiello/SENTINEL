@@ -43,6 +43,11 @@ trait CatalogoDaClinica
 
     private const PAPEIS_DO_DONO = ['dono'];
 
+    /** Caixa de entrada: quantos pets do tutor vão no pedido ao agente e o limite do campo do chat (AgenteController). */
+    private const PETS_NO_PEDIDO = 5;
+
+    private const LIMITE_DO_PEDIDO = 1000;
+
     /** @return array<int, array<string, mixed>> */
     private function toolsDaClinica(): array
     {
@@ -454,17 +459,21 @@ trait CatalogoDaClinica
                 papeis: self::PAPEIS_EQUIPE,
                 propriedades: ['status' => ['type' => 'string', 'enum' => Mensagem::STATUS]],
                 obrigatorios: [],
-                executar: fn (array $a) => $mensagens->buscarPorFiltro($a['status'] ?? null, $a['tenant_id'])
-                    ->map(fn (Mensagem $m) => [
+                executar: function (array $a) use ($mensagens): array {
+                    $lista = $mensagens->buscarPorFiltro($a['status'] ?? null, $a['tenant_id']);
+                    $pets = $this->petsDosTutores($lista, (int) $a['tenant_id']);
+
+                    return $lista->map(fn (Mensagem $m) => [
                         'id' => (int) $m->id,
                         'de' => $m->getAttribute('tutor') ?? $m->remetente ?? '—',
                         'mensagem' => $m->texto,
                         'recebida_em' => $m->created_at?->format('d/m/Y H:i'),
                         'status' => $m->status,
-                        // P-B5: o botão "Pedir ao agente" manda este texto como um pedido normal (com Revisar e segurar).
-                        ...($m->status === 'nova' ? ['pedido' => $m->texto] : []),
+                        // P-B5: o botão "Pedir ao agente" manda este texto (com o tutor e os pets) como um pedido normal (com Revisar e segurar).
+                        ...($m->status === 'nova' ? ['pedido' => $this->pedidoDaMensagem($m, $pets)] : []),
                         ...($m->status === 'nova' && $this->podeEditar('marcar_mensagem_tratada') ? ['acao' => ['tool' => 'marcar_mensagem_tratada', 'rotulo' => 'Marcar como tratada']] : []),
-                    ])->all(),
+                    ])->all();
+                },
                 mensagemErro: 'Não consegui consultar as mensagens agora. Tente novamente.',
                 colunas: ['id', 'de', 'mensagem', 'recebida_em', 'status'],
             ),
@@ -497,6 +506,36 @@ trait CatalogoDaClinica
                 },
             ),
         ];
+    }
+
+    /** Até PETS_NO_PEDIDO pets (id e nome) de cada tutor das mensagens novas, só do tenant, numa consulta só. */
+    private function petsDosTutores(\Illuminate\Support\Collection $mensagens, int $tenantId): array
+    {
+        $tutores = $mensagens->where('status', 'nova')->pluck('tutor_id')->filter()->unique()->values()->all();
+
+        return $tutores === [] ? [] : Pet::query()->where('tenant_id', $tenantId)->whereIn('tutor_id', $tutores)
+            ->orderBy('nome')->orderBy('id')->get(['id', 'nome', 'tutor_id'])->groupBy('tutor_id')
+            ->map(fn ($pets) => $pets->take(self::PETS_NO_PEDIDO)->map(fn (Pet $p) => ['id' => (int) $p->id, 'nome' => (string) $p->nome])->all())->all();
+    }
+
+    /**
+     * Caixa de entrada → pedido ao agente: o texto da mensagem com o contexto que a IA não tem (o número do tutor e os
+     * pets dele, com o número de cada um), para o card de agendamento já vir com o pet. O nome e o telefone de quem
+     * escreveu não vão: os números bastam, e o card mostra os nomes. Acima do limite do chat, vai só o texto.
+     */
+    private function pedidoDaMensagem(Mensagem $mensagem, array $petsPorTutor): string
+    {
+        $tutorId = $mensagem->tutor_id === null ? null : (int) $mensagem->tutor_id;
+        $pets = $tutorId === null ? [] : ($petsPorTutor[$tutorId] ?? []);
+        $contexto = match (true) {
+            $tutorId === null => 'remetente sem cadastro',
+            $pets === [] => 'tutor #'.$tutorId.', sem pet cadastrado',
+            default => 'tutor #'.$tutorId.'; pets: '.implode(', ', array_map(fn (array $p) => $p['nome'].' = pet #'.$p['id'], $pets)),
+        };
+        // O texto vai como string JSON (aspas e quebras escapadas): quem escreveu não fecha a aspa para forjar o contexto.
+        $pedido = 'Mensagem da caixa de entrada ('.$contexto.'): '.json_encode((string) $mensagem->texto, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+
+        return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : (string) $mensagem->texto;
     }
 
     /** O agendamento no card: pet, serviço, profissional, horário e situação (só leitura, do tenant). */

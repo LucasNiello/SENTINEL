@@ -53,7 +53,7 @@ class RoteamentoIntencaoTest extends TestCase
         $this->assertEmpty(session('confirmacoes', []));
     }
 
-    public function test_negativa_independe_de_azure_configurado_e_nao_revela_outro_tenant(): void
+    public function test_negativa_independe_de_ia_configurada_e_nao_revela_outro_tenant(): void
     {
         $this->logarComo('operador');
         config(['services.anthropic.api_key' => '']);
@@ -63,12 +63,12 @@ class RoteamentoIntencaoTest extends TestCase
         $this->assertDatabaseHas('clientes', ['id' => $cliente->id, 'tenant_id' => 2, 'deleted_at' => null]);
     }
 
-    public static function finaisAzure(): array
+    public static function finaisDaIa(): array
     {
         return [['tool_calls'], ['stop']];
     }
 
-    #[DataProvider('finaisAzure')]
+    #[DataProvider('finaisDaIa')]
     public function test_admin_recebe_apenas_a_tool_de_exclusao_e_propoe_sem_executar(string $fim): void
     {
         $this->logarComo('admin');

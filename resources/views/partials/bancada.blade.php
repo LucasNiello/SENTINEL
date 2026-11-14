@@ -1,4 +1,4 @@
-{{-- Bancada compartilhada (B3): estilos, popup e o JS das tabelas e do card de confirmação (Revisar → segurar).
+{{-- Bancada compartilhada (B3): estilos, popup e o JS das tabelas e do card de confirmação (Revisar → Confirmar; segurar só nas destrutivas).
      Usada pelas telas Agente, Cadastros e Lixeira. Cada tela tem o próprio #historico e marca com data-foco
      o elemento que recebe o foco quando um popup de erro é fechado. --}}
 
@@ -16,14 +16,13 @@
         const overlayPopup = document.getElementById('overlay-popup');
         const popup = document.getElementById('popup');
 
+        // Decisão B (13/11): segurar 2 s é só gesto visual, nas ações destrutivas (o /agente/revisar manda "segurar").
+        // As demais escritas confirmam com um clique. O servidor não tem mais janela de 2 a 12 s.
         const DURACAO_HOLD_MS = 2000;
-        const DURACAO_IDLE_MS = 10000;
-        // Até 12 s o servidor ainda aceita a confirmação (VALIDADE_MAXIMA_S); só depois disso encerrar é "expirado".
-        const VALIDADE_SERVIDOR_MS = 12000;
-        // Prazo do rascunho (formulário em edição), contado desde a proposta (PRAZO_RASCUNHO_S no servidor).
+        // Clique no Confirmar logo depois de ele aparecer (no lugar do Revisar) é ignorado: evita duplo clique virar gravação.
+        const ESPERA_CLIQUE_MS = 400;
+        // Prazo da proposta (rascunho e token dela), contado desde a proposta (PRAZO_RASCUNHO_S no servidor).
         const PRAZO_RASCUNHO_MS = 300000;
-        // Segurar só começa se ainda couber o hold (2 s) + margem antes do fim da janela: o servidor aceita até 12 s.
-        const MINIMO_PARA_SEGURAR_MS = 2500;
         const RISCOS = ['leitura', 'escrita', 'exclusao'];
 
         // Limpa antes de gravar: o mesmo texto repetido (ex.: dois Editar seguidos) não muda o DOM
@@ -413,7 +412,8 @@
 
         // RF04 + Bloco 2b: o card de confirmação É o formulário, em duas etapas.
         // 1) Rascunho: o humano edita e clica Revisar; o servidor valida sem gravar. Prazo de 5 min desde a proposta.
-        // 2) Revisada: campos travados, sai o token de segurar e correm os prazos de sempre (10 s na tela, 12 s no servidor).
+        // 2) Revisada: campos travados e sai o token de confirmação (vale até o fim dos 5 min da proposta). Confirmar é
+        //    um clique; nas ações destrutivas ("segurar" na resposta do Revisar), é segurar 2 s.
         //    "Editar" volta à etapa 1 e o token morre; o prazo de 5 min não reinicia.
         function renderizarConfirmacaoPendente(dados) {
             let formulario = dados.formulario || { titulo: 'Confirmar a ação', campos: [] };
@@ -436,8 +436,8 @@
                 <form class="card-form" novalidate>
                     <fieldset class="card-campos"></fieldset>
                     <fieldset class="card-autorizacao" hidden>
-                        <legend>Autorização de um administrador</legend>
-                        <p class="campo-info">Um administrador digita o e-mail e a senha dele aqui. A senha só vai junto com a confirmação e não fica guardada.</p>
+                        <legend class="autorizacao-titulo">Autorização de um administrador</legend>
+                        <p class="campo-info autorizacao-info">Um administrador digita o e-mail e a senha dele aqui. A senha só vai junto com a confirmação e não fica guardada.</p>
                         <div class="campo">
                             <label class="rotulo-admin-email">E-mail do administrador</label>
                             <input type="email" class="admin-email" autocomplete="off" maxlength="255">
@@ -479,6 +479,29 @@
             card.querySelector('.rotulo-admin-email').htmlFor = adminEmail.id;
             card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
             autorizacao.hidden = !formulario.reautenticar;
+            // Item H (estorno): quem autoriza é o supervisor do setor, com o PIN, ou o dono, com a senha de login.
+            // A chave vem do servidor (formulario.tipo_autorizacao); sem ela, o texto é o da lixeira (administrador).
+            const textosAutorizacao = formulario.tipo_autorizacao === 'estorno' ? {
+                titulo: 'Autorização do supervisor do setor ou do dono',
+                info: 'Supervisor do setor ou dono: e-mail e PIN (o dono usa a senha). O PIN só vai junto com a confirmação e não fica guardado.',
+                email: 'E-mail de quem autoriza',
+                segredo: 'PIN do supervisor (o dono usa a senha)',
+                etapa: 'Confira os dados, chame o supervisor do setor (PIN) ou o dono (senha) para digitar aqui e clique em Revisar.',
+                apagado: 'O PIN ou a senha de quem autoriza foi apagado. Digite o e-mail e o PIN (ou a senha do dono) de novo antes de Revisar.',
+                falta: 'Informe o e-mail e o PIN do supervisor do setor (ou o e-mail e a senha do dono).',
+            } : {
+                titulo: 'Autorização de um administrador',
+                info: 'Um administrador digita o e-mail e a senha dele aqui. A senha só vai junto com a confirmação e não fica guardada.',
+                email: 'E-mail do administrador',
+                segredo: 'Senha do administrador',
+                etapa: 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.',
+                apagado: 'A senha do administrador foi apagada. Digite o e-mail e a senha de novo antes de Revisar.',
+                falta: 'Informe o e-mail e a senha de um administrador.',
+            };
+            card.querySelector('.autorizacao-titulo').textContent = textosAutorizacao.titulo;
+            card.querySelector('.autorizacao-info').textContent = textosAutorizacao.info;
+            card.querySelector('.rotulo-admin-email').textContent = textosAutorizacao.email;
+            card.querySelector('.rotulo-admin-senha').textContent = textosAutorizacao.segredo;
             const resumoErro = card.querySelector('.card-resumo-erro');
             const avisos = card.querySelector('.card-avisos');
             const etapa = card.querySelector('.card-etapa');
@@ -569,7 +592,7 @@
             // Função (não const): o formulario é trocado em preencherFormulario() e o Editar a chama depois.
             function textoPrimeiraEtapa() {
                 return formulario.reautenticar
-                    ? 'Confira os dados, chame um administrador para digitar o e-mail e a senha dele aqui e clique em Revisar.'
+                    ? textosAutorizacao.etapa
                     : 'Confira os dados e clique em Revisar.';
             }
 
@@ -598,32 +621,14 @@
             let segurando = false;
             let inicioHold = 0;
             let rafId = null;
-            let idleTimer = null;
-            let quaseEsgotadoTimer = null;
-            let avisoTempo = null;
-            let tokenEmitidoEm = 0;
+            // Vem do /agente/revisar: true só nas ações destrutivas. Antes da resposta, o padrão seguro é segurar.
+            let precisaSegurar = true;
+            let entrouNaEtapa2Em = 0;
 
-            // Prazo do rascunho: conta desde a proposta e não reinicia no "Editar".
+            // Prazo da proposta: conta desde a proposta e não reinicia no "Editar" (vale também depois do Revisar).
             const rascunhoTimer = setTimeout(expirarRascunho, PRAZO_RASCUNHO_MS);
 
-            function restanteMs() {
-                return DURACAO_IDLE_MS - (performance.now() - tokenEmitidoEm);
-            }
-
-            function pararTimers() {
-                clearTimeout(idleTimer);
-                clearTimeout(quaseEsgotadoTimer);
-            }
-
-            // Janela ociosa contada desde a revisão. Segurar pausa os timers (M2); soltar sem completar retoma com o que resta.
-            function agendarExpiracao() {
-                const restante = restanteMs();
-                idleTimer = setTimeout(expirarCard, Math.max(0, restante));
-                quaseEsgotadoTimer = setTimeout(bloquearPorTempo, Math.max(0, restante - MINIMO_PARA_SEGURAR_MS));
-            }
-
             function encerrarCard() {
-                pararTimers();
                 clearTimeout(rascunhoTimer);
                 if (rafId) cancelAnimationFrame(rafId);
                 adminSenha.value = '';
@@ -631,9 +636,7 @@
             }
 
             function desativarTudo(texto) {
-                pararTimers();
                 clearTimeout(rascunhoTimer);
-                if (avisoTempo) avisoTempo.remove();
                 avisoSoltou.hidden = true;
                 segurando = false;
                 if (rafId) cancelAnimationFrame(rafId);
@@ -653,38 +656,20 @@
                 card.appendChild(aviso);
             }
 
-            // Rascunho venceu (5 min): o aviso ao servidor sai logo depois, quando ele já conta como expirado.
+            // Proposta venceu (5 min, antes ou depois do Revisar): o card não some calado — fica visível, marcado, com os
+            // botões desativados. O aviso ao servidor sai logo depois, quando ele já conta como expirado.
             function expirarRascunho() {
-                desativarTudo('O prazo para revisar terminou. Nada foi gravado. Peça de novo.');
-                setTimeout(() => encerrarSemGravar({ proposta }), 500);
-                anunciar('prazo para revisar terminou, nada foi gravado');
+                const corpo = token ? { token } : { proposta };
+                desativarTudo(token ? 'Confirmação expirada. Nada foi gravado. Peça de novo.' : 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.');
+                setTimeout(() => encerrarSemGravar(corpo), 500);
+                anunciar(token ? 'confirmação expirada, nada foi gravado' : 'prazo para revisar terminou, nada foi gravado');
             }
 
-            // Menos de 2,5 s na janela: um hold novo terminaria fora do prazo do servidor. Desativa o Confirmar.
-            function bloquearPorTempo() {
-                if (segurando || btnConfirmar.disabled) return;
-                btnConfirmar.disabled = true;
-                avisoSoltou.hidden = true;
-                avisoTempo = document.createElement('div');
-                avisoTempo.className = 'msg msg--aviso card-expirado-texto';
-                avisoTempo.textContent = 'Tempo quase esgotado. Peça de novo.';
-                card.appendChild(avisoTempo);
-                anunciar('tempo quase esgotado, peça de novo');
-            }
-
-            // Expirou a janela de segurar: o card não some calado — fica visível, marcado, com os botões desativados.
-            function expirarCard() {
-                const tokenVencido = token;
-                desativarTudo('Confirmação expirada. Nada foi gravado. Peça de novo.');
-                // O card fecha aos 10 s, mas o aviso ao servidor espera a validade dele passar: antes disso seria lido como cancelamento.
-                setTimeout(() => encerrarSemGravar({ token: tokenVencido }), VALIDADE_SERVIDOR_MS - DURACAO_IDLE_MS + 500);
-                anunciar('confirmação expirada, nada foi gravado');
-            }
-
-            // Etapa 2: campos travados, segurar liberado e a janela de 10 s começa.
-            function entrarNoSegurar(novoToken) {
+            // Etapa 2: campos travados e Confirmar liberado (clique, ou segurar 2 s nas ações destrutivas).
+            function entrarNoSegurar(novoToken, segurar) {
                 token = novoToken;
-                tokenEmitidoEm = performance.now();
+                precisaSegurar = segurar !== false;
+                entrouNaEtapa2Em = performance.now();
                 campos.disabled = true;
                 autorizacao.disabled = true;
                 resumoErro.hidden = true;
@@ -693,21 +678,21 @@
                 btnConfirmar.disabled = false;
                 // Sem campo nem senha para corrigir, "Editar" não teria o que editar.
                 btnEditar.hidden = !formulario.campos.length && !formulario.reautenticar;
-                etapa.textContent = 'Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.';
-                agendarExpiracao();
+                etapa.textContent = precisaSegurar
+                    ? 'Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.'
+                    : 'Dados conferidos. Clique em Confirmar para gravar.';
                 btnConfirmar.focus();
-                anunciar('dados conferidos, segure confirmar');
+                anunciar(precisaSegurar ? 'dados conferidos, segure confirmar' : 'dados conferidos, clique em confirmar');
             }
 
             // "Editar": o token morre no servidor (sem auditoria) e o card volta à etapa 1. O Revisar só volta
             // depois da resposta, para um Revisar rápido não disputar a sessão com o Editar.
             async function voltarAoFormulario() {
-                pararTimers();
                 segurando = false;
                 if (rafId) cancelAnimationFrame(rafId);
                 const tokenAntigo = token;
                 token = null;
-                if (avisoTempo) avisoTempo.remove();
+                precisaSegurar = true;
                 avisoSoltou.hidden = true;
                 fill.style.width = '0%';
                 label.textContent = 'Confirmar';
@@ -723,7 +708,7 @@
                 aplicarCondicoes(form, formulario.campos);
                 etapa.textContent = textoPrimeiraEtapa();
                 // A senha foi apagada: quem usa leitor de tela precisa saber que ela é pedida de novo.
-                if (formulario.reautenticar) anunciar('A senha do administrador foi apagada. Digite o e-mail e a senha de novo antes de Revisar.');
+                if (formulario.reautenticar) anunciar(textosAutorizacao.apagado);
                 const primeiro = form.querySelector('input, select');
                 if (primeiro) primeiro.focus();
                 const resp = await fetch('/agente/editar', {
@@ -747,7 +732,7 @@
                 adminErro.hidden = true;
                 adminSenha.removeAttribute('aria-invalid');
                 if (formulario.reautenticar && (adminEmail.value.trim() === '' || adminSenha.value === '')) {
-                    adminErro.textContent = 'Informe o e-mail e a senha de um administrador.';
+                    adminErro.textContent = textosAutorizacao.falta;
                     adminErro.hidden = false;
                     const vazio = adminEmail.value.trim() === '' ? adminEmail : adminSenha;
                     vazio.setAttribute('aria-invalid', 'true');
@@ -770,7 +755,7 @@
                     // Cancelado ou vencido enquanto a revisão ia e voltava: não mexe mais neste card.
                     if (!card.isConnected || card.classList.contains('card--expirado')) return;
                     if (resp.ok && dados.token) {
-                        entrarNoSegurar(dados.token);
+                        entrarNoSegurar(dados.token, dados.segurar);
                         return;
                     }
                     if (dados.formulario) {
@@ -803,12 +788,8 @@
             }
 
             function iniciarHold() {
-                if (segurando || btnConfirmar.disabled || btnConfirmar.hidden) return;
-                if (restanteMs() < MINIMO_PARA_SEGURAR_MS) {
-                    bloquearPorTempo();
-                    return;
-                }
-                pararTimers();
+                // Ação não destrutiva: o Confirmar é um clique (tratado no evento click), sem segurar.
+                if (!precisaSegurar || segurando || btnConfirmar.disabled || btnConfirmar.hidden) return;
                 avisoSoltou.hidden = true;
                 segurando = true;
                 inicioHold = performance.now();
@@ -842,11 +823,11 @@
                 btnConfirmar.classList.remove('segurando');
                 avisoSoltou.hidden = false;
                 anunciar('você soltou antes do fim, nada foi gravado');
-                agendarExpiracao();
             }
 
             async function confirmarAcao() {
-                pararTimers();
+                // A confirmação saiu: o prazo de 5 min não pode mais marcar o card como expirado enquanto ela vai e volta.
+                clearTimeout(rascunhoTimer);
                 // Confirmação a caminho: Cancelar ou Editar agora disputariam o mesmo token com ela.
                 btnConfirmar.disabled = true;
                 btnEditar.disabled = true;
@@ -894,7 +875,21 @@
             btnConfirmar.addEventListener('mouseleave', soltarHold);
             btnConfirmar.addEventListener('touchend', soltarHold);
             btnConfirmar.addEventListener('touchcancel', soltarHold);
+            // Clique simples (mouse, toque, Enter ou Espaço) confirma as ações não destrutivas. O Confirmar aparece no
+            // lugar do Revisar: o 2º clique de um duplo clique (detail > 1) ou um clique logo depois de entrar na etapa 2
+            // não confirma, para ninguém gravar sem ver "Dados conferidos".
+            btnConfirmar.addEventListener('click', (e) => {
+                if (precisaSegurar || btnConfirmar.disabled || btnConfirmar.hidden) return;
+                if (e.detail > 1 || performance.now() - entrouNaEtapa2Em < ESPERA_CLIQUE_MS) return;
+                confirmarAcao();
+            });
             btnConfirmar.addEventListener('keydown', (e) => {
+                // Sem segurar, Enter/Espaço seguem o comportamento normal do botão (disparam o click), mas a repetição
+                // automática de uma tecla segurada desde o Revisar não confirma.
+                if (!precisaSegurar) {
+                    if (e.repeat) e.preventDefault();
+                    return;
+                }
                 if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) {
                     e.preventDefault();
                     iniciarHold();

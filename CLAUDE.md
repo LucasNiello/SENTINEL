@@ -1,7 +1,7 @@
 # SENTINEL — regras fixas do projeto
 
 - **Stack**: 100% PHP/Laravel (Blade, Tailwind, JS vanilla). Nunca introduzir outra linguagem de programação neste projeto.
-- **Provedor de IA**: API da Anthropic (Messages API, `POST https://api.anthropic.com/v1/messages`, com `tools`/`tool_choice`), modelo `claude-haiku-5-5` (escolhido na bateria de 13/11; `claude-sonnet-5-5` como alternativa), em chamada HTTP REST única, stateless, sem SDK e sem pacote novo, pelo `Http` do Laravel. É o único provedor (decisão do Lucas, 13/11): o Azure foi removido, e `SENTINEL_IA_PROVEDOR` com qualquer valor diferente de `anthropic` falha fechado. Nunca usar Agent Service, Assistants API ou Managed Agents (threads, runs, polling). O provedor fica isolado em `app/Services/AiAgentService.php`, nunca chamado de outro lugar. A resposta da Anthropic é traduzida para o mesmo formato interno, e o motor (RBAC, tenant, Revisar → segurar → Confirmar, auditoria) não muda. Configuração: `ANTHROPIC_API_KEY` (só no .env), `ANTHROPIC_MODEL`, opcionais `ANTHROPIC_EFFORT` (padrão `low`), `ANTHROPIC_MAX_TOKENS` (8000) e `ANTHROPIC_VERSION` (`2026-10-21`). O `claude-sonnet-5-5` recusa `tool_choice` forçado: a tool solicitada vai com `tool_choice: auto`, só ela oferecida e uma instrução no system, e o servidor continua conferindo a divergência (AI_INTENT_MISMATCH).
+- **Provedor de IA**: API da Anthropic (Messages API, `POST https://api.anthropic.com/v1/messages`, com `tools`/`tool_choice`), modelo `claude-haiku-5-5` (escolhido na bateria de 13/11; `claude-sonnet-5-5` como alternativa), em chamada HTTP REST única, stateless, sem SDK e sem pacote novo, pelo `Http` do Laravel. É o único provedor (decisão do Lucas, 13/11): o Azure foi removido, e `SENTINEL_IA_PROVEDOR` com qualquer valor diferente de `anthropic` falha fechado. Nunca usar Agent Service, Assistants API ou Managed Agents (threads, runs, polling). O provedor fica isolado em `app/Services/AiAgentService.php`, nunca chamado de outro lugar. A resposta da Anthropic é traduzida para o mesmo formato interno, e o motor (RBAC, tenant, Revisar → Confirmar, auditoria) não muda. Configuração: `ANTHROPIC_API_KEY` (só no .env), `ANTHROPIC_MODEL`, opcionais `ANTHROPIC_EFFORT` (padrão `low`), `ANTHROPIC_MAX_TOKENS` (8000) e `ANTHROPIC_VERSION` (`2026-10-21`). O `claude-sonnet-5-5` recusa `tool_choice` forçado: a tool solicitada vai com `tool_choice: auto`, só ela oferecida e uma instrução no system, e o servidor continua conferindo a divergência (AI_INTENT_MISMATCH).
 - **Git**: Claude Code nunca executa `git add`, `git commit`, `git push` ou qualquer comando que altere o histórico. Apenas sugere mensagem de commit como texto.
 - **Arquitetura**: já está fechada e documentada no Notion (workspace "SENTINEL", página "Arquitetura") e em `documentacao/Documentacao-Sentinel1.2.docx` (Documentação 1.2, de 04/11/2026, vigente — arquivos anteriores em `documentacao/versoes-antigas/`, ex.: `Sentinel_0.x.docx`, `Sentinel_Doc_0.5.docx`, estão desatualizados). Não decidir ou alterar decisão de arquitetura autonomamente — se um conflito aparecer entre uma instrução e o que está documentado, sinalizar e perguntar, nunca escolher sozinho.
 - **Escopo**: protótipo acadêmico de TCC, não produto em produção. Não adicionar pacotes, dependências ou infraestrutura (filas, cache distribuído, 2FA, observabilidade, etc.) além do estritamente pedido em cada tarefa. **Isso é controle de escopo, não desculpa para segurança relapsa** — dado sensível (CPF, salário, financeiro) é tratado com cuidado mesmo em protótipo, como já feito no mascaramento de PII em audit_logs (Fase 2). Ver seção "Agenda: quando deixar de ser protótipo acadêmico" para o que fica pendente por enquanto, não por já ter sido descartado.
@@ -26,12 +26,17 @@
 
 - Toda tool de escrita vira um **rascunho** na sessão, válido por 5 min
   (`ConfirmacoesPendentes::PRAZO_RASCUNHO_S`).
-- `POST /agente/revisar` valida sem gravar e emite o token de segurar; com
-  erro, o formulário volta apontando o campo.
-- O usuário segura o botão por 2 s (`DURACAO_HOLD_MS` no front).
-- `POST /agente/confirmar` aceita o token uma única vez, só entre 2 e 12 s
-  (`ESPERA_MINIMA_S`/`VALIDADE_MAXIMA_S`), e executa com os valores da
-  sessão — nunca com o que vem do navegador.
+- `POST /agente/revisar` valida sem gravar e emite o token de confirmação; com
+  erro, o formulário volta apontando o campo. A resposta traz `segurar`
+  (`AiAgentService::exigeSegurar`, calculado com os valores revisados).
+- Decisão do Lucas (13/11, opção B): o servidor não tem janela de tempo. O
+  segurar 2 s (`DURACAO_HOLD_MS` no front) é só gesto visual, nas ações
+  destrutivas: excluir para a lixeira e excluir de vez, cancelar cobrança,
+  estornar, conciliação em lote e cancelar agendamento. As demais escritas
+  confirmam com um clique.
+- `POST /agente/confirmar` aceita o token uma única vez, até o fim dos 5 min
+  da proposta (sem espera mínima), e executa com os valores da sessão — nunca
+  com o que vem do navegador.
 - **RF03 — `conciliar_lancamentos_em_lote`** (papel mínimo operador): período
   obrigatório e categoria opcional; status fixo pendente → conciliado.
   - O servidor resolve o filtro uma vez, no tenant; 0 itens responde em texto,

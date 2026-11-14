@@ -1,0 +1,16 @@
+# Diagnóstico da Fase B (13/11/2026, máquina de casa, branch `automacao-na-madruga`)
+
+Só leitura, feita antes da Fase 3. A situação ao fim da sessão está no relatório `automacao/relatorio-2026-11-13-casa.md`.
+
+| Item | Situação | Prova / o que falta |
+|---|---|---|
+| Tools da clínica/petshop | FEITO | `app/Services/Agente/CatalogoDaClinica.php` traz cadastro de tutor, pet e catálogo, a lixeira, a agenda (consultar, mudar status, agendar e encaixe), a cobrança (consultar, cobrar, receber, cancelar e estornar), a venda e a caixa de entrada. Testes: `ToolsDeCadastroDaClinicaTest`, `ToolsDeAgendaDaClinicaTest`, `ToolsDeAtendimentoDaClinicaTest` e `RbacPapeisTest`. |
+| Agenda com conflito no chat | FEITO | `AgendaService` recusa o conflito do mesmo profissional, e o `conferir` do `agendar_atendimento` leva a frase ao card já no Revisar. Testes: `ToolsDeAgendaDaClinicaTest::test_regra_da_agenda_recusa_no_revisar_e_nada_e_gravado` e `::test_conflito_que_entra_entre_o_revisar_e_o_confirmar_e_recusado`. Sugerir horários livres ficou fora (decisão da P-C4). |
+| Continuidade pelo servidor: "edite o segundo", "o último" | FEITO | `posicao` resolvida no servidor contra a última tabela, guardada na sessão (`AiAgentService::resolverPosicao` e `ConversaAgente::guardarLista`). `MemoriaListaTest` tem 9 casos, e a bateria de continuações deu 4/4. |
+| Continuidade: "esse mesmo" | PARCIAL | Só funciona quando a última tabela tem o registro: se tem 1 linha, ele é a posição 1. Depois de gravar (o card confirmado), o registro gravado não vira "a última tabela", e "altere esse mesmo" não tem a que se referir no servidor. |
+| Venda avulsa (`agendamento_id` e `pet_id` opcionais) | FEITO | Migration `2026_11_10_100001_add_agendamento_e_pet_to_vendas_table`, `VendaService::registrar`/`previa` e a tool `registrar_venda`. Testes: `ToolsDeAtendimentoDaClinicaTest::test_venda_ligada_ao_atendimento_pega_o_pet_dele` e `VendaServiceTest`. |
+| PIN do supervisor no card | PARCIAL | O back está FEITO: `estornar_cobranca` usa `reautenticar: 'estorno'` e `formulario.tipo_autorizacao = 'estorno'`, com 12 casos em `EstornoNoCardTest`. Falta na tela: `bancada.blade.php` não lê `tipo_autorizacao` e continua dizendo "Um administrador digita o e-mail e a senha dele". |
+| Telas do dono: marcar supervisores e zerar o PIN | PARCIAL | Os endpoints JSON estão FEITOS (`SupervisaoController`, rotas `/supervisao/*`, 13 casos em `SupervisaoEndpointsTest`). Não há tela Blade nem item no menu, e o seed não cria supervisor. Sem tela, a demo do estorno com PIN não acontece. |
+| Tela do supervisor para definir o próprio PIN | PARCIAL | O endpoint `POST /supervisao/meu-pin` está FEITO, com teto de tentativas contado antes de conferir. Não há tela. |
+| Caixa de entrada: mensagens do seed → agendamentos propostos | PARCIAL | Existem as tools `consultar_mensagens` e `marcar_mensagem_tratada`, o botão "Pedir ao agente" e as 5 mensagens do seed (`ClinicaSeeder::mensagens`). O pedido leva só o texto cru: a IA não sabe de qual tutor nem de qual pet se trata, e o card de agendamento abre com o pet em branco. |
+| Remover o domínio antigo (contabilidade) | NÃO FEITO | Continuam as 38 tools de `toolsDeContabilidade()`, os models, as migrations e os seeders. **Remoção irreversível: não se faz nesta sessão.** |

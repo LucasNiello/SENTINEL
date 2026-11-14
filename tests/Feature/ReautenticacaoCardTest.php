@@ -10,6 +10,7 @@ use App\Services\ReautenticacaoAdmin;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -163,8 +164,8 @@ class ReautenticacaoCardTest extends TestCase
         $tokenSenhaErrada = $this->cardDeRestaurar($cliente);
         $tokenSenhaCerta = $this->cardDeRestaurar($cliente);
         $operador->update(['papel' => 'leitura']); // rebaixado entre o Revisar e a confirmação
-        $tentativas = fn () => [RateLimiter::attempts("reautenticacao:usuario:{$operador->id}"),
-            RateLimiter::attempts("reautenticacao:admin:{$operador->id}:".hash_hmac('sha256', self::EMAIL, (string) config('app.key')))];
+        $chavePorAdmin = app(ReautenticacaoAdmin::class)->chavePorAlvo($operador->id, self::EMAIL); // antes do spy
+        $tentativas = fn () => [RateLimiter::attempts("reautenticacao:usuario:{$operador->id}"), RateLimiter::attempts($chavePorAdmin)];
         $reautenticacao = $this->spy(ReautenticacaoAdmin::class);
 
         $comErrada = $this->confirmarCom($tokenSenhaErrada, ['email_admin' => self::EMAIL, 'senha_admin' => self::SENHA_ERRADA])->assertStatus(403);
@@ -268,6 +269,32 @@ class ReautenticacaoCardTest extends TestCase
         $cliente->delete();
         $this->travel(ReautenticacaoAdmin::JANELA_S + 1)->seconds();
         $this->confirmarCom($this->cardDeRestaurar($cliente), ['email_admin' => self::EMAIL, 'senha_admin' => self::SENHA])->assertOk();
+    }
+
+    public function test_limite_por_quem_autoriza_junta_as_variacoes_do_e_mail_sem_consultar_o_banco(): void
+    {
+        // nº 5-4: no MySQL (utf8mb4_unicode_ci) "SUPERVISOR@…" e "supérvisor@…" acham a mesma pessoa: a chave também junta.
+        $operadorId = auth()->id();
+        $reautenticacao = app(ReautenticacaoAdmin::class);
+        $chave = $reautenticacao->chavePorAlvo($operadorId, self::EMAIL);
+
+        foreach (['  '.self::EMAIL.' ', mb_strtoupper(self::EMAIL), 'supérvisor@sentinel.local', 'SUPÉRVISOR@SENTINEL.LOCAL'] as $variacao) {
+            $this->assertSame($chave, $reautenticacao->chavePorAlvo($operadorId, $variacao), $variacao);
+        }
+        $this->assertStringStartsWith("reautenticacao:admin:{$operadorId}:", $chave, 'o contador é do operador logado: ninguém trava o autorizador de outro');
+
+        // O texto digitado (até uma senha no campo errado) nunca fica legível, e a chave não consulta o banco
+        // (com a chave por id, 429 × 403 diria se o e-mail é de alguém do tenant).
+        DB::enableQueryLog();
+        foreach (['ninguem@sentinel.local', self::SENHA] as $digitado) {
+            $this->assertStringNotContainsString(mb_strtolower($digitado), $reautenticacao->chavePorAlvo($operadorId, $digitado));
+        }
+        $this->assertSame([], DB::getQueryLog());
+        DB::disableQueryLog();
+
+        // O erro conta nessa chave.
+        $this->confirmarCom($this->cardDeRestaurar($this->naLixeira()), ['email_admin' => self::EMAIL, 'senha_admin' => self::SENHA_ERRADA])->assertStatus(403);
+        $this->assertSame(1, RateLimiter::attempts($chave));
     }
 
     public function test_limite_de_10_erros_por_usuario_com_qualquer_e_mail(): void

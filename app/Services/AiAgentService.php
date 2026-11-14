@@ -1330,6 +1330,19 @@ class AiAgentService
     }
 
     /**
+     * Decisão B do Lucas (13/11): o Confirmar pede o gesto de segurar 2 s (só visual, sem trava no servidor) nas ações
+     * destrutivas; as demais escritas confirmam com um clique. Destrutivas: risco 'exclusao' (excluir para a lixeira,
+     * excluir de vez, cancelar cobrança, estornar), a conciliação em lote e cancelar um agendamento (pelo valor
+     * REVISADO do novo status, que o humano pode ter mudado no card). Tool fora do catálogo cai em segurar.
+     */
+    public function exigeSegurar(string $tool, array $argumentos): bool
+    {
+        return $this->risco($tool) === 'exclusao'
+            || $tool === 'conciliar_lancamentos_em_lote'
+            || ($tool === 'alterar_status_agendamento' && ($argumentos['novo_status'] ?? null) === 'cancelado');
+    }
+
+    /**
      * Formulário do card (RF04) a partir das regras da tool, com os valores dados e,
      * se houver, a frase de erro de cada campo. Null para tool sem formulário.
      */

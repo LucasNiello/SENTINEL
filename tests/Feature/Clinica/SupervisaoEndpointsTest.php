@@ -231,4 +231,52 @@ class SupervisaoEndpointsTest extends TestCase
         $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => ' abc123 '])->assertOk();
         $this->assertTrue(Hash::check('771133', $vet->fresh()->pin_autorizacao));
     }
+
+    public function test_auditoria_diz_o_setor_anterior_e_remarcar_no_mesmo_setor_diz_que_nada_mudou(): void
+    {
+        $vet = $this->supervisorComPin();
+        $this->logarComo('dono', self::T);
+
+        // nº 6-4: remarcar no mesmo setor não zera o PIN e não finge que mudou.
+        $this->postJson("/supervisao/supervisores/{$vet->id}", ['setor' => 'clinica'])->assertOk()
+            ->assertJsonPath('mensagem', 'Sem mudança: o usuário já estava nesse setor.');
+        $this->assertNotNull($vet->fresh()->pin_autorizacao);
+
+        // Desmarcar grava de qual setor a pessoa saiu.
+        $this->postJson("/supervisao/supervisores/{$vet->id}", ['setor' => null])->assertOk()->assertJsonPath('mensagem', 'Supervisor atualizado.');
+
+        $logs = AuditLog::query()->where('tool', 'marcar_supervisor')->orderBy('id')->get();
+        $this->assertSame([['setor' => 'clinica', 'setor_anterior' => 'clinica'], ['setor' => null, 'setor_anterior' => 'clinica']],
+            $logs->pluck('parametros')->all());
+        $this->assertSame(['Sem mudança: o usuário já estava nesse setor.', 'Supervisor atualizado.'], $logs->pluck('mensagem')->all());
+    }
+
+    public function test_setor_anterior_de_outro_tenant_nao_vaza_na_auditoria(): void
+    {
+        $deFora = $this->usuarioClinica('veterinario', self::OUTRO_TENANT);
+        $deFora->forceFill(['supervisor_setor' => 'petshop'])->save();
+        $this->logarComo('dono', self::T);
+
+        $this->postJson("/supervisao/supervisores/{$deFora->id}", ['setor' => null])->assertStatus(422);
+        $this->assertSame(['setor' => null, 'setor_anterior' => null], AuditLog::query()->latest('id')->first()->parametros);
+        $this->assertSame('petshop', $deFora->fresh()->supervisor_setor);
+    }
+
+    public function test_dono_so_vale_enquanto_for_papel_da_hierarquia(): void
+    {
+        // nº 6-6: se 'dono' sair de config('sentinel.papeis'), quem tem esse papel não gerencia supervisores (falha fechada).
+        $vet = $this->supervisorComPin();
+        $dono = $this->logarComo('dono', self::T);
+        config(['sentinel.papeis' => array_values(array_diff((array) config('sentinel.papeis'), ['dono']))]);
+
+        $this->getJson('/supervisao/supervisores')->assertForbidden();
+        $this->postJson("/supervisao/supervisores/{$vet->id}", ['setor' => null])->assertForbidden();
+        $this->postJson("/supervisao/supervisores/{$vet->id}/zerar-pin")->assertForbidden();
+        $this->get('/supervisao')->assertForbidden();
+        $this->assertSame(['clinica', true], [$vet->fresh()->supervisor_setor, $vet->fresh()->pin_autorizacao !== null]);
+
+        // O service também recusa, sem depender do controller.
+        $this->expectException(\App\Exceptions\RegraDeNegocioException::class);
+        app(SupervisaoService::class)->resetarPin($vet->id, $dono->id, self::T);
+    }
 }

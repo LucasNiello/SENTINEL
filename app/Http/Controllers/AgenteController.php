@@ -125,8 +125,9 @@ class AgenteController extends Controller
      * Bloco 2b: o humano revisa o formulário e o servidor valida sem gravar (RBAC,
      * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
      * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
-     * revisados ficam na sessão e sai o token de segurar — daí correm os prazos de
-     * sempre (2 a 12 s), e o /confirmar só usa estes valores.
+     * revisados ficam na sessão e sai o token de confirmação (uso único, até o fim
+     * dos 5 min da proposta), e o /confirmar só usa estes valores. "segurar" diz à
+     * tela se o Confirmar pede o gesto de 2 s (ações destrutivas; decisão B, 13/11).
      *
      * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.
      */
@@ -191,6 +192,7 @@ class AgenteController extends Controller
             'proposta' => $proposta,
             'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
             'risco' => $this->aiAgentService->risco($tool),
+            'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados),
         ]);
     }
 
@@ -230,14 +232,12 @@ class AgenteController extends Controller
 
         // Desfecho da proposta: o rascunho dela também sai da sessão (R3).
         $this->pendentes->encerrar($request->session(), $proposta);
-        $decorrido = $this->pendentes->decorrido($pendente);
 
-        // Fora do prazo: antes da espera mínima, ou vencido (12 s do token ou os 5 min absolutos do rascunho).
-        if ($decorrido < ConfirmacoesPendentes::ESPERA_MINIMA_S || $this->pendentes->expirou($pendente)) {
-            [$desfecho, $motivo] = $this->pendentes->expirou($pendente)
-                ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
-                : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
-            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
+        // Decisão B (13/11): não há espera mínima nem validade de 12 s; só os 5 min absolutos da proposta. O segurar
+        // de 2 s é gesto visual (ações destrutivas); o que o servidor garante é token único e valores da sessão.
+        if ($this->pendentes->expirou($pendente)) {
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'expirado',
+                'Confirmação recebida fora do prazo. Nada foi gravado.', ConfirmacoesPendentes::origem($pendente),
                 entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
@@ -325,8 +325,8 @@ class AgenteController extends Controller
      *
      * Contrato: { "token": "<uuid de segurar>" } ou { "proposta": "<uuid do rascunho>" }.
      * Se foi "cancelado" ou "expirado", decide o servidor pelo horário, nunca pelo que
-     * o front manda, com o mesmo limite das outras rotas: até 12 s depois da revisão
-     * (token) ou até 5 min depois da proposta (rascunho), encerrar é cancelamento;
+     * o front manda, com o mesmo limite das outras rotas: até 5 min depois da proposta
+     * (rascunho ou token dela; decisão B, 13/11), encerrar é cancelamento;
      * depois, é expiração. O desfecho vai para a auditoria e a proposta sai da sessão.
      */
     public function cancelar(Request $request)

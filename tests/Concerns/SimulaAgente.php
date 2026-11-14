@@ -9,16 +9,16 @@ use Illuminate\Support\Facades\Http;
  * Chame prepararAgente() no setUp() da classe de teste.
  *
  * Http::fake acumula stubs (o primeiro vence), então faz-se o fake uma vez só
- * e o que muda entre chamadas é $respostaFoundry.
+ * e o que muda entre chamadas é $respostaIa.
  */
 trait SimulaAgente
 {
-    /** Resposta que o "Foundry" devolve na próxima chamada. */
-    private array $respostaFoundry = [];
+    /** Resposta que a IA simulada devolve na próxima chamada. */
+    private array $respostaIa = [];
 
     protected function prepararAgente(): void
     {
-        Http::fake(fn () => Http::response($this->respostaFoundry));
+        Http::fake(fn () => Http::response($this->respostaIa));
     }
 
     private function respostaComTool(string $tool, array $argumentos): array
@@ -31,7 +31,7 @@ trait SimulaAgente
     /** Envia um comando cujo "modelo" responde chamando $tool. */
     private function comando(string $tool, array $argumentos = [])
     {
-        $this->respostaFoundry = $this->respostaComTool($tool, $argumentos);
+        $this->respostaIa = $this->respostaComTool($tool, $argumentos);
 
         return $this->postJson('/agente/comando', ['mensagem' => 'faça algo']);
     }

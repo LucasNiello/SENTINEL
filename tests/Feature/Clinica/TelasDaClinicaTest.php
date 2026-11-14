@@ -60,6 +60,10 @@ class TelasDaClinicaTest extends TestCase
         $this->logarComo('recepcao', 3);
 
         $this->get('/agente')->assertOk()->assertSee('window.pedirAoAgente = (texto) =>', false)->assertSee("'Pedir ao agente'", false);
+        // O botão só põe o texto no campo (prévia): quem envia é o usuário.
+        $pedir = str($this->get('/agente')->getContent())->after('window.pedirAoAgente = (texto) =>')->before('};');
+        $this->assertStringContainsString('campoMensagem.focus()', (string) $pedir);
+        $this->assertStringNotContainsString('requestSubmit', (string) $pedir);
         // Cadastros usa a mesma tabela, mas não tem o chat: lá a função não existe e o botão não aparece.
         $this->get('/cadastros')->assertOk()->assertDontSee('window.pedirAoAgente = (texto) =>', false);
     }

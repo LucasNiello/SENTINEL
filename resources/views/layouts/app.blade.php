@@ -25,6 +25,8 @@
     $pode = fn (callable $regra) => $papel !== null && rescue($regra, false, false);
     if ($pode(fn () => app(\App\Services\AiAgentService::class)->podeExecutar('consultar_lixeira'))) $itens[] = ['lixeira', 'Lixeira', 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5'];
     if ($pode(fn () => app(\App\Services\ContextoUsuario::class)->ehAdministrativo())) $itens[] = ['auditoria', 'Auditoria', 'M6 3h9l3 3v15H6V3m4 5h4m-4 4h4m-4 4h4'];
+    // Item I (clínica): supervisão, para o dono e para quem supervisiona um setor (a rota confere de novo).
+    if ($pode(fn () => app(\App\Services\ContextoUsuario::class)->dominio() === 'clinica' && (app(\App\Services\ContextoUsuario::class)->ehDono() || app(\App\Services\ContextoUsuario::class)->setorSupervisionado() !== null))) $itens[] = ['supervisao', 'Supervisão', 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3m-3 9 2 2 4-4'];
 @endphp
 <body class="workspace{{ $usuario ? '' : ' workspace--guest' }}">
     <a class="pular" href="#conteudo">Pular para o conteúdo</a>

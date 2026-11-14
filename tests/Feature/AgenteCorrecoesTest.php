@@ -56,8 +56,8 @@ class AgenteCorrecoesTest extends TestCase
         Log::spy();
         Http::fake(function () use ($errno) {
             $cause = $errno === 28
-                ? new \GuzzleHttp\Exception\NetworkTimeoutException('secret-marker', new Request('POST', 'https://foundry.test'))
-                : new ConnectException('secret-marker', new Request('POST', 'https://foundry.test'));
+                ? new \GuzzleHttp\Exception\NetworkTimeoutException('secret-marker', new Request('POST', 'https://ia.test'))
+                : new ConnectException('secret-marker', new Request('POST', 'https://ia.test'));
             throw new ConnectionException('BODY-CONFIDENCIAL', 0, $cause);
         });
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus($status)->assertJsonPath('categoria', $categoria);

@@ -46,8 +46,9 @@ domínio dele.
   tipo nome de relação Eloquent).
 - Ciclo soft delete → lixeira → arquivado (RF09-RF12).
 - Confirmação no fluxo /agente (RNF02), conferida no servidor:
-  - espera mínima (antes de 2 s → 422);
-  - validade (depois de 12 s → 422);
+  - sem janela de tempo (decisão B, 13/11): confirmar no mesmo instante do
+    Revisar grava; depois dos 5 min da proposta → 422 e auditoria "expirado";
+  - `segurar` do Revisar: true só nas destrutivas (`exigeSegurar`), pelo valor revisado;
   - token usado uma única vez, inclusive com duas confirmações simultâneas
     (consumo atômico — vale a partir do Lote 2);
   - token malformado → 422 (vale a partir do Lote 2).

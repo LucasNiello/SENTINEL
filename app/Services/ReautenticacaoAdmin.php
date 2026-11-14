@@ -94,10 +94,8 @@ class ReautenticacaoAdmin
         }
 
         try {
-            // O e-mail digitado entra na chave só como HMAC: se alguém digitar a senha no campo
-            // do e-mail, ela não fica legível no cache.
             $porUsuario = "reautenticacao:usuario:{$usuarioId}";
-            $porAdmin = "reautenticacao:admin:{$usuarioId}:".hash_hmac('sha256', Str::lower(trim($email)), (string) config('app.key'));
+            $porAdmin = $this->chavePorAlvo($usuarioId, $email);
 
             // A tentativa conta ANTES de conferir a senha (incremento atômico no cache): pedidos em
             // paralelo não passam todos pela conferência antes de o primeiro erro ser contado.
@@ -132,6 +130,18 @@ class ReautenticacaoAdmin
 
             return ['falha' => 'invalido'];
         }
+    }
+
+    /**
+     * Chave do limite por quem autoriza (LIMITE_POR_ADMIN). Pendência nº 5-4 (13/11): o e-mail entra em minúsculas e
+     * SEM ACENTO, porque a collation do MySQL (utf8mb4_unicode_ci) acha "vét@…" e "VET@…" como a mesma pessoa; com o
+     * texto cru na chave, cada variação ganhava um contador novo e só sobrava o limite de 10 por usuário. Não se busca
+     * a pessoa no banco: com a chave por id, a diferença entre 429 e 403 dizia se o e-mail é de alguém do tenant.
+     * Entra só como HMAC: se alguém digitar a senha no campo do e-mail, ela não fica legível no cache.
+     */
+    public function chavePorAlvo(int $usuarioId, string $email): string
+    {
+        return "reautenticacao:admin:{$usuarioId}:".hash_hmac('sha256', Str::lower(Str::ascii(trim($email))), (string) config('app.key'));
     }
 
     /** Desfaz a tentativa contada; se a janela venceu no meio do pedido, o contador recomeçou e não vai abaixo de zero. */

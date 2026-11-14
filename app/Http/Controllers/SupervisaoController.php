@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 
 /**
- * Item I (clínica vet), em JSON e sem tela, que fica com o Matheus. O dono lista, marca e desmarca os supervisores
+ * Item I (clínica vet), em JSON; a tela /supervisao (TelasController::supervisao) chama estas rotas. O dono lista, marca e desmarca os supervisores
  * de setor e zera o PIN. O supervisor define o próprio PIN, confirmando a senha de login. Papel, tenant e "quem"
  * vêm sempre do ContextoUsuario, nunca do corpo. O PIN e a senha nunca vão para a resposta, a sessão ou a
  * auditoria. A escrita e a auditoria do sucesso ficam na mesma transação; a negação e a recusa também são
@@ -66,7 +66,13 @@ class SupervisaoController extends Controller
         }
         $setor = $validador->validated()['setor'];
 
-        return $this->executar('marcar_supervisor', $id, ['setor' => $setor], 'Supervisor atualizado.',
+        // nº 6-4: a auditoria diz de qual setor a pessoa saiu (desmarcar gravava só "setor: null"), e remarcar no
+        // mesmo setor diz que nada mudou. Leitura só do tenant: usuário de fora continua "não encontrado" no service.
+        $anterior = User::query()->where('tenant_id', $this->contexto->tenantId())->whereKey($id)->value('supervisor_setor');
+        $semMudanca = $anterior === $setor;
+
+        return $this->executar('marcar_supervisor', $id, ['setor' => $setor, 'setor_anterior' => $anterior],
+            $semMudanca ? 'Sem mudança: o usuário já estava nesse setor.' : 'Supervisor atualizado.',
             fn () => $this->supervisao->marcarSupervisor($id, $setor, $this->contexto->usuario()->id, $this->contexto->tenantId()));
     }
 
@@ -136,7 +142,7 @@ class SupervisaoController extends Controller
             return $this->erro(404, 'AI_NOT_FOUND', 'not_found', 'Recurso não encontrado.');
         }
 
-        if ($soDono && $this->contexto->papel() !== 'dono') {
+        if ($soDono && ! $this->contexto->ehDono()) {
             $this->auditar($tool, $id, [], 'negado', 'Só o dono gerencia supervisores e PIN.', false, $acao);
 
             return $this->erro(403, 'AI_FORBIDDEN', 'authorization_error', 'Só o dono gerencia supervisores e PIN.');

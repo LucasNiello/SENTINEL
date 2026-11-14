@@ -37,6 +37,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/cadastros', [TelasController::class, 'cadastros']);
         Route::get('/lixeira', [TelasController::class, 'lixeira']);
         Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
+        // Item I (clínica vet): a tela usa as rotas JSON /supervisao/* abaixo, que conferem tudo de novo.
+        Route::get('/supervisao', [TelasController::class, 'supervisao']);
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
         Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
@@ -49,7 +51,7 @@ Route::middleware('auth')->group(function () {
         // A3 (RF02): CSV de uma tabela de consulta, reexecutada no servidor.
         Route::post('/agente/exportar', [AgenteController::class, 'exportar'])->middleware('throttle:exportar');
 
-        // Item I (clínica): supervisores de setor e PIN do estorno, em JSON (a tela é do Matheus).
+        // Item I (clínica): supervisores de setor e PIN do estorno, em JSON (a tela /supervisao usa estas rotas).
         Route::get('/supervisao/supervisores', [SupervisaoController::class, 'listar'])->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/supervisores/{id}/zerar-pin', [SupervisaoController::class, 'zerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');

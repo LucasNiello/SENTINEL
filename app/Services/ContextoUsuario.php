@@ -59,6 +59,21 @@ class ContextoUsuario
     }
 
     /**
+     * Pendência nº 6-6 (13/11): o usuário logado é o dono E 'dono' é papel da hierarquia (config('sentinel.papeis')).
+     * Se o papel sair da configuração, quem o tem deixa de valer como dono (falha fechada), como em papeisAdministrativos().
+     */
+    public function ehDono(): bool
+    {
+        return $this->papel() === 'dono' && in_array('dono', (array) config('sentinel.papeis', []), true);
+    }
+
+    /** O setor que o usuário logado supervisiona, só se o papel dele ainda for da hierarquia (2ª passada, 13/11). */
+    public function setorSupervisionado(): ?string
+    {
+        return in_array($this->papel(), (array) config('sentinel.papeis', []), true) ? $this->usuario()->supervisor_setor : null;
+    }
+
+    /**
      * Papéis administrativos que AINDA são papéis válidos (config('sentinel.papeis')). Um papel que saiu da lista
      * de válidos nunca autoriza nada, mesmo que continue em papeis_administrativos. Usada também pela senha
      * de administrador (ReautenticacaoAdmin) e pela exclusão definitiva (ExclusaoSegura).

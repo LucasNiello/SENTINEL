@@ -32,7 +32,7 @@ class TempoIaTest extends TestCase
         Http::fake(function () {
             usleep(self::ATRASO_MS * 1000);
 
-            return Http::response($this->respostaFoundry);
+            return Http::response($this->respostaIa);
         });
         $this->logarComo('operador', 1);
     }
@@ -92,7 +92,7 @@ class TempoIaTest extends TestCase
     public function test_resposta_em_texto_vai_so_para_o_log_sem_conteudo(): void
     {
         Log::spy();
-        $this->respostaFoundry = ['choices' => [['message' => ['role' => 'assistant', 'content' => 'O CPF 123.456.789-01 é do José.'], 'finish_reason' => 'stop']]];
+        $this->respostaIa = ['choices' => [['message' => ['role' => 'assistant', 'content' => 'O CPF 123.456.789-01 é do José.'], 'finish_reason' => 'stop']]];
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'texto');
 
@@ -119,9 +119,9 @@ class TempoIaTest extends TestCase
     {
         Log::spy();
 
-        $this->respostaFoundry = ['choices' => [['message' => ['role' => 'assistant', 'content' => 'meia'], 'finish_reason' => 'length']]];
+        $this->respostaIa = ['choices' => [['message' => ['role' => 'assistant', 'content' => 'meia'], 'finish_reason' => 'length']]];
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(502);
-        $this->respostaFoundry = ['choices' => []];
+        $this->respostaIa = ['choices' => []];
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(502);
 
         Log::shouldHaveReceived('warning')->with('AiAgentService: falha controlada', Mockery::on(

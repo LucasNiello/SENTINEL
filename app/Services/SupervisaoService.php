@@ -14,7 +14,8 @@ use Illuminate\Support\Facades\Hash;
  * - o PIN de autorização é diferente da senha de login e é definido só pelo próprio supervisor; o dono
  *   pode apenas zerá-lo, nunca vê-lo nem defini-lo. Mínimo de 6 caracteres; só o hash é guardado;
  * - supervisor sem PIN não autoriza; desmarcar ou trocar o setor zera o PIN.
- * Usuário de outro tenant é tratado como inexistente. As telas e a conferência do PIN ficam para a Fase B.
+ * Usuário de outro tenant é tratado como inexistente. A conferência do PIN fica no ReautenticacaoAdmin (card do
+ * estorno); a tela é a /supervisao (TelasController), sobre as rotas JSON do SupervisaoController.
  */
 class SupervisaoService
 {
@@ -50,7 +51,8 @@ class SupervisaoService
     {
         $usuario = $this->doTenant(User::class, $usuarioId, $tenantId, 'o usuário');
 
-        if ($usuario->supervisor_setor === null) {
+        // Papel fora da hierarquia (config('sentinel.papeis')) não define PIN, como o dono fora dela não gerencia (2ª passada).
+        if ($usuario->supervisor_setor === null || ! in_array($usuario->papel, (array) config('sentinel.papeis', []), true)) {
             throw new RegraDeNegocioException('Só um supervisor de setor define PIN de autorização.');
         }
         // O PIN medido, comparado com a senha e guardado é sempre o MESMO texto, sem espaços nas pontas (quem confere o PIN usa o mesmo trim).
@@ -75,6 +77,9 @@ class SupervisaoService
 
     private function dono(int $donoId, int $tenantId): User
     {
-        return $this->usuarioDoTenant($donoId, $tenantId, ['dono'], 'o dono', 'Só o dono marca supervisores e zera PIN.');
+        // nº 6-6: 'dono' só vale enquanto for papel da hierarquia (config('sentinel.papeis')); fora dela, ninguém é dono.
+        $papeis = array_values(array_intersect(['dono'], (array) config('sentinel.papeis', [])));
+
+        return $this->usuarioDoTenant($donoId, $tenantId, $papeis, 'o dono', 'Só o dono marca supervisores e zera PIN.');
     }
 }

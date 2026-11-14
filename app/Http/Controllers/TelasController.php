@@ -87,6 +87,26 @@ class TelasController extends Controller
         ]);
     }
 
+    /**
+     * Item I (clínica vet): o dono marca e desmarca os supervisores de setor e zera o PIN; o supervisor define o próprio
+     * PIN. Só monta a página: as rotas JSON /supervisao/* conferem dono, tenant, setor e a senha de login de novo.
+     * Fora da clínica não existe (404, como as rotas JSON); quem não é dono nem supervisor não tem o que fazer aqui (403).
+     */
+    public function supervisao()
+    {
+        abort_unless($this->contexto->dominio() === 'clinica', 404);
+
+        $ehDono = $this->contexto->ehDono();
+        $setor = $this->contexto->setorSupervisionado();
+        abort_unless($ehDono || $setor !== null, 403);
+
+        return view('telas.supervisao', [
+            'ehDono' => $ehDono,
+            'meuSetor' => $setor,
+            'rotulosPapeis' => (array) config('sentinel.rotulos_papeis', []),
+        ]);
+    }
+
     public function auditoria(ConsultaAuditoria $consulta)
     {
         try {

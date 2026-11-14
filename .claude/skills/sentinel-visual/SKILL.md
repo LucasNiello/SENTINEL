@@ -80,11 +80,11 @@ A borda é o único sinal de risco. Não varie animação por risco.
 
 ## 6. Confirmação: segurar para confirmar
 
-- Toda escrita pede confirmação por **segurar o botão por 2000 ms** (`DURACAO_HOLD_MS`). É o padrão, não um modo avançado. **Não existe duplo toque.**
+- Decisão do Lucas (13/11, opção B): **segurar o botão por 2000 ms** (`DURACAO_HOLD_MS`) só nas ações destrutivas — excluir (lixeira e de vez), cancelar cobrança, estornar, conciliação em lote e cancelar agendamento (`segurar` na resposta do `/agente/revisar`). As demais escritas confirmam com **um clique**. É gesto visual: o servidor não tem janela de tempo. **Não existe duplo toque.**
 - Funciona com mouse, toque e teclado (Espaço/Enter segurados). Soltar antes do fim cancela o preenchimento e mostra "Nada foi gravado".
 - O botão de segurar usa a cor do risco da ação (`aviso` ou `erro`). O **Cancelar** é neutro (contorno `tinta-2`), nunca vermelho, e cancela com um clique.
 - O card mostra em texto o que vai acontecer (ação + dados principais) antes de o usuário segurar.
-- O servidor só aceita a confirmação entre 2 s (espera mínima) e 12 s (janela ociosa de 10 s da interface, `DURACAO_IDLE_MS`, mais folga; `VALIDADE_MAXIMA_S`). Quando a janela passa, o card **não some calado**: fica visível com o texto "Confirmação expirada. Nada foi gravado. Peça de novo." e os botões desativados.
+- O servidor aceita a confirmação (token de uso único) até o fim dos 5 min da proposta (`PRAZO_RASCUNHO_S`), sem espera mínima. Quando o prazo passa, o card **não some calado**: fica visível com o texto "Confirmação expirada. Nada foi gravado. Peça de novo." e os botões desativados.
 
 ## 7. Mensagens e estados
 
@@ -123,6 +123,7 @@ A borda é o único sinal de risco. Não varie animação por risco.
 - [ ] Só tokens da seção 2 (procure por `#` solto nas views).
 - [ ] Borda de risco certa em cada tipo de card.
 - [ ] Segurar funciona com mouse, toque e teclado; Cancelar é neutro.
+- [ ] Clique simples (ações não destrutivas): o 2º clique de um duplo clique e o Enter segurado desde o Revisar não confirmam.
 - [ ] `aviso` aparece quando vem no JSON.
 - [ ] Nenhuma animação na bancada; `prefers-reduced-motion` respeitado na vitrine.
 - [ ] Testado em 360px e em 1280px.

@@ -1,3 +1,8 @@
+# Atualização da noite de 13/11 (máquina de casa) — leia primeiro
+- **Resolvidas:** login conta a tentativa antes do `Auth::attempt`; nº 5 item 4 (chave do limite junta as variações do e-mail, sem consultar o banco); nº 6 itens 4 (setor anterior na auditoria; "sem mudança") e 6 (dono e supervisor × `sentinel.papeis`); nota para o Matheus da nº 4 (o card do estorno já lê `tipo_autorizacao`); tela `/supervisao` feita aqui (a nota de rotas da nº 6 continua válida, agora com tela); "Pedir ao agente" agora só preenche o campo (prévia).
+- **Para decidir:** a tela `/supervisao` grava com um clique, sem segurar; "esse mesmo" depois de gravar exige uma frase nova para a IA e precisa da bateria; medir na bateria se o pedido da caixa de entrada (com `tutor #N; pets: ...`) abre o card de agendamento com o pet.
+- **Relatório:** `automacao/relatorio-2026-11-13-casa.md`. Suíte 878/878; 0 chamadas reais (169/200).
+
 # Atualização do fim da tarde de 13/11 — leia primeiro
 - **Feito hoje:** remoção do Azure (Anthropic é o único provedor), bateria 38/40 e padrão Anthropic; comentários com "Foundry/Azure" corrigidos em `AppServiceProvider` e nos cabeçalhos dos testes (só texto). Suíte 863/863, duas rodadas seguidas estáveis.
 - **Abertos, pulados por tocarem RBAC/PIN/rate limit (fora da permissão da sessão):** nº 5 item 4, nº 6 itens 4, 6 e 7, e o login com `RateLimiter::hit` antes do `Auth::attempt`. Precisam do Lucas.

@@ -176,16 +176,14 @@ class AgenteTest extends TestCase
         $this->assertSame(0, Lancamento::count());
     }
 
-    public function test_rnf02_confirmar_antes_de_2s_e_recusado_e_nao_grava(): void
+    public function test_rnf02_confirmar_com_um_clique_logo_depois_de_revisar_grava(): void
     {
-        $token = $this->propor(['descricao' => 'Cedo demais', 'valor' => 1, 'data' => '2026-09-21']);
-        $this->travel(1)->seconds();
+        // Decisão B (13/11): sem espera mínima no servidor; o segurar é só gesto visual nas ações destrutivas.
+        $token = $this->propor(['descricao' => 'Um clique', 'valor' => 1, 'data' => '2026-09-21']);
 
-        $this->postJson('/agente/confirmar', ['token' => $token])
-            ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->assertSame(0, Lancamento::count());
+        $this->assertSame(1, Lancamento::count());
     }
 
     public function test_rnf02_token_so_vale_uma_vez(): void
@@ -202,26 +200,30 @@ class AgenteTest extends TestCase
         $this->assertSame(1, Lancamento::count());
     }
 
-    public function test_rnf02_token_expirado_apos_12s_e_recusado_e_nao_grava(): void
+    public function test_rnf02_token_vale_alem_de_12s_e_vence_no_prazo_da_proposta(): void
     {
-        $token = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21']);
+        // Decisão B (13/11): o token não tem mais validade própria de 12 s; vale até o fim dos 5 min da proposta.
+        $token = $this->propor(['descricao' => 'Depois de 13 s', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(13)->seconds();
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->postJson('/agente/confirmar', ['token' => $token])
+        $vencido = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21']);
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
+        $this->postJson('/agente/confirmar', ['token' => $vencido])
             ->assertStatus(422)
             ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
 
-        $this->assertSame(0, Lancamento::count());
+        $this->assertSame(['Depois de 13 s'], Lancamento::query()->pluck('descricao')->all());
     }
 
-    public function test_falha_do_foundry_degrada_para_erro_amigavel(): void
+    public function test_falha_da_ia_degrada_para_erro_amigavel(): void
     {
         Http::fake(['*' => Http::response(['error' => 'boom'], 500)]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
     }
 
-    public function test_sem_credencial_do_foundry_devolve_erro_sem_chamar_a_rede(): void
+    public function test_sem_credencial_da_ia_devolve_erro_sem_chamar_a_rede(): void
     {
         config(['services.anthropic.api_key' => '']);
         Http::fake();
@@ -330,7 +332,7 @@ class AgenteTest extends TestCase
         $this->assertSame(0, Lancamento::count());
     }
 
-    public function test_mensagem_em_array_da_422_e_nao_chama_o_foundry(): void
+    public function test_mensagem_em_array_da_422_e_nao_chama_a_ia(): void
     {
         Http::fake();
 
@@ -342,7 +344,7 @@ class AgenteTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_mensagem_acima_de_1000_caracteres_da_422_e_nao_chama_o_foundry(): void
+    public function test_mensagem_acima_de_1000_caracteres_da_422_e_nao_chama_a_ia(): void
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
 
@@ -391,7 +393,7 @@ class AgenteTest extends TestCase
     }
 
     #[DataProvider('respostasForaDoFormato')]
-    public function test_n1_resposta_da_azure_fora_do_formato_vira_erro_amigavel_e_warning(array|string $corpo): void
+    public function test_n1_resposta_da_ia_fora_do_formato_vira_erro_amigavel_e_warning(array|string $corpo): void
     {
         Log::spy();
         Http::fake(['*' => Http::response($corpo)]);

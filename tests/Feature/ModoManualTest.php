@@ -37,7 +37,7 @@ class ModoManualTest extends TestCase
         return $this->postJson('/agente/consultar', ['tool' => $tool, 'filtros' => $filtros]);
     }
 
-    public function test_com_a_azure_fora_do_ar_lista_busca_cadastra_e_exporta(): void
+    public function test_com_a_ia_fora_do_ar_lista_busca_cadastra_e_exporta(): void
     {
         // A IA está mesmo fora: o agente responde com erro.
         $this->postJson('/agente/comando', ['mensagem' => 'liste os clientes'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
