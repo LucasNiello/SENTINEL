@@ -29,8 +29,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/auditoria/exportar', [AuditoriaController::class, 'exportar'])->middleware('throttle:exportar');
         Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
 
+        // T1: o Administrador da clínica só gerencia PINs; a bancada do agente e os cadastros o levam à /supervisao.
         Route::get('/agente', function () {
-            return view('agente');
+            return app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica() ? redirect('/supervisao') : view('agente');
         });
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
@@ -51,10 +52,11 @@ Route::middleware('auth')->group(function () {
         // A3 (RF02): CSV de uma tabela de consulta, reexecutada no servidor.
         Route::post('/agente/exportar', [AgenteController::class, 'exportar'])->middleware('throttle:exportar');
 
-        // Item I (clínica): supervisores de setor e PIN do estorno, em JSON (a tela /supervisao usa estas rotas).
+        // Item I (clínica): supervisores de setor (o dono marca) e PIN do estorno (T1, 14/11: o Administrador gera e
+        // revoga), em JSON; a tela /supervisao usa estas rotas. Saíram o "meu PIN" do supervisor e o "zerar PIN" do dono.
         Route::get('/supervisao/supervisores', [SupervisaoController::class, 'listar'])->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
-        Route::post('/supervisao/supervisores/{id}/zerar-pin', [SupervisaoController::class, 'zerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
-        Route::post('/supervisao/meu-pin', [SupervisaoController::class, 'definirMeuPin'])->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/pins/{id}/gerar', [SupervisaoController::class, 'gerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/pins/{id}/revogar', [SupervisaoController::class, 'revogarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
     });
 });

@@ -133,6 +133,9 @@ class AiAgentService
         'inicio' => 'o início',
         'fim' => 'o fim',
         'agendamento_id' => 'o atendimento',
+        // T2: estorno por itens.
+        'modo' => 'a escolha do que estornar',
+        'linhas' => 'as linhas do estorno',
         'itens' => 'os itens',
         'itens.*.catalogo_item_id' => 'o item do catálogo',
         'itens.*.quantidade' => 'a quantidade',
@@ -971,7 +974,7 @@ class AiAgentService
         return (bool) ($this->catalogo()[$tool]['reautenticar'] ?? false);
     }
 
-    /** H: que conferência o card faz antes de executar: 'admin' (senha de admin) ou 'estorno' (PIN do supervisor ou senha do dono). */
+    /** H: que conferência o card faz antes de executar: 'admin' (senha de admin) ou 'estorno' (PIN do supervisor ou do dono). */
     public function tipoReautenticacao(string $tool): ?string
     {
         $reautenticar = $this->catalogo()[$tool]['reautenticar'] ?? false;
@@ -1379,6 +1382,11 @@ class AiAgentService
                 $formulario['resumo'] = array_key_exists('resumo', $resumido) ? $resumido['resumo'] : $resumido;
                 if (($resumido['avisos'] ?? []) !== []) {
                     $formulario['avisos'] = array_values($resumido['avisos']);
+                }
+                // T2: o editor de itens do estorno (quantidade por linha) substitui o campo "linhas" (que seria um texto).
+                if (isset($resumido['itens_estorno'])) {
+                    $formulario['itens_estorno'] = array_values($resumido['itens_estorno']);
+                    $formulario['campos'] = array_values(array_filter($formulario['campos'], fn (array $c) => $c['nome'] !== 'linhas'));
                 }
             } catch (ToolRecusadaException $e) {
                 $formulario['resumo'] = [];
@@ -2425,7 +2433,7 @@ class AiAgentService
         string $colunaRotulo = '',
         ?Closure $conferir = null,
         array $resumo = [],
-        bool|string $reautenticar = false, // true = senha de admin (lixeira); 'estorno' = PIN do supervisor ou senha do dono (H)
+        bool|string $reautenticar = false, // true = senha de admin (lixeira); 'estorno' = PIN do supervisor ou do dono (H, T1)
         string $feito = 'alterado',
         string $onde = '',
         string $rotuloAcao = '',
@@ -2503,6 +2511,13 @@ class AiAgentService
     private function papelAtualPermite(array $papeis): bool
     {
         $atual = $this->contexto->papel();
+
+        // T1 (resposta F, 1ª passada do reviewer): o Administrador da clínica só gerencia PINs. Nenhuma tool vale para
+        // ele, nem as da lixeira que o domínio antigo dá ao 'admin' (consultar, excluir, excluir de vez): o RBAC de
+        // todas as rotas /agente/*, da tela /lixeira e do menu passa por aqui.
+        if ($this->contexto->ehAdminDaClinica()) {
+            return false;
+        }
 
         return in_array($atual, (array) config('sentinel.papeis', []), true) && in_array($atual, $papeis, true);
     }

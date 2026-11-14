@@ -37,6 +37,21 @@
 - `POST /agente/confirmar` aceita o token uma única vez, até o fim dos 5 min
   da proposta (sem espera mínima), e executa com os valores da sessão — nunca
   com o que vem do navegador.
+- **Estorno e PIN (clínica; decisões do Lucas A–F, 14/11)**:
+  - O PIN de autorização é gerado só pelo Administrador da clínica (papel
+    `admin` num tenant de `sentinel.tenants_clinica`, conta do `ClinicaSeeder`)
+    na `/supervisao`: 6 dígitos aleatórios, mostrados uma vez, só o hash
+    gravado; vale até o Admin gerar outro; "Revogar" zera. O dono marca o
+    supervisor do setor. O Admin da clínica só gerencia PINs: nenhuma tool,
+    sem auditoria, sem autorizar a lixeira nem estorno.
+  - O estorno (cobrança paga e venda paga) é por itens: `estornar_cobranca` e
+    `estornar_venda`, modo `tudo` | `tudo_menos_prontuario` | `itens` (argumento
+    `linhas`). Valor = preço copiado na linha × quantidade; a IA nunca informa
+    valor. Parcial continua paga; o que esgota cancela. Item do prontuário
+    estorna só o valor (o estoque nunca volta). Tabelas `estornos` e
+    `estorno_itens`. Autoriza o PIN do supervisor do setor ou do dono (a
+    senha de login do dono não vale mais). O Revisar congela o plano mostrado
+    no card. Cancelar cobrança/venda não paga continua sem PIN.
 - **RF03 — `conciliar_lancamentos_em_lote`** (papel mínimo operador): período
   obrigatório e categoria opcional; status fixo pendente → conciliado.
   - O servidor resolve o filtro uma vez, no tenant; 0 itens responde em texto,

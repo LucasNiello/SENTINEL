@@ -52,6 +52,18 @@ class PrepararAcessoLocalTest extends TestCase
         $this->assertSame($original, $usuario->fresh()->getAttributes());
     }
 
+    /** T1 (2ª passada): o Administrador da clínica (só PINs) não faz o comando pular a criação do admin do domínio antigo. */
+    public function test_admin_da_clinica_nao_conta_como_o_administrador_existente(): void
+    {
+        $this->app->detectEnvironment(fn () => 'local');
+        User::factory()->papel('admin')->doTenant(3)->create();
+
+        $this->artisan('sentinel:preparar-acesso')->assertSuccessful();
+
+        $this->assertDatabaseHas('users', ['papel' => 'admin', 'tenant_id' => 1]);
+        $this->assertSame(2, User::where('papel', 'admin')->count());
+    }
+
     public function test_email_local_ocupado_nao_e_promovido_ou_redefinido(): void
     {
         $this->app->detectEnvironment(fn () => 'local');

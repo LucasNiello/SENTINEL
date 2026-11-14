@@ -60,7 +60,7 @@ class ClinicaSeederTest extends TestCase
     {
         $usuarios = User::where('tenant_id', self::T)->get();
 
-        $this->assertCount(5, $usuarios);
+        $this->assertCount(6, $usuarios); // T1: mais a conta Administrador
         foreach ($usuarios as $usuario) {
             $this->assertNotSame(self::SENHA, $usuario->getRawOriginal('password'));
             $this->assertTrue(Hash::check(self::SENHA, $usuario->password), $usuario->email);
@@ -101,7 +101,9 @@ class ClinicaSeederTest extends TestCase
     {
         $usuarios = User::where('tenant_id', self::T)->orderBy('papel')->get();
 
-        $this->assertSame(['atendente', 'dono', 'recepcao', 'vendedor', 'veterinario'], $usuarios->pluck('papel')->all());
+        $this->assertSame(['admin', 'atendente', 'dono', 'recepcao', 'vendedor', 'veterinario'], $usuarios->pluck('papel')->all());
+        // T1: a conta Administrador nasce sem PIN e sem setor (ela só gera e revoga os PINs dos outros).
+        $this->assertSame([null, null], [$usuarios->firstWhere('papel', 'admin')->supervisor_setor, $usuarios->firstWhere('papel', 'admin')->pin_autorizacao]);
         $this->assertSame(['dono', 'veterinario'], $usuarios->whereNotNull('crmv')->pluck('papel')->values()->all());
     }
 

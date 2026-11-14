@@ -61,6 +61,18 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
   `sentinel-visual`, seção 5). Tool nova entra na classe do seu efeito, não do
   seu nome. O campo `risco` (leitura / escrita / exclusao) já vai no catálogo
   e na resposta `confirmacao_pendente`.
+- **PIN e estorno (clínica, 14/11)**:
+  - o PIN de autorização é gerado SÓ pelo Administrador da clínica (papel `admin` num tenant de
+    `sentinel.tenants_clinica`; `ContextoUsuario::ehAdminDaClinica()`), na `/supervisao`: 6 dígitos de
+    `random_int`, mostrado uma vez, só o hash gravado; nunca em log, auditoria, sessão ou outra resposta;
+  - têm PIN o dono (sem setor) e os supervisores marcados pelo dono (`SupervisaoService::podeTerPin`);
+    o estorno confere só o PIN (a senha de login do dono não vale); o Admin nunca autoriza;
+  - o Admin da clínica não tem tool nenhuma (`papelAtualPermite` nega), não vê auditoria nem autoriza
+    a lixeira (`papeisAdministrativosDoTenant`);
+  - estorno por itens (cobrança e venda): regra no trait `Concerns\EstornoPorItens`; valor = preço
+    copiado na linha × quantidade, nunca da IA nem do navegador; o argumento é `linhas`
+    ([{item_id, quantidade}]), não `itens` (colide com a relação `itens()` no localizar); o Revisar
+    congela o plano em linhas explícitas (`congelarEstorno`) e o Confirmar não recalcula "tudo".
 - **Datas**: use o timezone da config da aplicação (`now()`/Carbon seguem
   `config('app.timezone')`); nunca assuma UTC.
 - **Teste**: toda mudança vem com teste (ver skill `sentinel-testes`).

@@ -8,8 +8,8 @@ use App\Models\CatalogoItem;
 use App\Models\Cobranca;
 use App\Models\CobrancaItem;
 use App\Models\Prontuario;
-use App\Models\User;
 use App\Services\Concerns\ConfereTenant;
+use App\Services\Concerns\EstornoPorItens;
 use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -27,17 +27,14 @@ use Illuminate\Support\Facades\DB;
  * - produto com controle de estoque baixa o estoque ao entrar na cobrança (mesma transação; sem saldo, fica
  *   negativo e o card avisa, decisão de 10/11). Item removido devolve. Cobrança cancelada ou estornada devolve só os itens avulsos: o que
  *   veio do prontuário foi aplicado no animal (não volta, e não baixa de novo numa cobrança seguinte);
- * - cancelada não conta: o agendamento pode ganhar uma cobrança nova.
+ * - cancelada não conta: o agendamento pode ganhar uma cobrança nova;
+ * - cobrança PAGA se estorna por itens (T2, 14/11; EstornoPorItens): vários parciais até esgotar; o que esgota a deixa
+ *   cancelada, com o estado final de antes (colunas estorno_*).
  * Nenhum texto clínico passa para a cobrança: só o nome comercial do item.
  */
 class CobrancaService
 {
-    use ConfereTenant, FiltroPorNome;
-
-    /** Quem pode pedir o estorno, por setor da cobrança (o dono pede em qualquer setor). */
-    private const SOLICITANTE_DO_ESTORNO = ['clinica' => 'recepcao', 'petshop' => 'atendente'];
-
-    private const MOTIVO_MAXIMO = 500;
+    use ConfereTenant, EstornoPorItens, FiltroPorNome;
 
     public function __construct(private CatalogoService $catalogo)
     {
@@ -198,7 +195,11 @@ class CobrancaService
             ->when($setor, fn ($query) => $query->where('cobrancas.setor', $setor))
             ->orderByDesc('cobrancas.id')
             ->limit(100)
-            ->get(['cobrancas.*', 'pets.nome as pet', 'catalogo_itens.nome_comercial as servico', 'agendamentos.inicio as atendimento_em']);
+            ->select(['cobrancas.*', 'pets.nome as pet', 'catalogo_itens.nome_comercial as servico', 'agendamentos.inicio as atendimento_em'])
+            // T2: o estornado (soma dos estornos por itens), para a consulta mostrar total, estornado e líquido.
+            ->selectSub(fn ($q) => $q->from('estornos')->whereColumn('estornos.cobranca_id', 'cobrancas.id')->where('estornos.tenant_id', $tenantId)
+                ->selectRaw('coalesce(sum(valor_centavos), 0)'), 'estornado_centavos')
+            ->get();
     }
 
     /**
@@ -322,77 +323,86 @@ class CobrancaService
     }
 
     /**
-     * Estorno: cobrança PAGA -> cancelada, com duas pessoas. Pede: a recepção (cobrança da clínica), o
-     * atendente (do petshop) ou o dono. Autoriza: o dono, ou um supervisor do setor da cobrança (marcado
-     * pelo dono) que já definiu o PIN. Quem pede não autoriza o próprio pedido, salvo o dono. Motivo
-     * obrigatório; quem pediu, quem autorizou, o motivo, o valor e a hora ficam gravados na cobrança.
+     * Estorno por itens (T2, 14/11) de uma cobrança PAGA, com duas pessoas. Pede: a recepção (cobrança da clínica), o
+     * atendente (do petshop) ou o dono. Autoriza: o dono ou um supervisor do setor da cobrança, com o PIN gerado pelo
+     * Administrador (T1). Quem pede não autoriza o próprio pedido, salvo o dono. Motivo obrigatório.
      *
-     * A conferência do PIN do supervisor (ou da senha do dono) NÃO é feita aqui: fica no card (Fase B),
-     * que passa o resultado em $autorizacaoConferida. Sem ela (false), o estorno é recusado.
-     * Itens que vieram do prontuário não voltam ao estoque: foram aplicados no animal.
+     * $modo: "tudo" (o que resta), "tudo_menos_prontuario" ou "itens" ($itens = [{item_id, quantidade}]). O valor é
+     * sempre o preço copiado na linha × quantidade. Parcial: continua paga. O estorno que esgota a cobrança a deixa
+     * cancelada e preenche as colunas estorno_* (quem pediu e quem autorizou o último, o motivo dele, o total estornado).
+     * Cobrança e linhas travadas; tudo ou nada.
+     *
+     * A conferência do PIN NÃO é feita aqui: fica no card, que passa o resultado em $autorizacaoConferida. Sem ela
+     * (false), o estorno é recusado. Linha do prontuário estorna só o valor: o estoque nunca volta (resposta D).
+     *
+     * @param  array<int, array{item_id: mixed, quantidade: mixed}>  $itens
      */
-    public function estornar(int $cobrancaId, string $motivo, int $solicitanteId, int $autorizadorId, int $tenantId, bool $autorizacaoConferida): Cobranca
+    public function estornar(int $cobrancaId, string $motivo, int $solicitanteId, int $autorizadorId, int $tenantId, bool $autorizacaoConferida, string $modo = 'tudo', array $itens = []): Cobranca
     {
-        return DB::transaction(function () use ($cobrancaId, $motivo, $solicitanteId, $autorizadorId, $tenantId, $autorizacaoConferida) {
+        return DB::transaction(function () use ($cobrancaId, $motivo, $solicitanteId, $autorizadorId, $tenantId, $autorizacaoConferida, $modo, $itens) {
             $cobranca = Cobranca::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($cobrancaId);
 
             // Falha fechada (padrão do restaurarDaLixeira): sem a conferência do autorizador no card, nada muda.
             if (! $autorizacaoConferida) {
-                throw new RegraDeNegocioException('O estorno precisa da confirmação de quem autoriza (PIN do supervisor ou senha do dono).');
+                throw new RegraDeNegocioException('O estorno precisa da confirmação de quem autoriza (PIN do supervisor do setor ou do dono).');
             }
 
             if ($cobranca->status !== 'paga') {
                 throw new RegraDeNegocioException('Só uma cobrança paga é estornada (esta está '.$cobranca->status.'); aberta ou fechada é cancelada.');
             }
 
-            $motivo = trim($motivo);
-            if ($motivo === '') {
-                throw new RegraDeNegocioException('Informe o motivo do estorno.');
-            }
-            if (mb_strlen($motivo) > self::MOTIVO_MAXIMO) {
-                throw new RegraDeNegocioException('O motivo do estorno passa de '.self::MOTIVO_MAXIMO.' caracteres.');
-            }
+            [$motivo, $solicitante, $autorizador] = $this->conferirQuemEstorna($cobranca->setor, $motivo, $solicitanteId, $autorizadorId, $tenantId, 'cobrança');
+            $plano = $this->planoDaCobranca($cobranca, $modo, $itens, travar: true);
 
-            $solicitante = $this->doTenant(User::class, $solicitanteId, $tenantId, 'quem pediu o estorno');
-            $dono = $solicitante->papel === 'dono';
-            if (! $dono && $solicitante->papel !== self::SOLICITANTE_DO_ESTORNO[$cobranca->setor]) {
-                throw new RegraDeNegocioException('O estorno de uma cobrança do setor '.($cobranca->setor === 'clinica' ? 'clínica' : $cobranca->setor).' é pedido pela '
-                    .($cobranca->setor === 'clinica' ? 'recepção' : 'equipe de atendimento do petshop').' ou pelo dono.');
+            $estorno = $this->gravarEstorno('cobranca_id', $cobranca->id, $plano, $motivo, $solicitante->id, $autorizador->id, $tenantId);
+            if ($plano['esgota']) {
+                $cobranca->update([
+                    'status' => 'cancelada',
+                    'estorno_solicitado_por' => $solicitante->id,
+                    'estorno_autorizado_por' => $autorizador->id,
+                    'estorno_motivo' => $motivo,
+                    'estorno_valor_centavos' => $plano['estornado_antes_centavos'] + $plano['valor_centavos'],
+                    'estornado_em' => now(),
+                ]);
             }
-
-            $autorizador = $this->doTenant(User::class, $autorizadorId, $tenantId, 'quem autorizou o estorno');
-            if ($autorizador->id === $solicitante->id && ! $dono) {
-                throw new RegraDeNegocioException('Quem pede o estorno não pode autorizá-lo: chame o dono ou outro supervisor do setor.');
-            }
-            // Papel que saiu da lista de papéis válidos não autoriza nada, mesmo com a marcação e o PIN ainda gravados.
-            if (! in_array($autorizador->papel, (array) config('sentinel.papeis', []), true)) {
-                throw new RegraDeNegocioException('Quem autorizou não tem um perfil válido no sistema: o estorno não pode ser autorizado por essa pessoa.');
-            }
-            if ($autorizador->papel !== 'dono') {
-                if ($autorizador->supervisor_setor !== $cobranca->setor) {
-                    throw new RegraDeNegocioException('Só o dono ou um supervisor do setor '.($cobranca->setor === 'clinica' ? 'clínica' : $cobranca->setor).' autoriza este estorno.');
-                }
-                if ($autorizador->pin_autorizacao === null) {
-                    throw new RegraDeNegocioException('Este supervisor ainda não definiu o PIN de autorização: não pode autorizar.');
-                }
-            }
-
-            $this->devolverEstoqueDe($cobranca);
-            $cobranca->update([
-                'status' => 'cancelada',
-                'estorno_solicitado_por' => $solicitante->id,
-                'estorno_autorizado_por' => $autorizador->id,
-                'estorno_motivo' => $motivo,
-                'estorno_valor_centavos' => $cobranca->total_centavos,
-                'estornado_em' => now(),
-            ]);
+            app(DetalhesAuditoria::class)->anotar('valores_anteriores', $this->auditoriaDoEstorno($estorno, $plano));
 
             return $cobranca;
         });
     }
 
     /**
-     * Cobrança cancelada ou estornada: as linhas AVULSAS que baixaram estoque devolvem o que baixaram, em
+     * Só leitura, para o card: o que o estorno levaria AGORA (linhas, valor, já estornado, líquido). Cobrança de outro
+     * tenant: ModelNotFoundException; não paga, modo ou itens inválidos: RegraDeNegocioException.
+     */
+    public function planoDoEstorno(int $cobrancaId, string $modo, array $itens, int $tenantId): array
+    {
+        $cobranca = Cobranca::where('tenant_id', $tenantId)->findOrFail($cobrancaId);
+        if ($cobranca->status !== 'paga') {
+            throw new RegraDeNegocioException('Só uma cobrança paga é estornada (esta está '.$cobranca->status.').');
+        }
+
+        return $this->planoDaCobranca($cobranca, $modo, $itens, travar: false);
+    }
+
+    /** As linhas da cobrança paga com o que já foi estornado e o que resta (para o editor do card). */
+    public function linhasParaEstornar(int $cobrancaId, int $tenantId): array
+    {
+        $cobranca = Cobranca::where('tenant_id', $tenantId)->where('status', 'paga')->findOrFail($cobrancaId);
+
+        return $this->linhasDoEstorno('cobranca_id', $cobranca->id, $tenantId, $cobranca->itens()->orderBy('id')->get());
+    }
+
+    private function planoDaCobranca(Cobranca $cobranca, string $modo, array $itens, bool $travar): array
+    {
+        $consulta = $cobranca->itens()->orderBy('id');
+        $linhas = $this->linhasDoEstorno('cobranca_id', $cobranca->id, $cobranca->tenant_id, ($travar ? $consulta->lockForUpdate() : $consulta)->get(), $travar);
+
+        return $this->planoDoEstornoDe($linhas, $this->escolherDoEstorno($linhas, $modo, $itens, 'cobrança'), (int) $cobranca->total_centavos);
+    }
+
+    /**
+     * Cobrança cancelada (aberta ou fechada; o estorno devolve por linha, no EstornoPorItens): as linhas AVULSAS que baixaram estoque devolvem o que baixaram, em
      * ordem de item (trava sem deadlock). Linha vinda do prontuário não volta: o produto foi consumido no
      * atendimento (e não baixa de novo se o item for cobrado em outra cobrança; ver importarDoProntuario).
      */

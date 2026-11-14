@@ -84,6 +84,26 @@ class CadastrosClinicaTest extends TestCase
         $this->assertSame('Original', $tutor->fresh()->nome);
     }
 
+    /** T1 (14/11, resposta F): o Administrador da clínica só gerencia PINs; a senha dele não autoriza a lixeira. */
+    public function test_admin_da_clinica_nao_autoriza_restaurar_nem_excluir_de_vez(): void
+    {
+        $tutores = app(TutorService::class);
+        $admin = $this->usuarioClinica('admin');
+        $dono = $this->usuarioClinica('dono');
+        $tutor = $this->tutor();
+        $tutores->excluir($tutor->id, self::T);
+        $this->travel((int) config('sentinel.retencao_lixeira_dias') + 1)->days();
+        $this->artisan('sentinel:arquivar-expirados')->assertSuccessful();
+
+        $this->assertFalse($tutores->excluirDefinitivo($tutor->id, self::T, $admin->id)['excluido']);
+        $this->assertSame(1, Tutor::withTrashed()->whereKey($tutor->id)->count());
+
+        $this->actingAs($this->usuarioClinica('recepcao'));
+        $reautenticacao = app(\App\Services\ReautenticacaoAdmin::class);
+        $this->assertSame(['falha' => 'invalido'], $reautenticacao->autorizar($admin->email, 'password'));
+        $this->assertSame(['admin' => $dono->id], $reautenticacao->autorizar($dono->email, 'password'), 'o dono continua autorizando a lixeira');
+    }
+
     public function test_tutor_pet_e_item_vao_da_lixeira_ao_arquivo_e_sao_excluidos_de_vez(): void
     {
         $tutores = app(TutorService::class);

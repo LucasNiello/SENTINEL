@@ -275,7 +275,7 @@ class CorrecoesDaRevisaoTest extends TestCase
         $this->assertSame([[15000, 1, 15000], [6500, 2, 13000], [9900, 1, 9900]],
             $cobranca->itens()->orderBy('id')->get()->map(fn ($l) => [$l->preco_unitario_centavos, $l->quantidade, $l->subtotal_centavos])->all());
 
-        $dono = $this->usuarioClinica('dono');
+        $dono = $this->comPin($this->usuarioClinica('dono'));
         $estornada = $cobrancas->estornar($cobranca->id, 'Duplicidade.', $dono->id, $dono->id, self::T, true);
         $this->assertSame([$esperado, $esperado], [$estornada->fresh()->total_centavos, $estornada->fresh()->estorno_valor_centavos]);
     }
@@ -367,9 +367,8 @@ class CorrecoesDaRevisaoTest extends TestCase
         $usuario = $this->usuarioClinica($papel);
         $supervisao = app(SupervisaoService::class);
         $supervisao->marcarSupervisor($usuario->id, $setor, $this->usuarioClinica('dono')->id, self::T);
-        $supervisao->definirProprioPin($usuario->id, self::PIN, self::T);
 
-        return $usuario->fresh();
+        return $this->comPin($usuario->fresh(), self::PIN);
     }
 
     public function test_supervisor_com_papel_fora_da_lista_de_validos_nao_autoriza_estorno(): void
@@ -491,21 +490,18 @@ class CorrecoesDaRevisaoTest extends TestCase
         $this->assertTrue(app(ClienteService::class)->excluirDefinitivo($cliente->id, 1, $admin->id)['excluido']);
     }
 
-    // ---------------------------------------------------------------- defeito 12: o PIN é medido e guardado sem espaços nas pontas
+    // ---------------------------------------------------------------- defeito 12 (T1, 14/11: o PIN agora é gerado pelo Administrador)
 
-    public function test_pin_e_medido_comparado_e_guardado_sem_espacos_nas_pontas(): void
+    public function test_pin_gerado_so_tem_digitos_e_o_card_ignora_espacos_nas_pontas(): void
     {
         $usuario = $this->usuarioClinica('veterinario');
-        $usuario->forceFill(['password' => Hash::make('abc123xyz')])->save();
         $supervisao = app(SupervisaoService::class);
         $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
+        $pin = $supervisao->gerarPin($usuario->id, $this->usuarioClinica('admin')->id, self::T);
 
-        // Mesmo texto da senha com espaço no fim: depois do trim é igual a ela.
-        $this->recusa(fn () => $supervisao->definirProprioPin($usuario->id, 'abc123xyz ', self::T), 'não pode ser igual à sua senha de login');
-        $this->assertNull($usuario->fresh()->pin_autorizacao);
-
-        $supervisao->definirProprioPin($usuario->id, '  '.self::PIN.'  ', self::T);
-        $this->assertTrue(Hash::check(self::PIN, $usuario->fresh()->getRawOriginal('pin_autorizacao')), 'guardado sem os espaços');
-        $this->assertFalse(Hash::check('  '.self::PIN.'  ', $usuario->fresh()->getRawOriginal('pin_autorizacao')));
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $pin, 'sem espaço nem letra: nada a aparar na geração');
+        $this->actingAs($this->usuarioClinica('recepcao'));
+        $this->assertSame(['admin' => $usuario->id], app(ReautenticacaoAdmin::class)->autorizarEstorno($usuario->email, '  '.$pin.'  '));
+        $this->assertSame(['falha' => 'invalido'], app(ReautenticacaoAdmin::class)->autorizarEstorno($usuario->email, $pin.'0'));
     }
 }

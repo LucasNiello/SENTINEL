@@ -1,0 +1,73 @@
+/*
+ * Sentinel — estilos fora do build do Vite (14/11). Nesta máquina não há node para recompilar
+ * resources/css/workspace.css; o que entrou depois do último build mora aqui, só com os tokens
+ * da bancada (sentinel-visual §2). Quando houver build, pode migrar para o workspace.css.
+ */
+
+/* T2: editor do estorno por itens, dentro do card. */
+.estorno-itens {grid-column:1/-1}
+.estorno-itens__titulo {margin:0 0 8px;font-weight:500}
+.estorno-itens .tabela-rolagem table {min-width:560px}
+.estorno-itens__origem,.estorno-itens__resta {display:block;color:var(--sentinel-ink-muted);font-size:15px}
+.estorno-itens input[data-item-id] {width:88px;min-height:44px;font-variant-numeric:tabular-nums}
+.estorno-itens input[data-item-id]:disabled {opacity:.6}
+
+/* T3: celular (Android, 360 px). Corpo >= 15 px (rótulos em mono e caixa alta podem ficar em 12 px, sentinel-visual §3),
+   toque >= 44 px, nada só no hover, nada além da largura da tela (tabelas largas rolam dentro do contêiner). */
+@media (max-width:599px) {
+    .intro,.agent-hero .intro,.agent-empty>p:not(.eyebrow),.composer-note,.msg,.decision-flow p,.decision-flow li,
+    .context-rail dd,.context-rail p,.rodape,.campo-info,.campo-falta,.campo-erro,.card-etapa,
+    .supervisao-secao>p,.sidebar-note,.usuario,.papel-tag,.deck-header p {font-size:15px}
+    .agent-suggestions button {font-size:15px;min-height:44px}
+    .deck-badge,.agent-suggestions button small {font-size:12px}
+    #campo-mensagem {font-size:16px}
+    th,td {font-size:15px}
+    button,.menu a,.sidebar-account button,select,input:not([type=checkbox]):not([type=radio]),textarea {min-height:44px}
+    .menu a {display:flex;align-items:center}
+    .supervisao-acoes button {flex:1 1 100%}
+    .card-confirmacao .acoes button {min-height:48px}
+    .pin-gerado__codigo {font-size:28px}
+
+    /* Editor do estorno: cada linha vira um bloco, com o rótulo de cada número (o thead continua para leitor de tela). */
+    .estorno-itens .tabela-rolagem {border:0;background:transparent;overflow:visible}
+    .estorno-itens .tabela-rolagem table {min-width:0;width:100%}
+    .estorno-itens thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    .estorno-itens table,.estorno-itens tbody,.estorno-itens tr,.estorno-itens td {display:block}
+    .estorno-itens tr {border:1px solid var(--sentinel-border);border-radius:var(--radius);background:var(--sentinel-paper);padding:12px;margin:0 0 8px}
+    .estorno-itens td {padding:4px 0;border:0;text-align:left}
+    .estorno-itens td:nth-child(1) {font-weight:500}
+    .estorno-itens td:nth-child(2)::before {content:"Preço: "}
+    .estorno-itens td:nth-child(3)::before {content:"Lançado: "}
+    .estorno-itens td:nth-child(4)::before {content:"Já estornado: "}
+    .estorno-itens td:nth-child(5) {display:flex;align-items:center;gap:12px;padding-top:8px}
+    .estorno-itens td:nth-child(5)::before {content:"Estornar agora:"}
+    .estorno-itens input[data-item-id] {width:96px}
+}
+
+/* T3, 2ª rodada das capturas: rótulos em caixa alta no mínimo 12 px; rótulos de campo, células, topo e botões em 15 px. */
+@media (max-width:599px) {
+    .eyebrow,.sidebar-caption,.marca small,.card-overline span,.card-risco,.context-rail dt,.tabela-resumo,
+    .agent-suggestions small,.account-initials {font-size:12px}
+    .campo label,.campo-obrigatorio,.card-registro dt,.card-registro dd,.workspace-context span,.sidebar-account button,
+    .btn-editar-linha,.btn-ver,main td,main th,.card-confirmacao .acoes button {font-size:15px}
+}
+@media (max-width:599px) {
+    .workspace .eyebrow,.workspace .decision-flow span {font-size:12px}
+    .workspace .decision-flow h3,.workspace main td,.workspace main th,.workspace .autorizacao-titulo {font-size:15px}
+}
+
+/* T3: a tabela da /supervisao vira um bloco por pessoa no celular (as ações ficavam fora da tela, à direita). */
+@media (max-width:599px) {
+    #tabela-supervisores {border:0;background:transparent;overflow:visible}
+    #tabela-supervisores table {min-width:0;width:100%}
+    #tabela-supervisores thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+    #tabela-supervisores table,#tabela-supervisores tbody,#tabela-supervisores tr,#tabela-supervisores td {display:block}
+    #tabela-supervisores tr {border:1px solid var(--sentinel-border);border-radius:var(--radius);background:var(--sentinel-paper);padding:12px 16px;margin:0 0 12px}
+    #tabela-supervisores td {padding:4px 0;border:0}
+    #tabela-supervisores td:nth-child(1) {font-weight:500}
+    #tabela-supervisores td:nth-child(2)::before {content:"Papel: "}
+    #tabela-supervisores td:nth-child(3)::before {content:"Setor: "}
+    #tabela-supervisores td:nth-child(4)::before {content:"PIN: "}
+    #tabela-supervisores td:nth-child(5) {padding-top:12px}
+    #tabela-supervisores .campo {min-width:0}
+}

@@ -85,6 +85,13 @@ class AgenteController extends Controller
         }
 
         $mensagem = $validador->validated()['mensagem'];
+
+        // T1 (resposta F): o Administrador da clínica só gerencia PINs; nenhum pedido dele vai à IA (nem gasta chamada).
+        if (app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica()) {
+            return response()->json(['tipo' => 'negado', 'categoria' => 'authorization_error', 'codigo' => 'AI_FORBIDDEN', 'http_status' => 403,
+                'mensagem' => 'O Administrador só gera e revoga os PINs, na tela Supervisão.'], 403);
+        }
+
         try {
             $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()), $this->conversa->lerLista($request->session()));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -156,12 +163,24 @@ class AgenteController extends Controller
         }
 
         $tool = $rascunho['tool'];
-        $revisados = $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores);
+        // T2: as linhas do estorno só com item_id e quantidade (nada a mais do navegador vai para a sessão ou a auditoria).
+        $revisados = $this->aiAgentService->limparLinhasDoEstorno($tool, $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores));
 
         try {
             $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho), ConfirmacoesPendentes::origem($rascunho),
                 ConfirmacoesPendentes::tempoIa($rascunho), ConfirmacoesPendentes::loteIds($rascunho));
             $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? [], ConfirmacoesPendentes::loteIds($rascunho));
+            // T2: o plano do estorno que o card vai mostrar fica congelado em linhas explícitas (o Confirmar não recalcula "tudo").
+            if ($recusa === null) {
+                try {
+                    $revisados = $this->aiAgentService->congelarEstorno($tool, $revisados);
+                } catch (\App\Exceptions\RegraDeNegocioException $e) {
+                    // Corrida entre o conferir e o congelar (ex.: outro estorno esgotou o registro): a frase de negócio, não um 500.
+                    $recusa = ['tipo' => 'erro', 'categoria' => 'business_rule', 'codigo' => 'AI_BUSINESS_RULE', 'http_status' => 422,
+                        'mensagem' => $e->getMessage(), 'erros' => ['_acao' => $e->getMessage()]];
+                    $formulario = $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'], ConfirmacoesPendentes::loteIds($rascunho));
+                }
+            }
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -187,12 +206,19 @@ class AgenteController extends Controller
                 'formulario' => $formulario], $recusa['http_status'] ?? 422);
         }
 
+        // T2: no estorno por itens, o card mostra de novo o que vai ser estornado, com os valores REVISADOS (o humano pode
+        // ter mudado o modo ou as quantidades), antes do segurar.
+        // Só nas tools do estorno: nas outras, o resumo pode rodar uma prévia (transação desfeita) sem necessidade.
+        $refeito = $this->aiAgentService->tipoReautenticacao($tool) === 'estorno'
+            ? $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho)) : null;
+
         return response()->json([
             'tipo' => 'revisada',
             'proposta' => $proposta,
             'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
             'risco' => $this->aiAgentService->risco($tool),
             'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados),
+            ...(isset($refeito['itens_estorno']) ? ['formulario' => $refeito] : []),
         ]);
     }
 
@@ -251,7 +277,7 @@ class AgenteController extends Controller
         $autorizadoPor = null;
 
         if ($this->aiAgentService->exigeReautenticacao($pendente['tool']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
-            // H: o estorno é autorizado pelo PIN do supervisor ou pela senha do dono (mesmos campos do card e mesmos limites).
+            // H, T1: o estorno é autorizado pelo PIN do supervisor ou do dono (mesmos campos do card e mesmos limites).
             $estorno = $this->aiAgentService->tipoReautenticacao($pendente['tool']) === 'estorno';
             $autorizacao = $this->reautenticar($request, $estorno);
 
@@ -450,7 +476,7 @@ class AgenteController extends Controller
     private function reautenticar(Request $request, bool $estorno = false): array
     {
         try {
-            // H: no estorno, "senha_admin" leva o PIN do supervisor ou a senha do dono (o card é o mesmo).
+            // H, T1: no estorno, "senha_admin" leva o PIN do supervisor ou do dono (o card é o mesmo).
             return $estorno
                 ? $this->reautenticacao->autorizarEstorno($request->input('email_admin'), $request->input('senha_admin'))
                 : $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin'));
@@ -477,11 +503,11 @@ class AgenteController extends Controller
     {
         [$codigo, $status, $motivo, $mensagem] = $estorno ? match ($falha) {
             'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de autorização do estorno atingido.',
-                'Muitas tentativas com o PIN ou a senha errados. Aguarde alguns minutos. Nada foi gravado.'],
-            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e PIN (ou senha do dono) de quem autoriza o estorno.',
-                'Informe o e-mail de quem autoriza e o PIN do supervisor (ou a senha do dono). Nada foi gravado.'],
+                'Muitas tentativas com o PIN errado. Aguarde alguns minutos. Nada foi gravado.'],
+            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e PIN de quem autoriza o estorno.',
+                'Informe o e-mail e o PIN do supervisor do setor ou do dono. Nada foi gravado.'],
             default => ['AI_REAUTH_FAILED', 403, 'Autorização do estorno não conferiu.',
-                'E-mail, PIN ou senha de quem autoriza inválidos. Nada foi gravado.'],
+                'E-mail ou PIN de quem autoriza inválidos. Nada foi gravado.'],
         } : match ($falha) {
             'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de senha de administrador atingido.',
                 'Muitas tentativas com a senha errada. Aguarde alguns minutos. Nada foi gravado.'],

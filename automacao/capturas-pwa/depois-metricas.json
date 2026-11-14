@@ -1,0 +1,172 @@
+{
+ "erros": [],
+ "metricas": {
+  "depois-01-login": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "span 12px \"SENTINEL\"",
+    "span.access-tag 12px \"ÁREA RESTRITA\"",
+    "span 12px \"© SENTINEL\"",
+    "span 12px \"Acesso autorizado\""
+   ],
+   "total_fontes_pequenas": 4,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-02-agente": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"DH\"",
+    "span.deck-badge 12px \"REVISÃO HUMANA\"",
+    "small 12px \"CONSULTAR\"",
+    "small 12px \"FINANCEIRO\"",
+    "dt 12px \"CONTA\"",
+    "dt 12px \"PERFIL\"",
+    "dt 12px \"MÓDULO\"",
+    "span 12px \"01\"",
+    "span 12px \"02\"",
+    "span 12px \"03\""
+   ],
+   "total_fontes_pequenas": 11,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-03-menu": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"DH\"",
+    "span.deck-badge 12px \"REVISÃO HUMANA\"",
+    "small 12px \"CONSULTAR\"",
+    "small 12px \"FINANCEIRO\"",
+    "dt 12px \"CONTA\"",
+    "dt 12px \"PERFIL\"",
+    "dt 12px \"MÓDULO\"",
+    "span 12px \"01\"",
+    "span 12px \"02\"",
+    "span 12px \"03\""
+   ],
+   "total_fontes_pequenas": 11,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-04-card-estorno": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"DH\"",
+    "span.deck-badge 12px \"REVISÃO HUMANA\"",
+    "span 12px \"AÇÃO PROPOSTA\"",
+    "span.card-risco 12px \"Exclusão\"",
+    "dt 12px \"CONTA\"",
+    "dt 12px \"PERFIL\"",
+    "dt 12px \"MÓDULO\"",
+    "span 12px \"01\"",
+    "span 12px \"02\"",
+    "span 12px \"03\""
+   ],
+   "total_fontes_pequenas": 11,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-editor": "{\"modo\":\"itens\",\"linhas\":[{\"item_id\":35,\"quantidade\":\"1\"}]}",
+  "depois-editor-tudo": "[\"1/1\"]",
+  "depois-04b-card-segurar": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"DH\"",
+    "span.deck-badge 12px \"REVISÃO HUMANA\"",
+    "span 12px \"AÇÃO PROPOSTA\"",
+    "span.card-risco 12px \"Exclusão\"",
+    "dt 12px \"CONTA\"",
+    "dt 12px \"PERFIL\"",
+    "dt 12px \"MÓDULO\"",
+    "span 12px \"01\"",
+    "span 12px \"02\"",
+    "span 12px \"03\""
+   ],
+   "total_fontes_pequenas": 11,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-toque": {
+   "etapa": "Dados conferidos. Segure Confirmar por 2 segundos. Se soltar antes, nada é gravado.",
+   "curto": "{\"soltou\":true,\"popup\":\"\"}",
+   "longo": "{\"popup\":\"✕ E-mail ou PIN de quem autoriza inválidos. Nada foi gravado.Fechar\",\"card_existe\":false}"
+  },
+  "depois-service-worker": "{\"registrado\":true,\"escopo\":\"http://127.0.0.1:8765/\",\"cache\":[\"/manifest.webmanifest\",\"/icons/sentinel-192.png\",\"/icons/sentinel-512.png\",\"/favicon-sentinel.svg\",\"/build/assets/workspace-DJ0ixdab.css\",\"/build/assets/workspace-C4FyHYw8.js\",\"/build/assets/ibm-plex-sans-400-600-IvpUvPa2.woff2\",\"/build/assets/ibm-plex-mono-400-DMJ8VG8y.woff2\",\"/build/assets/sora-300-600-DdqRvwsR.woff2\",\"/build/assets/login-CoCtO9hF.css\",\"/build/assets/login-D2yYZPUf.js\",\"/build/assets/three-core-BoIOInGc.js\",\"/build/assets/quality-DlLkK6tM.js\",\"/build/assets/ibm-plex-mono-500-DSY6xOcd.woff2\"]}",
+  "depois-05-cadastros": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"DH\"",
+    "div.tabela-resumo 12px \"8 registro(s) encontrado(s)\"",
+    "button.btn-exportar 13px \"Exportar CSV\""
+   ],
+   "total_fontes_pequenas": 4,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-06-supervisao-dono": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"DH\""
+   ],
+   "total_fontes_pequenas": 2,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-07-supervisao-admin": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"AD\""
+   ],
+   "total_fontes_pequenas": 2,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-gerar-pin": "{\"codigo_6_digitos\":true,\"caixa_visivel\":true,\"senha_limpa\":true,\"aviso\":\"PIN gerado para Dra. Helena Prado (dono) por Administrador da clínica.\",\"linha\":\"Dra. Helena Prado (dono)DonoTodos (dono)GeradoGerar novo PINRevogar PIN\"}",
+  "depois-08-pin-gerado": {
+   "largura": 360,
+   "rolagem_horizontal": false,
+   "scrollWidth": 360,
+   "fontes_pequenas": [
+    "small 12px \"CONTROL SYSTEM\"",
+    "span.account-initials 12px \"AD\""
+   ],
+   "total_fontes_pequenas": 2,
+   "toque_pequeno": [],
+   "total_toque_pequeno": 0,
+   "alem_da_tela": []
+  },
+  "depois-ja-anotei": "{\"caixa_escondida\":true,\"codigo_apagado\":true}"
+ }
+}

@@ -7,6 +7,7 @@ use App\Http\Requests\AlterarStatusAgendamentoRequest;
 use App\Http\Requests\CatalogoItemAtualizacaoRequest;
 use App\Http\Requests\CatalogoItemRequest;
 use App\Http\Requests\EstornarCobrancaRequest;
+use App\Http\Requests\EstornarVendaRequest;
 use App\Http\Requests\PetRequest;
 use App\Http\Requests\ReceberCobrancaRequest;
 use App\Http\Requests\RegistrarVendaRequest;
@@ -19,6 +20,7 @@ use App\Models\Mensagem;
 use App\Models\Pet;
 use App\Models\Tutor;
 use App\Models\User;
+use App\Models\Venda;
 use App\Services\AgendaService;
 use App\Services\CatalogoService;
 use App\Services\CobrancaService;
@@ -300,12 +302,16 @@ trait CatalogoDaClinica
                         'servico' => $c->getAttribute('servico'),
                         'atendimento' => \Carbon\CarbonImmutable::parse($c->getAttribute('atendimento_em'), (string) config('app.timezone'))->format('d/m/Y H:i'),
                         'total' => $this->reais((int) $c->total_centavos),
+                        // T2: estornado (soma dos estornos por itens; estorno antigo, de antes da T2: a coluna estorno_valor) e líquido.
+                        'estornado' => $this->reais($estornado = $this->estornadoDaCobranca($c)),
+                        // Líquido só onde houve pagamento (paga, ou cancelada por estorno); nas outras, "—".
+                        'liquido' => $c->status === 'paga' || $estornado > 0 ? $this->reais((int) $c->total_centavos - $estornado) : '—',
                         'status' => $c->status === 'fechada' ? 'a receber' : $c->status,
                         'forma_pagamento' => $c->forma_pagamento,
                         ...($c->status === 'fechada' && $this->podeEditar('receber_cobranca') ? ['acao' => ['tool' => 'receber_cobranca', 'rotulo' => 'Receber']] : []),
                     ])->all(),
                 mensagemErro: 'Não consegui consultar as cobranças agora. Tente novamente.',
-                colunas: ['id', 'pet', 'servico', 'atendimento', 'total', 'status', 'forma_pagamento'],
+                colunas: ['id', 'pet', 'servico', 'atendimento', 'total', 'estornado', 'liquido', 'status', 'forma_pagamento'],
             ),
             $this->definirAcao(
                 nome: 'cobrar_atendimento',
@@ -378,33 +384,43 @@ trait CatalogoDaClinica
                 campos: [],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId),
             ),
-            // H: estorno de cobrança PAGA no card. Pede: a recepção (clínica), o atendente (petshop) ou o dono; quem é do
-            // setor certo o CobrancaService confere. Autoriza: o supervisor do setor com o PIN dele, ou o dono com a senha,
-            // digitados no card (reautenticar 'estorno'); a conferência fica no /agente/confirmar e nunca vai para a IA.
+            // H, T2 (14/11): estorno por itens de cobrança PAGA no card. Pede: a recepção (clínica), o atendente (petshop) ou o
+            // dono; quem é do setor certo o CobrancaService confere. Autoriza: o supervisor do setor ou o dono, com o PIN
+            // (T1), digitado no card (reautenticar 'estorno'); a conferência fica no /agente/confirmar e nunca vai para a IA.
+            // A IA escolhe o modo e, em "itens", as linhas e as quantidades; o VALOR é sempre do servidor.
             $this->definirAcao(
                 nome: 'estornar_cobranca',
-                descricao: 'Estorna uma cobrança PAGA (volta para cancelada; o estoque dos itens avulsos volta). Precisa de motivo e da autorização de um supervisor do setor (PIN) ou do dono (senha), digitada só no card de confirmação: nunca peça nem aceite PIN ou senha no chat. Achada pelo id da cobrança ou pelo nome do pet.',
+                descricao: 'Estorna, no todo ou em parte, uma cobrança PAGA. modo: "tudo" (tudo o que ainda não foi estornado), "tudo_menos_prontuario" (sem o que veio do prontuário) ou "itens" (só as linhas e quantidades em linhas; item_id é o número da linha da cobrança). Nunca informe valor: o servidor calcula pelo preço da época. Parcial: a cobrança continua paga. O estoque dos itens avulsos volta; o do prontuário nunca. Precisa de motivo e da autorização de um supervisor do setor ou do dono (PIN), digitada só no card de confirmação: nunca peça nem aceite PIN ou senha no chat. Achada pelo id da cobrança ou pelo nome do pet.',
                 acao: 'estornar',
                 entidade: 'Cobranca',
                 papeis: ['recepcao', 'atendente', 'dono'],
-                propriedades: ['motivo' => ['type' => 'string', 'description' => 'Por que a cobrança paga está sendo estornada.']],
+                propriedades: [
+                    'motivo' => ['type' => 'string', 'description' => 'Por que a cobrança paga está sendo estornada.'],
+                    ...$this->propriedadesDoEstorno(EstornarCobrancaRequest::MODOS),
+                ],
                 obrigatorios: [],
                 formRequest: EstornarCobrancaRequest::class,
                 // Quem pede é o usuário logado; quem autorizou é quem o card conferiu (autorizadoPor), nunca a IA.
                 executar: fn (array $d, int $tenantId, User $ator) => $cobrancas->estornar($d['id'], (string) $d['motivo'], $ator->id,
-                    $this->autorizadoPor() ?? 0, $tenantId, $this->autorizadoPor() !== null),
+                    $this->autorizadoPor() ?? 0, $tenantId, $this->autorizadoPor() !== null, (string) $d['modo'], $this->itensDoEstorno($d['linhas'] ?? [])),
                 mensagemErro: 'Não consegui estornar a cobrança. Nada foi gravado.',
                 titulo: 'Estornar a cobrança',
-                sucesso: 'Cobrança estornada',
+                sucesso: 'Estorno registrado',
                 conferir: fn (array $a) => $cobrancas->localizar((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], ['paga'])->isEmpty()
-                    ? ['campo' => 'id', 'motivo' => 'Não encontrei a cobrança paga #'.(int) ($a['id'] ?? 0).'.'] : null,
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei a cobrança paga #'.(int) ($a['id'] ?? 0).'.']
+                    : $this->recusaDe(fn () => $cobrancas->planoDoEstorno((int) $a['id'], (string) ($a['modo'] ?? ''), $this->itensDoEstorno($a['linhas'] ?? []), (int) $a['tenant_id']), 'a cobrança paga', 'itens'),
                 risco: 'exclusao',
                 localizar: fn (?int $id, ?string $busca, int $tenantId) => $cobrancas->localizar($id, $busca, $tenantId, ['paga']),
                 rotulo: 'a cobrança paga',
                 colunaRotulo: 'pet',
                 rotuloAcao: 'Estornar',
-                campos: ['motivo'],
-                resumir: fn (array $v, int $tenantId) => $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId),
+                campos: ['modo', 'motivo', 'linhas'],
+                resumir: fn (array $v, int $tenantId) => $this->resumoDoEstorno(
+                    $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId, comLinhas: false),
+                    fn () => $cobrancas->linhasParaEstornar((int) ($v['id'] ?? 0), $tenantId),
+                    fn () => $cobrancas->planoDoEstorno((int) ($v['id'] ?? 0), (string) ($v['modo'] ?? ''), $this->itensDoEstorno($v['linhas'] ?? []), $tenantId),
+                    $v,
+                ),
                 reautenticar: 'estorno',
             ),
 
@@ -446,6 +462,73 @@ trait CatalogoDaClinica
                         ...$this->linhasDoResumo($previa['linhas'], $previa['total_centavos']),
                     ], 'avisos' => $previa['avisos']];
                 },
+            ),
+
+            // T2 (14/11): consulta das vendas (total, estornado e líquido) e estorno por itens da venda PAGA (resposta E).
+            $this->definirTool(
+                nome: 'consultar_vendas',
+                descricao: 'Lista as vendas avulsas (aberta, paga, cancelada), com setor, tutor, pet, total, estornado e líquido. Ação de leitura — não exige confirmação.',
+                tipo: 'leitura',
+                risco: 'leitura',
+                acao: 'consultar',
+                entidade: 'Venda',
+                papeis: self::PAPEIS_EQUIPE,
+                propriedades: [
+                    'status' => ['type' => 'string', 'enum' => Venda::STATUS],
+                    'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
+                ],
+                obrigatorios: [],
+                executar: fn (array $a) => $vendas->buscarPorFiltro($a['status'] ?? null, $a['setor'] ?? null, $a['tenant_id'])
+                    ->map(fn (Venda $venda) => [
+                        'id' => (int) $venda->id,
+                        'data' => ($venda->pago_em ?? $venda->created_at)?->format('d/m/Y H:i'),
+                        'setor' => $venda->setor === 'clinica' ? 'Clínica' : 'Petshop',
+                        'tutor' => $venda->getAttribute('tutor'),
+                        'pet' => $venda->getAttribute('pet'),
+                        'total' => $this->reais((int) $venda->total_centavos),
+                        'estornado' => $this->reais((int) $venda->getAttribute('estornado_centavos')),
+                        'liquido' => $venda->status === 'paga' || (int) $venda->getAttribute('estornado_centavos') > 0
+                            ? $this->reais((int) $venda->total_centavos - (int) $venda->getAttribute('estornado_centavos')) : '—',
+                        'status' => $venda->status,
+                        'forma_pagamento' => $venda->forma_pagamento,
+                    ])->all(),
+                mensagemErro: 'Não consegui consultar as vendas agora. Tente novamente.',
+                colunas: ['id', 'data', 'setor', 'tutor', 'pet', 'total', 'estornado', 'liquido', 'status', 'forma_pagamento'],
+            ),
+            $this->definirAcao(
+                nome: 'estornar_venda',
+                descricao: 'Estorna, no todo ou em parte, uma venda avulsa PAGA, com a mesma regra da cobrança. modo: "tudo" (tudo o que ainda não foi estornado) ou "itens" (só as linhas e quantidades em linhas; item_id é o número da linha da venda). Nunca informe valor: o servidor calcula pelo preço da época. Parcial: a venda continua paga; o estoque volta. Precisa de motivo e da autorização de um supervisor do setor ou do dono (PIN), digitada só no card de confirmação: nunca peça nem aceite PIN ou senha no chat. Achada pelo id da venda ou pelo nome do tutor ou do pet.',
+                acao: 'estornar',
+                entidade: 'Venda',
+                papeis: ['recepcao', 'atendente', 'dono'],
+                propriedades: [
+                    'motivo' => ['type' => 'string', 'description' => 'Por que a venda paga está sendo estornada.'],
+                    ...$this->propriedadesDoEstorno(EstornarVendaRequest::MODOS),
+                ],
+                obrigatorios: [],
+                formRequest: EstornarVendaRequest::class,
+                executar: fn (array $d, int $tenantId, User $ator) => $vendas->estornar($d['id'], (string) $d['motivo'], $ator->id,
+                    $this->autorizadoPor() ?? 0, $tenantId, $this->autorizadoPor() !== null, (string) $d['modo'], $this->itensDoEstorno($d['linhas'] ?? [])),
+                mensagemErro: 'Não consegui estornar a venda. Nada foi gravado.',
+                titulo: 'Estornar a venda',
+                sucesso: 'Estorno registrado',
+                conferir: fn (array $a) => $vendas->localizar((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], ['paga'])->isEmpty()
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei a venda paga #'.(int) ($a['id'] ?? 0).'.']
+                    : $this->recusaDe(fn () => $vendas->planoDoEstorno((int) $a['id'], (string) ($a['modo'] ?? ''), $this->itensDoEstorno($a['linhas'] ?? []), (int) $a['tenant_id']), 'a venda paga', 'itens'),
+                risco: 'exclusao',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $vendas->localizar($id, $busca, $tenantId, ['paga']),
+                rotulo: 'a venda paga',
+                buscaPor: 'nome do tutor ou do pet',
+                colunaRotulo: 'tutor',
+                rotuloAcao: 'Estornar',
+                campos: ['modo', 'motivo', 'linhas'],
+                resumir: fn (array $v, int $tenantId) => $this->resumoDoEstorno(
+                    $this->resumoDaVenda((int) ($v['id'] ?? 0), $tenantId),
+                    fn () => $vendas->linhasParaEstornar((int) ($v['id'] ?? 0), $tenantId),
+                    fn () => $vendas->planoDoEstorno((int) ($v['id'] ?? 0), (string) ($v['modo'] ?? ''), $this->itensDoEstorno($v['linhas'] ?? []), $tenantId),
+                    $v,
+                ),
+                reautenticar: 'estorno',
             ),
 
             // ---------------------------------------------------------------- caixa de entrada (P-B5)
@@ -558,8 +641,8 @@ trait CatalogoDaClinica
         return $prefixo === '' ? $linhas : array_map(fn (array $l) => [...$l, 'rotulo' => $prefixo.': '.mb_strtolower($l['rotulo'])], $linhas);
     }
 
-    /** A cobrança no card: pet, serviço, cada linha (cópia do preço da época), total e situação. */
-    private function resumoDaCobranca(int $id, int $tenantId): array
+    /** A cobrança no card: pet, serviço, cada linha (cópia do preço da época), total e situação. Sem $comLinhas (estorno): só o cabeçalho. */
+    private function resumoDaCobranca(int $id, int $tenantId, bool $comLinhas = true): array
     {
         $cobranca = Cobranca::query()->where('tenant_id', $tenantId)->with(['agendamento.pet', 'agendamento.servico', 'itens'])->find($id);
 
@@ -567,11 +650,154 @@ trait CatalogoDaClinica
             return [];
         }
 
+        if (! $comLinhas) {
+            return [
+                ['rotulo' => 'Pet', 'valor' => $cobranca->agendamento?->pet?->nome],
+                ['rotulo' => 'Atendimento', 'valor' => $cobranca->agendamento?->servico?->nome_comercial.' em '.$cobranca->agendamento?->inicio?->format('d/m/Y H:i')],
+                ['rotulo' => 'Pago em', 'valor' => $cobranca->pago_em?->format('d/m/Y H:i').' ('.$cobranca->forma_pagamento.')'],
+            ];
+        }
+
         return [
             ['rotulo' => 'Pet', 'valor' => $cobranca->agendamento?->pet?->nome],
             ['rotulo' => 'Atendimento', 'valor' => $cobranca->agendamento?->servico?->nome_comercial.' em '.$cobranca->agendamento?->inicio?->format('d/m/Y H:i')],
             ...$this->linhasDoResumo($cobranca->itens->sortBy('id')->map(fn ($l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->values()->all(), (int) $cobranca->total_centavos),
             ['rotulo' => 'Situação', 'valor' => $cobranca->status === 'fechada' ? 'a receber' : $cobranca->status],
+        ];
+    }
+
+    /** A venda no card do estorno: setor, tutor, pet e quando foi paga (só leitura, do tenant). */
+    private function resumoDaVenda(int $id, int $tenantId): array
+    {
+        $venda = Venda::query()->where('tenant_id', $tenantId)->with(['tutor', 'pet'])->find($id);
+
+        return $venda === null ? [] : [
+            ['rotulo' => 'Setor', 'valor' => $venda->setor === 'clinica' ? 'Clínica' : 'Petshop'],
+            ['rotulo' => 'Tutor', 'valor' => $venda->tutor?->nome],
+            ['rotulo' => 'Pet', 'valor' => $venda->pet?->nome],
+            ['rotulo' => 'Pago em', 'valor' => $venda->pago_em?->format('d/m/Y H:i').' ('.$venda->forma_pagamento.')'],
+        ];
+    }
+
+    /** T2: estornado de uma linha da consulta de cobranças (soma dos estornos; estorno de antes da T2: estorno_valor_centavos). */
+    private function estornadoDaCobranca(Cobranca $c): int
+    {
+        $porItens = (int) $c->getAttribute('estornado_centavos');
+
+        return $porItens > 0 ? $porItens : (int) ($c->estorno_valor_centavos ?? 0);
+    }
+
+    /**
+     * T2, 1ª passada do reviewer (imp. 2): as linhas do estorno só com item_id e quantidade, venham da IA ou do navegador
+     * (/agente/revisar). Assim nenhuma chave a mais (um "valor_centavos") vai para a sessão nem para a auditoria.
+     */
+    public function limparLinhasDoEstorno(string $tool, array $valores): array
+    {
+        if (in_array($tool, ['estornar_cobranca', 'estornar_venda'], true) && array_key_exists('linhas', $valores)) {
+            $valores['linhas'] = $this->itensDoEstorno($valores['linhas']);
+        }
+
+        return $valores;
+    }
+
+    /**
+     * T2, 1ª passada do reviewer (imp. 1): no Revisar, o plano que o card mostrou é congelado em linhas explícitas (modo
+     * "itens", com as quantidades daquele instante). No Confirmar, "tudo" não é recalculado: se outro estorno levou parte
+     * das linhas nesse meio-tempo, o service recusa ("restam N"), em vez de gravar um valor que quem autorizou não viu.
+     */
+    public function congelarEstorno(string $tool, array $revisados): array
+    {
+        $servico = match ($tool) {
+            'estornar_cobranca' => app(CobrancaService::class),
+            'estornar_venda' => app(VendaService::class),
+            default => null,
+        };
+        if ($servico === null) {
+            return $revisados;
+        }
+
+        $plano = $servico->planoDoEstorno((int) ($revisados['id'] ?? 0), (string) ($revisados['modo'] ?? ''),
+            $this->itensDoEstorno($revisados['linhas'] ?? []), $this->contexto->tenantId());
+
+        return [...$revisados, 'modo' => 'itens', 'linhas' => array_values(array_map(
+            fn (array $l) => ['item_id' => $l['item_id'], 'quantidade' => $l['quantidade']],
+            array_filter($plano['linhas'], fn (array $l) => $l['quantidade'] >= 1),
+        ))];
+    }
+
+    /** As propriedades do estorno por itens no esquema da tool (a IA nunca informa valor). */
+    private function propriedadesDoEstorno(array $modos): array
+    {
+        return [
+            'modo' => ['type' => 'string', 'enum' => $modos],
+            'linhas' => ['type' => 'array', 'description' => 'Só no modo "itens": cada linha (item_id = número da linha) e a quantidade inteira a estornar.', 'items' => [
+                'type' => 'object',
+                'properties' => ['item_id' => ['type' => 'integer'], 'quantidade' => ['type' => 'integer']],
+                'required' => ['item_id', 'quantidade'],
+                'additionalProperties' => false,
+            ]],
+        ];
+    }
+
+    /** Itens do estorno: só item_id e quantidade de cada linha (qualquer outra chave, como um "valor", é descartada). */
+    private function itensDoEstorno(mixed $itens): array
+    {
+        if (! is_array($itens)) {
+            return [];
+        }
+
+        return array_values(array_map(fn ($linha) => is_array($linha) ? array_intersect_key($linha, array_flip(['item_id', 'quantidade'])) : [], $itens));
+    }
+
+    /**
+     * O card do estorno (T2): o cabeçalho do registro, o que este estorno leva (linha a linha, com o valor da época), o
+     * valor do estorno, o já estornado e o líquido que fica; e o editor de itens (itens_estorno: cada linha com o que
+     * resta e a quantidade escolhida). Recusa do plano (ex.: modo sem itens) vira aviso: o Revisar recusa de novo.
+     */
+    private function resumoDoEstorno(array $cabecalho, \Closure $linhas, \Closure $plano, array $valores): array
+    {
+        try {
+            $todas = $linhas();
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return ['resumo' => $cabecalho];
+        }
+
+        $avisos = [];
+        try {
+            $previsto = $plano();
+        } catch (\App\Exceptions\RegraDeNegocioException $e) {
+            $previsto = null;
+            $avisos[] = $e->getMessage();
+        }
+
+        $escolhidas = $previsto === null ? array_column($this->itensDoEstorno($valores['linhas'] ?? []), 'quantidade', 'item_id')
+            : array_column($previsto['linhas'], 'quantidade', 'item_id');
+        $resumo = $cabecalho;
+        if ($previsto !== null) {
+            foreach ($previsto['linhas'] as $l) {
+                if ($l['quantidade'] >= 1) {
+                    $resumo[] = ['rotulo' => 'Estornar '.$l['quantidade'].' × '.$l['descricao'].($l['prontuario'] ? ' (prontuário: o estoque não volta)' : ''), 'valor' => $this->reais($l['valor_centavos'])];
+                }
+            }
+            $resumo[] = ['rotulo' => 'Valor do estorno', 'valor' => $this->reais($previsto['valor_centavos'])];
+            $resumo[] = ['rotulo' => 'Total pago', 'valor' => $this->reais($previsto['total_centavos'])];
+            $resumo[] = ['rotulo' => 'Já estornado antes', 'valor' => $this->reais($previsto['estornado_antes_centavos'])];
+            $resumo[] = ['rotulo' => 'Líquido depois do estorno', 'valor' => $this->reais($previsto['liquido_centavos'])];
+        }
+
+        return [
+            'resumo' => $resumo,
+            'avisos' => $avisos,
+            'itens_estorno' => array_map(fn (array $l) => [
+                'item_id' => $l['item_id'],
+                'descricao' => $l['descricao'],
+                'origem' => $l['prontuario'] ? 'Prontuário' : 'Avulso',
+                'lancada' => $l['lancada'],
+                'estornada' => $l['estornada'],
+                'restante' => $l['restante'],
+                'preco' => $this->reais($l['preco_unitario_centavos']),
+                'quantidade' => (int) ($escolhidas[$l['item_id']] ?? 0),
+            ], $todas),
         ];
     }
 
@@ -641,7 +867,8 @@ trait CatalogoDaClinica
 
     /**
      * A lixeira da clínica: o vínculo tool ↔ entidade ↔ service, no mesmo formato de lixeiras() do domínio antigo.
-     * "papeis" é quem restaura (a senha do dono é pedida no card); excluir e excluir de vez são sempre do dono.
+     * "papeis" é quem restaura (a senha do dono é pedida no card); excluir e excluir de vez usam as listas do
+     * definirLixeira (dono, e 'admin' só no domínio antigo: o Administrador da clínica não tem tool nenhuma, T1).
      * Item C (12/11): só o dono restaura, em toda entidade, pelo chat e pela tela: é o mesmo papel que abre a Lixeira
      * (consultar_lixeira). Antes, a recepção (e o resto da equipe) recebia 403 na tela, mas restaurava tutor e pet pelo chat.
      *

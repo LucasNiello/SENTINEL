@@ -28,6 +28,17 @@ trait CenarioClinica
         return User::factory()->papel($papel)->doTenant($tenant)->create(['crmv' => $crmv]);
     }
 
+    /**
+     * T1 (14/11): fixture do PIN de autorização, gravado só como hash. O código de verdade é aleatório e vem do
+     * SupervisaoService::gerarPin (provado em SupervisaoEndpointsTest); aqui o teste do estorno precisa saber o código.
+     */
+    protected function comPin(User $usuario, string $pin = '482915'): User
+    {
+        $usuario->forceFill(['pin_autorizacao' => \Illuminate\Support\Facades\Hash::make($pin)])->save();
+
+        return $usuario->fresh();
+    }
+
     protected function tutor(int $tenant = self::T, string $nome = 'Ana Souza'): Tutor
     {
         return Tutor::create(['nome' => $nome, 'tenant_id' => $tenant]);

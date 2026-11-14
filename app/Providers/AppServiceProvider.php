@@ -71,11 +71,11 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // (O limiter 'agente-sem-ia' também cobre as rotas /supervisao/*, no mesmo balde por usuário.)
-        // Item I: o teto de 5 tentativas da senha ao definir o PIN é contado no SupervisaoController, antes do Hash::check.
+        // Item I/T1: o teto de 5 tentativas da senha ao gerar o PIN é contado no SupervisaoController, antes do Hash::check.
 
         // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
         // volta à sessão como "valor antigo" num redirecionamento de erro de validação. Item I: idem para
-        // a senha de login da rota /supervisao/meu-pin (o PIN é aparado no SupervisaoService).
+        // a senha de login do Administrador ao gerar um PIN (/supervisao/pins/{id}/gerar, T1).
         TrimStrings::except(['senha_admin', 'senha_atual']);
         $tratador = $this->app->make(ExceptionHandler::class);
         if ($tratador instanceof Handler) {

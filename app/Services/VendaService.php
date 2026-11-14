@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Models\Venda;
 use App\Models\VendaItem;
 use App\Services\Concerns\ConfereTenant;
+use App\Services\Concerns\EstornoPorItens;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -23,11 +25,13 @@ use Illuminate\Support\Facades\DB;
  * - descrição e preço são cópias do catálogo; total em centavos calculado aqui;
  * - a baixa do estoque acontece na MESMA transação da venda; sem saldo, a venda acontece e o estoque fica negativo
  *   (decisão de 10/11: o card avisa antes do segurar, sem bloquear);
- * - com forma de pagamento, a venda já nasce paga; sem, fica aberta. Cancelar (só aberta) devolve o estoque.
+ * - com forma de pagamento, a venda já nasce paga; sem, fica aberta. Cancelar (só aberta) devolve o estoque;
+ * - venda PAGA se estorna por itens (T2, resposta E), com a mesma regra da cobrança (EstornoPorItens): parcial fica
+ *   paga, com o estornado e o líquido à vista; o estorno que esgota a venda a deixa cancelada.
  */
 class VendaService
 {
-    use ConfereTenant;
+    use ConfereTenant, EstornoPorItens;
 
     public function __construct(private CatalogoService $catalogo)
     {
@@ -187,6 +191,113 @@ class VendaService
 
             return $venda;
         });
+    }
+
+    /**
+     * T2: estorno por itens de uma venda PAGA (modo "tudo" ou "itens"; a venda não tem item de prontuário, então
+     * "tudo_menos_prontuario" é o mesmo que "tudo"). A conferência do PIN fica no card; sem ela, nada muda. Venda e
+     * linhas travadas; tudo ou nada.
+     *
+     * @param  array<int, array{item_id: mixed, quantidade: mixed}>  $itens
+     */
+    public function estornar(int $vendaId, string $motivo, int $solicitanteId, int $autorizadorId, int $tenantId, bool $autorizacaoConferida, string $modo = 'tudo', array $itens = []): Venda
+    {
+        return DB::transaction(function () use ($vendaId, $motivo, $solicitanteId, $autorizadorId, $tenantId, $autorizacaoConferida, $modo, $itens) {
+            $venda = Venda::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($vendaId);
+
+            if (! $autorizacaoConferida) {
+                throw new RegraDeNegocioException('O estorno precisa da confirmação de quem autoriza (PIN do supervisor do setor ou do dono).');
+            }
+            if ($venda->status !== 'paga') {
+                throw new RegraDeNegocioException('Só uma venda paga é estornada (esta está '.$venda->status.'); a aberta é cancelada.');
+            }
+
+            [$motivo, $solicitante, $autorizador] = $this->conferirQuemEstorna($venda->setor, $motivo, $solicitanteId, $autorizadorId, $tenantId, 'venda');
+            $plano = $this->planoDaVenda($venda, $modo, $itens, travar: true);
+
+            $estorno = $this->gravarEstorno('venda_id', $venda->id, $plano, $motivo, $solicitante->id, $autorizador->id, $tenantId);
+            if ($plano['esgota']) {
+                $venda->update(['status' => 'cancelada']);
+            }
+            app(\App\Services\DetalhesAuditoria::class)->anotar('valores_anteriores', $this->auditoriaDoEstorno($estorno, $plano));
+
+            return $venda;
+        });
+    }
+
+    /**
+     * Só leitura, para o card: o que o estorno levaria AGORA (linhas, valor, já estornado, líquido). Venda de outro
+     * tenant: ModelNotFoundException; não paga, modo ou itens inválidos: RegraDeNegocioException.
+     */
+    public function planoDoEstorno(int $vendaId, string $modo, array $itens, int $tenantId): array
+    {
+        $venda = Venda::where('tenant_id', $tenantId)->findOrFail($vendaId);
+        if ($venda->status !== 'paga') {
+            throw new RegraDeNegocioException('Só uma venda paga é estornada (esta está '.$venda->status.').');
+        }
+
+        return $this->planoDaVenda($venda, $modo, $itens, travar: false);
+    }
+
+    /** As linhas da venda paga com o que já foi estornado e o que resta (para o editor do card). */
+    public function linhasParaEstornar(int $vendaId, int $tenantId): array
+    {
+        $venda = Venda::where('tenant_id', $tenantId)->where('status', 'paga')->findOrFail($vendaId);
+
+        return $this->linhasDoEstorno('venda_id', $venda->id, $tenantId, $venda->itens()->orderBy('id')->get());
+    }
+
+    private function planoDaVenda(Venda $venda, string $modo, array $itens, bool $travar): array
+    {
+        $consulta = $venda->itens()->orderBy('id');
+        $linhas = $this->linhasDoEstorno('venda_id', $venda->id, $venda->tenant_id, ($travar ? $consulta->lockForUpdate() : $consulta)->get(), $travar);
+        $escolha = $this->escolherDoEstorno($linhas, $modo === 'tudo_menos_prontuario' ? 'tudo' : $modo, $itens, 'venda');
+
+        return $this->planoDoEstornoDe($linhas, $escolha, (int) $venda->total_centavos);
+    }
+
+    /**
+     * Vendas do tenant, mais novas primeiro, com o tutor, o pet e o estornado (soma dos estornos). Até 100.
+     */
+    public function buscarPorFiltro(?string $status, ?string $setor, int $tenantId): Collection
+    {
+        return $this->consultaDeVendas($tenantId)
+            ->when($status, fn ($query) => $query->where('vendas.status', $status))
+            ->when($setor, fn ($query) => $query->where('vendas.setor', $setor))
+            ->orderByDesc('vendas.id')
+            ->limit(100)
+            ->get();
+    }
+
+    /**
+     * Acha a venda por id ou pelo nome do tutor ou do pet, só no tenant e só nos status dados (estornar: paga). Até 6,
+     * para o agente saber se ficou ambíguo.
+     *
+     * @param  string[]  $status
+     */
+    public function localizar(?int $id, ?string $busca, int $tenantId, array $status): Collection
+    {
+        $busca = trim((string) $busca);
+
+        return $this->consultaDeVendas($tenantId)
+            ->whereIn('vendas.status', $status)
+            ->when($id, fn ($query) => $query->where('vendas.id', $id), fn ($query) => $query->where(fn ($q) => $q
+                ->where('tutores.nome', 'like', '%'.addcslashes($busca, '%_\\').'%')
+                ->orWhere('pets.nome', 'like', '%'.addcslashes($busca, '%_\\').'%')))
+            ->orderByDesc('vendas.id')
+            ->limit(6)
+            ->get();
+    }
+
+    private function consultaDeVendas(int $tenantId): \Illuminate\Database\Eloquent\Builder
+    {
+        return Venda::query()
+            ->leftJoin('tutores', 'tutores.id', '=', 'vendas.tutor_id')
+            ->leftJoin('pets', 'pets.id', '=', 'vendas.pet_id')
+            ->where('vendas.tenant_id', $tenantId)
+            ->select(['vendas.*', 'tutores.nome as tutor', 'pets.nome as pet'])
+            ->selectSub(fn ($q) => $q->from('estornos')->whereColumn('estornos.venda_id', 'vendas.id')->where('estornos.tenant_id', $tenantId)
+                ->selectRaw('coalesce(sum(valor_centavos), 0)'), 'estornado_centavos');
     }
 
     /**

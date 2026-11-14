@@ -56,6 +56,15 @@ domínio dele.
   tool tem teste mostrando que o registro de outro tenant dá
   `ModelNotFoundException` (no service; na tool, é recusado como inexistente)
   e fica intacto.
+- PIN (clínica): só o Admin gera; o código aparece uma vez e nunca na auditoria, no
+  log (todos os níveis), na sessão ou na lista; código novo invalida o antigo; o
+  dono autoriza só com PIN (a senha falha); o Admin não autoriza; outro tenant não
+  vale; o teto conta a tentativa ANTES do `Hash::check`. Nos testes de estorno, o
+  PIN conhecido vem do helper `comPin()` (`CenarioClinica`).
+- Estorno por itens: parcial (continua paga), parciais até esgotar (cancelada),
+  acima do restante recusado, prontuário nunca devolve estoque, preço da época,
+  linha de mesmo número em cobrança e venda, travas (`ProvaDeTravas`), e a IA ou
+  o navegador mandando "valor" (recusado ou descartado).
 - Auditoria (RF06/RF07): o teste confere que gravou o registro certo E que o
   dado sensível (CPF, salário, CPF no documento) está mascarado — não só que
   não deu erro.

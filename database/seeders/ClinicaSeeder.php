@@ -25,7 +25,7 @@ use Illuminate\Support\Str;
 
 /**
  * Clínica veterinária + petshop de demonstração (tenant 3): um usuário por papel (dono com CRMV, mais
- * um veterinário), tutores, pets, catálogo dos dois setores (com farmácia), agenda da semana, um
+ * um veterinário, e a conta Administrador, que só gerencia os PINs), tutores, pets, catálogo dos dois setores (com farmácia), agenda da semana, um
  * atendimento de emergência sem agendamento, cobranças e vendas pagas e em aberto espalhadas no último
  * mês (para os Resultados terem dados), despesas gerais e 5 mensagens na caixa de entrada simulada.
  *
@@ -89,6 +89,8 @@ class ClinicaSeeder extends Seeder
             'recepcao' => ['name' => 'Juliana Reis (recepção)', 'email' => 'recepcao@clinica.sentinel.local', 'papel' => 'recepcao', 'crmv' => null],
             'atendente' => ['name' => 'Carlos Mendes (banho e tosa)', 'email' => 'atendente@clinica.sentinel.local', 'papel' => 'atendente', 'crmv' => null],
             'vendedor' => ['name' => 'Patrícia Gomes (loja)', 'email' => 'vendedor@clinica.sentinel.local', 'papel' => 'vendedor', 'crmv' => null],
+            // T1 (14/11, resposta F): a conta Administrador só gera e revoga os PINs de autorização (tela Supervisão).
+            'admin' => ['name' => 'Administrador da clínica', 'email' => 'admin@clinica.sentinel.local', 'papel' => 'admin', 'crmv' => null],
         ];
 
         foreach ($contas as $chave => $atributos) {

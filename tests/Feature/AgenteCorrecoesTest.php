@@ -128,7 +128,8 @@ class AgenteCorrecoesTest extends TestCase
         $this->postJson('/agente/comando', ['mensagem' => 'usuario A'])->assertOk();
         $user = $this->logarComo('admin', 2);
         $this->postJson('/agente/comando', ['mensagem' => 'usuario B'])->assertOk();
-        $user->tenant_id = 3;
+        // T1 (14/11): o tenant 3 é da clínica, onde o Admin não usa o agente; outro tenant do domínio antigo prova o mesmo.
+        $user->tenant_id = 5;
         $user->save();
         $this->postJson('/agente/comando', ['mensagem' => 'tenant C'])->assertOk();
         $requests = Http::recorded();

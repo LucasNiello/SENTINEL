@@ -67,10 +67,10 @@ class ReautenticacaoAdmin
 
     /**
      * H (clínica): quem autoriza um ESTORNO, pelo mesmo card e com os MESMOS limites (os contadores são os de
-     * autorizar(): errar aqui também conta lá). O segredo é o PIN de autorização de um supervisor ou a senha de
-     * login do dono, do mesmo tenant de quem está logado. A senha de login de um supervisor NÃO serve (o PIN é
-     * diferente dela de propósito). Se a pessoa pode autorizar ESTA cobrança (setor, autoaprovação, papel válido)
-     * é conferido de novo no CobrancaService::estornar().
+     * autorizar(): errar aqui também conta lá). O segredo é o PIN de autorização (gerado pelo Administrador, T1 de
+     * 14/11) de um supervisor ou do dono, do mesmo tenant de quem está logado. A senha de login NÃO serve, nem a do
+     * dono; o Administrador não autoriza, mesmo com um código. Se a pessoa pode autorizar ESTE estorno (setor,
+     * autoaprovação, papel válido) é conferido de novo no service do estorno.
      *
      * @return array{admin: int}|array{falha: 'faltando'|'limite'|'invalido'}  "admin" = quem autorizou
      */
@@ -154,7 +154,7 @@ class ReautenticacaoAdmin
         }
     }
 
-    /** O dono pela senha de login; o supervisor (marcado, com PIN) pelo PIN. Qualquer outro: null, no mesmo tempo. */
+    /** O dono e o supervisor (marcado) pelo PIN; o Administrador e qualquer outro: null, no mesmo tempo. */
     private function autorizadorDeEstorno(string $email, string $segredo): ?User
     {
         $usuario = User::query()
@@ -163,12 +163,8 @@ class ReautenticacaoAdmin
             ->whereIn('papel', (array) config('sentinel.papeis', []))
             ->first();
 
-        $hash = match (true) {
-            $usuario === null => null,
-            $usuario->papel === 'dono' => $usuario->password,
-            $usuario->supervisor_setor !== null && $usuario->pin_autorizacao !== null => $usuario->pin_autorizacao,
-            default => null,
-        };
+        // T1: a senha de login do dono deixou de valer; o dono confere pelo PIN, como o supervisor.
+        $hash = $usuario !== null && SupervisaoService::podeTerPin($usuario) ? $usuario->pin_autorizacao : null;
 
         if ($hash === null) {
             Hash::check($segredo, self::HASH_FICTICIO);
@@ -176,10 +172,8 @@ class ReautenticacaoAdmin
             return null;
         }
 
-        // O PIN é guardado sem espaços nas pontas (SupervisaoService::definirProprioPin); a senha do dono não muda.
-        $conferido = $usuario->papel === 'dono' ? $segredo : trim($segredo);
-
-        return Hash::check($conferido, $hash) ? $usuario : null;
+        // O PIN gerado são só dígitos (SupervisaoService::gerarPin); espaços nas pontas, digitados sem querer, não contam.
+        return Hash::check(trim($segredo), $hash) ? $usuario : null;
     }
 
     private function adminQueConfere(string $email, string $senha): ?User
@@ -188,7 +182,7 @@ class ReautenticacaoAdmin
 
         $admin = User::query()
             ->where('email', $email)
-            ->whereIn('papel', ContextoUsuario::papeisAdministrativos())
+            ->whereIn('papel', ContextoUsuario::papeisAdministrativosDoTenant($tenantId))
             ->where('tenant_id', $tenantId)
             ->first();
 

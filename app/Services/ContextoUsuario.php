@@ -55,7 +55,17 @@ class ContextoUsuario
     {
         $papel = $this->papel();
 
-        return in_array($papel, self::papeisAdministrativos(), true);
+        return in_array($papel, self::papeisAdministrativosDoTenant($this->tenantId()), true);
+    }
+
+    /**
+     * T1 (14/11, resposta F): a conta Admin da clínica é o papel 'admin' num tenant da clínica, e só gerencia os PINs
+     * (gera e revoga na /supervisao). Não vende, não cobra, não autoriza estorno, não vê a auditoria nem autoriza a
+     * lixeira. Papel fora da hierarquia (config('sentinel.papeis')) não vale (falha fechada).
+     */
+    public function ehAdminDaClinica(): bool
+    {
+        return $this->papel() === 'admin' && $this->dominio() === 'clinica' && in_array('admin', (array) config('sentinel.papeis', []), true);
     }
 
     /**
@@ -89,12 +99,30 @@ class ContextoUsuario
     }
 
     /**
+     * Os papéis administrativos que valem NESTE tenant: num tenant da clínica, o 'admin' fica de fora (T1, resposta F:
+     * ele só gerencia PINs); lá, a senha que autoriza a lixeira e a auditoria são só do dono (item C, 12/11).
+     *
+     * @return string[]
+     */
+    public static function papeisAdministrativosDoTenant(int $tenantId): array
+    {
+        $papeis = self::papeisAdministrativos();
+
+        return self::tenantDaClinica($tenantId) ? array_values(array_diff($papeis, ['admin'])) : $papeis;
+    }
+
+    public static function tenantDaClinica(int $tenantId): bool
+    {
+        return in_array($tenantId, array_map('intval', (array) config('sentinel.tenants_clinica', [])), true);
+    }
+
+    /**
      * Domínio do tenant do usuário logado: 'clinica' (config sentinel.tenants_clinica) ou 'contabilidade'.
      * Define quais tools do agente e quais telas existem para ele; sem tenant, falha fechada (AuthenticationException).
      */
     public function dominio(): string
     {
-        return in_array($this->tenantId(), array_map('intval', (array) config('sentinel.tenants_clinica', [])), true) ? 'clinica' : 'contabilidade';
+        return self::tenantDaClinica($this->tenantId()) ? 'clinica' : 'contabilidade';
     }
 
     public function tenantId(): int

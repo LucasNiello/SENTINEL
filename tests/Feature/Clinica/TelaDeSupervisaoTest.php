@@ -8,44 +8,91 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Item I (clínica vet), tela: o dono marca supervisores e zera o PIN; o supervisor define o próprio PIN. A tela só
- * monta a página e chama as rotas JSON /supervisao/* (provadas em SupervisaoEndpointsTest); aqui se prova quem abre
- * a tela, o que cada um vê e que o menu segue a mesma regra.
+ * Item I (clínica vet), tela, T1 (14/11): o dono marca os supervisores de setor; o Administrador gera e revoga os PINs.
+ * A tela só monta a página e chama as rotas JSON /supervisao/* (provadas em SupervisaoEndpointsTest); aqui se prova
+ * quem abre a tela, o que cada um vê e que o menu segue a mesma regra.
  */
 class TelaDeSupervisaoTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_dono_ve_a_lista_da_equipe_e_nao_o_formulario_do_pin(): void
+    public function test_dono_ve_a_marcacao_de_setor_e_nao_os_botoes_do_pin(): void
     {
         $this->logarComo('dono', 3);
 
         $this->get('/supervisao')->assertOk()
             ->assertSee('Supervisores de setor')
             ->assertSee("enviar('/supervisao/supervisores', 'GET')", false)
+            ->assertSee('const EH_ADMIN = false;', false)
+            ->assertDontSee('id="form-gerar-pin"', false)
             ->assertDontSee('id="form-meu-pin"', false);
         $this->get('/agente')->assertOk()->assertSee('href="/supervisao"', false);
     }
 
-    public function test_supervisor_ve_so_o_formulario_do_proprio_pin_com_campos_de_senha(): void
+    public function test_admin_ve_gerar_e_revogar_com_a_senha_e_o_codigo_uma_vez(): void
     {
-        $dono = User::factory()->papel('dono')->doTenant(3)->create();
-        $veterinario = $this->logarComo('veterinario', 3);
-        app(SupervisaoService::class)->marcarSupervisor($veterinario->id, 'clinica', $dono->id, 3);
-        $this->actingAs($veterinario->fresh()); // num pedido real o usuário é relido do banco
+        $this->logarComo('admin', 3);
 
         $this->get('/supervisao')->assertOk()
-            ->assertSee('id="form-meu-pin"', false)
-            ->assertSee('Você supervisiona o setor clínica.')
-            ->assertSee('<input type="password" id="pin" autocomplete="one-time-code"', false)
-            ->assertSee('<input type="password" id="pin-confirmacao" autocomplete="one-time-code"', false)
-            ->assertSee('<input type="password" id="senha-atual" autocomplete="current-password"', false)
-            ->assertDontSee('Supervisores de setor');
-        $this->get('/agente')->assertOk()->assertSee('href="/supervisao"', false);
+            ->assertSee('PIN de autorização')
+            ->assertSee('id="form-gerar-pin"', false)
+            ->assertSee('<input type="password" id="senha-admin" autocomplete="current-password"', false)
+            ->assertSee('este código não aparece de novo')
+            ->assertSee('const EH_ADMIN = true;', false)
+            ->assertSee("'/supervisao/pins/' + alvo.id + '/gerar'", false)
+            ->assertSee("'/revogar'", false)
+            ->assertDontSee('id="form-meu-pin"', false)
+            // o menu do Administrador só tem a Supervisão
+            ->assertSee('<span>Supervisão</span>', false)
+            ->assertDontSee('<span>Agente</span>', false)
+            ->assertDontSee('<span>Cadastros</span>', false);
     }
 
-    public function test_quem_nao_e_dono_nem_supervisor_nao_abre_a_tela_nem_ve_o_menu(): void
+    public function test_admin_da_clinica_nao_usa_o_agente_nem_os_cadastros(): void
     {
+        $this->logarComo('admin', 3);
+
+        $this->get('/agente')->assertRedirect('/supervisao');
+        $this->get('/cadastros')->assertRedirect('/supervisao');
+        $this->get('/auditoria')->assertForbidden();
+        $this->postJson('/agente/comando', ['mensagem' => 'liste os tutores'])->assertStatus(403)->assertJsonPath('codigo', 'AI_FORBIDDEN');
+    }
+
+    /** 1ª passada do reviewer (bloqueador): as tools da lixeira que o domínio antigo dá ao 'admin' não valem na clínica. */
+    public function test_admin_da_clinica_nao_tem_tool_nenhuma_nem_a_lixeira(): void
+    {
+        $tutor = \App\Models\Tutor::create(['nome' => 'Ana Souza', 'tenant_id' => 3]);
+        $this->logarComo('admin', 3);
+
+        $this->get('/lixeira')->assertForbidden();
+        $this->get('/supervisao')->assertOk()->assertDontSee('<span>Lixeira</span>', false)->assertDontSee('<span>Auditoria</span>', false);
+        $this->postJson('/agente/consultar', ['tool' => 'consultar_lixeira'])->assertStatus(403);
+        // A recusa do Admin passa pelo negar() de sempre: vira linha "negado" na auditoria (2ª passada).
+        $this->assertDatabaseHas('audit_logs', ['tool' => 'consultar_lixeira', 'resultado' => 'negado', 'permitido' => false]);
+        $this->postJson('/agente/consultar', ['tool' => 'consultar_tutores'])->assertStatus(403);
+        $this->postJson('/agente/formulario', ['tool' => 'excluir_tutor', 'id' => $tutor->id])->assertStatus(403);
+        $this->postJson('/agente/formulario', ['tool' => 'criar_tutor'])->assertStatus(403);
+
+        $agente = app(\App\Services\AiAgentService::class);
+        foreach (['consultar_lixeira', 'excluir_tutor', 'excluir_definitivo_tutor', 'restaurar_tutor', 'estornar_cobranca', 'registrar_venda', 'consultar_cobrancas'] as $tool) {
+            $this->assertFalse($agente->podeExecutar($tool), $tool);
+        }
+        $this->assertNull($tutor->fresh()->deleted_at);
+
+        // O admin do domínio antigo continua com a lixeira.
+        $this->logarComo('admin', 1);
+        $this->assertTrue(app(\App\Services\AiAgentService::class)->podeExecutar('consultar_lixeira'));
+    }
+
+    public function test_supervisor_e_os_outros_papeis_nao_abrem_a_tela_nem_veem_o_menu(): void
+    {
+        $dono = User::factory()->papel('dono')->doTenant(3)->create();
+        $veterinario = User::factory()->papel('veterinario')->doTenant(3)->create();
+        app(SupervisaoService::class)->marcarSupervisor($veterinario->id, 'clinica', $dono->id, 3);
+        $this->actingAs($veterinario->fresh());
+        $this->get('/supervisao')->assertForbidden();
+        $this->get('/agente')->assertOk()->assertDontSee('href="/supervisao"', false);
+
         foreach (['recepcao', 'veterinario', 'atendente', 'vendedor'] as $papel) {
             $this->logarComo($papel, 3);
             $this->get('/supervisao')->assertForbidden();
@@ -53,11 +100,11 @@ class TelaDeSupervisaoTest extends TestCase
         }
     }
 
-    public function test_fora_da_clinica_a_tela_nao_existe(): void
+    public function test_fora_da_clinica_a_tela_nao_existe_e_o_admin_antigo_continua_com_o_agente(): void
     {
         $this->logarComo('admin', 1);
         $this->get('/supervisao')->assertNotFound();
-        $this->get('/agente')->assertOk()->assertDontSee('href="/supervisao"', false);
+        $this->get('/agente')->assertOk()->assertDontSee('href="/supervisao"', false)->assertSee('href="/auditoria"', false);
     }
 
     public function test_sem_login_vai_para_o_login(): void
@@ -69,32 +116,18 @@ class TelaDeSupervisaoTest extends TestCase
     {
         $dono = User::factory()->papel('dono')->doTenant(3)->create();
         $veterinario = User::factory()->papel('veterinario')->doTenant(3)->create();
-        $supervisao = app(SupervisaoService::class);
-        $supervisao->marcarSupervisor($veterinario->id, 'clinica', $dono->id, 3);
-        $supervisao->definirProprioPin($veterinario->id, '482915', 3);
-        $this->actingAs($dono);
-
-        // A página não traz a lista (vem do JSON, que só diz tem_pin) e nunca o hash do PIN.
-        $pagina = $this->get('/supervisao')->assertOk();
-        $pagina->assertDontSee((string) $veterinario->fresh()->pin_autorizacao, false)->assertDontSee('482915');
-
-        // O que a tela de fato carrega é o JSON da lista: só tem_pin, nunca o hash nem o e-mail (2ª passada).
-        $json = $this->getJson('/supervisao/supervisores')->assertOk()->getContent();
-        $this->assertStringContainsString('"tem_pin":true', $json);
-        $this->assertStringNotContainsString((string) $veterinario->fresh()->pin_autorizacao, $json);
-        $this->assertStringNotContainsString((string) $veterinario->email, $json);
-    }
-
-    public function test_supervisor_cujo_papel_saiu_da_hierarquia_nao_abre_a_tela_nem_define_pin(): void
-    {
-        $dono = User::factory()->papel('dono')->doTenant(3)->create();
-        $veterinario = User::factory()->papel('veterinario')->doTenant(3)->create(['password' => \Illuminate\Support\Facades\Hash::make('senha-de-login-1')]);
         app(SupervisaoService::class)->marcarSupervisor($veterinario->id, 'clinica', $dono->id, 3);
-        $this->actingAs($veterinario->fresh());
-        config(['sentinel.papeis' => array_values(array_diff((array) config('sentinel.papeis'), ['veterinario']))]);
+        $veterinario->forceFill(['pin_autorizacao' => \Illuminate\Support\Facades\Hash::make('482915')])->save();
 
-        $this->get('/supervisao')->assertForbidden();
-        $this->postJson('/supervisao/meu-pin', ['pin' => '771133', 'pin_confirmacao' => '771133', 'senha_atual' => 'senha-de-login-1'])->assertStatus(422);
-        $this->assertNull($veterinario->fresh()->pin_autorizacao);
+        foreach ([$dono, User::factory()->papel('admin')->doTenant(3)->create()] as $quem) {
+            $this->actingAs($quem);
+            $pagina = $this->get('/supervisao')->assertOk();
+            $pagina->assertDontSee((string) $veterinario->fresh()->pin_autorizacao, false)->assertDontSee('482915');
+
+            $json = $this->getJson('/supervisao/supervisores')->assertOk()->getContent();
+            $this->assertStringContainsString('"tem_pin":true', $json);
+            $this->assertStringNotContainsString((string) $veterinario->fresh()->pin_autorizacao, $json);
+            $this->assertStringNotContainsString((string) $veterinario->email, $json);
+        }
     }
 }

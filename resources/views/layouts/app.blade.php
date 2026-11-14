@@ -8,6 +8,12 @@
     <title>@yield('titulo', 'Sentinel') — {{ config('app.name', 'Sentinel') }}</title>
     <link rel="icon" href="/favicon-sentinel.svg" type="image/svg+xml">
     @vite(['resources/css/workspace.css', 'resources/js/workspace.js'])
+    {{-- Estilos depois do último build do Vite (sem node nesta máquina): editor do estorno (T2) e 360 px (T3). --}}
+    <link rel="stylesheet" href="/css/sentinel-extra.css">
+    {{-- T3 (14/11): PWA. O service worker só guarda o shell estático (ícones, manifest, build); nunca /agente, JSON, login ou dados. --}}
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/sentinel-192.png">
+    <script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {})); }</script>
     @stack('estilos')
 </head>
 @php
@@ -16,7 +22,9 @@
     $papel = $usuario ? rescue(fn () => app(\App\Services\ContextoUsuario::class)->papel(), null, false) : null;
     $rotulosPapel = (array) config('sentinel.rotulos_papeis', []);
     $iniciais = $usuario ? collect(preg_split('/[^\p{L}\p{N}]+/u', trim($usuario->name)))->filter()->take(2)->map(fn ($nome) => mb_substr($nome, 0, 1))->implode('') : '';
-    $itens = [
+    // T1: o Administrador da clínica só gerencia PINs (a /agente e os cadastros o levam à /supervisao).
+    $adminDaClinica = $papel !== null && rescue(fn () => app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica(), false, false);
+    $itens = $adminDaClinica ? [] : [
         ['agente', 'Agente', 'M4 5h16v11H8l-4 4V5m4 4h8m-8 3h5'],
         ['cadastros', 'Cadastros', 'M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z'],
     ];
@@ -25,8 +33,8 @@
     $pode = fn (callable $regra) => $papel !== null && rescue($regra, false, false);
     if ($pode(fn () => app(\App\Services\AiAgentService::class)->podeExecutar('consultar_lixeira'))) $itens[] = ['lixeira', 'Lixeira', 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5'];
     if ($pode(fn () => app(\App\Services\ContextoUsuario::class)->ehAdministrativo())) $itens[] = ['auditoria', 'Auditoria', 'M6 3h9l3 3v15H6V3m4 5h4m-4 4h4m-4 4h4'];
-    // Item I (clínica): supervisão, para o dono e para quem supervisiona um setor (a rota confere de novo).
-    if ($pode(fn () => app(\App\Services\ContextoUsuario::class)->dominio() === 'clinica' && (app(\App\Services\ContextoUsuario::class)->ehDono() || app(\App\Services\ContextoUsuario::class)->setorSupervisionado() !== null))) $itens[] = ['supervisao', 'Supervisão', 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3m-3 9 2 2 4-4'];
+    // Item I (clínica), T1: supervisão, para o dono (marca o setor) e para o Administrador (PINs); a rota confere de novo.
+    if ($pode(fn () => app(\App\Services\ContextoUsuario::class)->dominio() === 'clinica' && (app(\App\Services\ContextoUsuario::class)->ehDono() || app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica()))) $itens[] = ['supervisao', 'Supervisão', 'M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3m-3 9 2 2 4-4'];
 @endphp
 <body class="workspace{{ $usuario ? '' : ' workspace--guest' }}">
     <a class="pular" href="#conteudo">Pular para o conteúdo</a>

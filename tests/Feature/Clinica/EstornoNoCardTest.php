@@ -16,7 +16,8 @@ use Tests\TestCase;
 
 /**
  * H: estorno de cobrança paga pelo card. Quem pede é o usuário logado; quem autoriza digita no card o PIN (supervisor
- * do setor) ou a senha (dono), no mesmo JSON da reautenticação (email_admin/senha_admin). O PIN nunca vai para a IA,
+ * do setor ou dono; T1, 14/11: gerado pelo Administrador, e a senha do dono deixou de valer), no mesmo JSON da
+ * reautenticação (email_admin/senha_admin). O PIN nunca vai para a IA,
  * a sessão, o log ou a auditoria; a regra (setor, autoaprovação, papel válido) é reconferida no CobrancaService.
  */
 class EstornoNoCardTest extends TestCase
@@ -51,15 +52,14 @@ class EstornoNoCardTest extends TestCase
         $usuario = $this->usuarioClinica($setor === 'clinica' ? 'veterinario' : 'atendente');
         $supervisao = app(SupervisaoService::class);
         $supervisao->marcarSupervisor($usuario->id, $setor, $this->usuarioClinica('dono')->id, self::T);
-        $supervisao->definirProprioPin($usuario->id, self::PIN, self::T);
 
-        return $usuario->fresh();
+        return $this->comPin($usuario->fresh(), self::PIN);
     }
 
     /** Propõe e revisa o estorno pelo chat (como a recepção logada) e confirma com o que foi digitado no card. */
     private function estornarComCard(Cobranca $cobranca, array $card)
     {
-        $token = $this->propor(['id' => $cobranca->id, 'motivo' => 'Cobrado em duplicidade.'], 'estornar_cobranca');
+        $token = $this->propor(['id' => $cobranca->id, 'motivo' => 'Cobrado em duplicidade.', 'modo' => 'tudo'], 'estornar_cobranca');
         $this->travel(2)->seconds();
 
         return $this->postJson('/agente/confirmar', ['token' => $token, ...$card]);
@@ -81,14 +81,40 @@ class EstornoNoCardTest extends TestCase
         $this->assertStringNotContainsString(self::PIN, (string) json_encode(session()->all()));
     }
 
-    public function test_dono_autoriza_com_a_senha_de_login(): void
+    public function test_dono_autoriza_com_o_pin_e_a_senha_de_login_nao_vale_mais(): void
     {
+        $dono = $this->comPin($this->usuarioClinica('dono'), self::PIN);
+
+        $antes = $this->paga();
+        $this->estornarComCard($antes, ['email_admin' => $dono->email, 'senha_admin' => 'password'])
+            ->assertStatus(403)->assertJsonPath('codigo', 'AI_REAUTH_FAILED');
+        $this->assertSame('paga', $antes->fresh()->status);
+
         $cobranca = $this->paga();
-        $dono = $this->usuarioClinica('dono');
-
-        $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => 'password'])->assertOk();
-
+        $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => self::PIN])->assertOk();
         $this->assertSame([$dono->id, 'cancelada'], [$cobranca->fresh()->estorno_autorizado_por, $cobranca->fresh()->status]);
+    }
+
+    public function test_dono_sem_pin_nao_autoriza_nem_com_a_senha(): void
+    {
+        $dono = $this->usuarioClinica('dono');
+        $cobranca = $this->paga();
+
+        $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => 'password'])->assertStatus(403);
+        $this->assertSame('paga', $cobranca->fresh()->status);
+    }
+
+    public function test_admin_nao_autoriza_nem_com_um_codigo_gravado(): void
+    {
+        $admin = $this->comPin($this->usuarioClinica('admin'), self::PIN);
+        $admin->forceFill(['supervisor_setor' => 'clinica'])->save(); // dado antigo: nem assim
+
+        foreach ([self::PIN, 'password'] as $segredo) {
+            $cobranca = $this->paga();
+            $this->estornarComCard($cobranca, ['email_admin' => $admin->email, 'senha_admin' => $segredo])
+                ->assertStatus(403)->assertJsonPath('codigo', 'AI_REAUTH_FAILED');
+            $this->assertSame('paga', $cobranca->fresh()->status);
+        }
     }
 
     public function test_atendente_pede_estorno_do_petshop_com_o_pin_do_supervisor_do_petshop(): void
@@ -104,18 +130,18 @@ class EstornoNoCardTest extends TestCase
             [$depois->status, $depois->estorno_solicitado_por, $depois->estorno_autorizado_por]);
     }
 
-    public function test_dono_logado_pede_e_se_autoaprova_com_a_propria_senha(): void
+    public function test_dono_logado_pede_e_se_autoaprova_com_o_proprio_pin(): void
     {
         $cobranca = $this->paga();
-        $dono = $this->logarComo('dono', self::T);
+        $dono = $this->comPin($this->logarComo('dono', self::T), self::PIN);
 
-        $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => 'password'])->assertOk();
+        $this->estornarComCard($cobranca, ['email_admin' => $dono->email, 'senha_admin' => self::PIN])->assertOk();
 
         $depois = $cobranca->fresh();
         $this->assertSame(['cancelada', $dono->id, $dono->id], [$depois->status, $depois->estorno_solicitado_por, $depois->estorno_autorizado_por]);
     }
 
-    public function test_pin_com_espacos_nas_pontas_vale_como_na_definicao(): void
+    public function test_pin_com_espacos_nas_pontas_vale(): void
     {
         $cobranca = $this->paga();
         $supervisor = $this->supervisor();
@@ -127,13 +153,12 @@ class EstornoNoCardTest extends TestCase
 
     public function test_dono_ou_supervisor_de_outro_tenant_com_o_segredo_certo_nao_autorizam(): void
     {
-        $donoDeFora = $this->usuarioClinica('dono', self::OUTRO_TENANT);
+        $donoDeFora = $this->comPin($this->usuarioClinica('dono', self::OUTRO_TENANT), self::PIN);
         $supervisorDeFora = $this->usuarioClinica('veterinario', self::OUTRO_TENANT);
-        $supervisao = app(SupervisaoService::class);
-        $supervisao->marcarSupervisor($supervisorDeFora->id, 'clinica', $donoDeFora->id, self::OUTRO_TENANT);
-        $supervisao->definirProprioPin($supervisorDeFora->id, self::PIN, self::OUTRO_TENANT);
+        app(SupervisaoService::class)->marcarSupervisor($supervisorDeFora->id, 'clinica', $donoDeFora->id, self::OUTRO_TENANT);
+        $this->comPin($supervisorDeFora->fresh(), self::PIN);
 
-        foreach ([[$donoDeFora->email, 'password'], [$supervisorDeFora->email, self::PIN]] as [$email, $segredo]) {
+        foreach ([[$donoDeFora->email, self::PIN], [$supervisorDeFora->email, self::PIN]] as [$email, $segredo]) {
             $cobranca = $this->paga();
             $this->estornarComCard($cobranca, ['email_admin' => $email, 'senha_admin' => $segredo])
                 ->assertStatus(403)->assertJsonPath('codigo', 'AI_REAUTH_FAILED');
@@ -228,7 +253,9 @@ class EstornoNoCardTest extends TestCase
 
         $resposta = $this->comando('estornar_cobranca', ['id' => $cobranca->id, 'motivo' => 'Erro.'])->assertOk()
             ->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('formulario.reautenticar', true)->assertJsonPath('formulario.tipo_autorizacao', 'estorno');
-        $this->assertSame(['motivo'], array_column($resposta->json('formulario.campos'), 'nome'));
+        // T2: o modo e o motivo são campos; as linhas vão no editor de itens (itens_estorno), nunca um campo de valor ou de PIN.
+        $this->assertSame(['modo', 'motivo'], array_column($resposta->json('formulario.campos'), 'nome'));
+        $this->assertSame([1], array_column($resposta->json('formulario.itens_estorno'), 'restante'));
 
         $this->logarComo('vendedor', self::T);
         $this->comando('estornar_cobranca', ['id' => $cobranca->id, 'motivo' => 'Erro.'])->assertStatus(403)->assertJsonPath('tipo', 'negado');
@@ -242,11 +269,12 @@ class EstornoNoCardTest extends TestCase
 
     public function test_a_tela_troca_o_rotulo_da_autorizacao_quando_o_card_e_de_estorno(): void
     {
-        // A bancada lê formulario.tipo_autorizacao: no estorno, supervisor (PIN) ou dono (senha); sem a chave, o texto da lixeira.
+        // A bancada lê formulario.tipo_autorizacao: no estorno, o PIN do supervisor ou do dono (T1); sem a chave, o texto da lixeira.
         $this->get('/agente')->assertOk()
             ->assertSee("formulario.tipo_autorizacao === 'estorno'", false)
-            ->assertSee('Supervisor do setor ou dono: e-mail e PIN (o dono usa a senha).', false)
-            ->assertSee('PIN do supervisor (o dono usa a senha)', false)
+            ->assertSee('Supervisor do setor ou dono: e-mail e PIN de autorização.', false)
+            ->assertSee("segredo: 'PIN de quem autoriza'", false)
+            ->assertDontSee('o dono usa a senha', false)
             ->assertSee('Autorização de um administrador', false)
             // O campo do PIN continua de senha e sem preenchimento automático.
             ->assertSee('class="admin-senha" autocomplete="new-password"', false);

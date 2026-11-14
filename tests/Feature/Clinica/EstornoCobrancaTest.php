@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Hash;
 use Tests\Concerns\CenarioClinica;
 use Tests\TestCase;
 
-/** Estorno de cobrança paga (duas pessoas) e a supervisão que o autoriza (marcação pelo dono, PIN). */
+/** Estorno de cobrança paga (duas pessoas) e a supervisão que o autoriza (marcação pelo dono; PIN gerado pelo Administrador, T1). */
 class EstornoCobrancaTest extends TestCase
 {
     use CenarioClinica, RefreshDatabase;
@@ -32,7 +32,8 @@ class EstornoCobrancaTest extends TestCase
         $this->travelTo(Carbon::parse('2026-11-10 10:00', 'America/Sao_Paulo'));
         $this->cobrancas = app(CobrancaService::class);
         $this->supervisao = app(SupervisaoService::class);
-        $this->dono = $this->usuarioClinica('dono');
+        // T1: o dono autoriza com o PIN (gerado pelo Administrador), não mais com a senha.
+        $this->dono = $this->comPin($this->usuarioClinica('dono'));
     }
 
     private function recusa(callable $acao, string $frase): void
@@ -67,11 +68,8 @@ class EstornoCobrancaTest extends TestCase
         $usuario = $this->usuarioClinica($papel, $tenant);
         $dono = $tenant === self::T ? $this->dono : $this->usuarioClinica('dono', $tenant);
         $this->supervisao->marcarSupervisor($usuario->id, $setor, $dono->id, $tenant);
-        if ($comPin) {
-            $this->supervisao->definirProprioPin($usuario->id, self::PIN, $tenant);
-        }
 
-        return $usuario->fresh();
+        return $comPin ? $this->comPin($usuario->fresh(), self::PIN) : $usuario->fresh();
     }
 
     private function estornar(Cobranca $cobranca, User $solicitante, User $autorizador, string $motivo = 'Cobrado em duplicidade.', bool $conferida = true): Cobranca
@@ -99,7 +97,7 @@ class EstornoCobrancaTest extends TestCase
         $this->supervisao->marcarSupervisor($supervisor->id, 'petshop', $this->dono->id, self::T);
         $this->assertNull($supervisor->fresh()->pin_autorizacao);
 
-        $this->supervisao->definirProprioPin($supervisor->id, self::PIN, self::T);
+        $this->comPin($supervisor->fresh(), self::PIN);
         $this->supervisao->marcarSupervisor($supervisor->id, null, $this->dono->id, self::T);
         $this->supervisao->marcarSupervisor($supervisor->id, 'petshop', $this->dono->id, self::T);
         $this->assertNull($supervisor->fresh()->pin_autorizacao, 'remarcado depois de desmarcado: PIN antigo não volta');
@@ -157,7 +155,7 @@ class EstornoCobrancaTest extends TestCase
 
         $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->supervisor('atendente', 'petshop')), 'Só o dono ou um supervisor do setor clínica');
         $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->usuarioClinica('veterinario')), 'Só o dono ou um supervisor do setor clínica');
-        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->supervisor('veterinario', 'clinica', comPin: false)), 'ainda não definiu o PIN');
+        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $this->supervisor('veterinario', 'clinica', comPin: false)), 'ainda não tem PIN');
 
         $deFora = $this->supervisor('veterinario', 'clinica', tenant: self::OUTRO_TENANT);
         $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $deFora), "Não encontrei quem autorizou o estorno #{$deFora->id}.");
@@ -192,49 +190,88 @@ class EstornoCobrancaTest extends TestCase
         $this->cobrancas->estornar($cobranca->id, 'Motivo.', $recepcao->id, $this->dono->id, self::OUTRO_TENANT, true);
     }
 
-    public function test_so_o_dono_marca_supervisor_e_zera_pin(): void
+    public function test_so_o_dono_marca_supervisor_e_so_o_admin_gera_e_revoga_pin(): void
     {
         $alvo = $this->usuarioClinica('recepcao');
+        $admin = $this->usuarioClinica('admin');
 
-        foreach (['veterinario', 'recepcao', 'atendente', 'vendedor'] as $papel) {
+        foreach (['veterinario', 'recepcao', 'atendente', 'vendedor', 'admin'] as $papel) {
             $outro = $this->usuarioClinica($papel);
             $this->recusa(fn () => $this->supervisao->marcarSupervisor($alvo->id, 'clinica', $outro->id, self::T), 'Só o dono');
-            $this->recusa(fn () => $this->supervisao->resetarPin($alvo->id, $outro->id, self::T), 'Só o dono');
+        }
+        foreach (['veterinario', 'recepcao', 'atendente', 'vendedor', 'dono'] as $papel) {
+            $outro = $this->usuarioClinica($papel);
+            $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $outro->id, self::T), 'Só o Administrador');
+            $this->recusa(fn () => $this->supervisao->revogarPin($this->dono->id, $outro->id, self::T), 'Só o Administrador');
         }
         $this->recusa(fn () => $this->supervisao->marcarSupervisor($alvo->id, 'clinica', $this->usuarioClinica('dono', self::OUTRO_TENANT)->id, self::T), 'Não encontrei o dono');
         $this->recusa(fn () => $this->supervisao->marcarSupervisor($this->usuarioClinica('recepcao', self::OUTRO_TENANT)->id, 'clinica', $this->dono->id, self::T), 'Não encontrei o usuário');
         $this->recusa(fn () => $this->supervisao->marcarSupervisor($alvo->id, 'farmacia', $this->dono->id, self::T), '"clinica" ou "petshop"');
+        $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $this->usuarioClinica('admin', self::OUTRO_TENANT)->id, self::T), 'Não encontrei o Administrador');
         $this->assertNull($alvo->fresh()->supervisor_setor);
 
         $this->assertSame('clinica', $this->supervisao->marcarSupervisor($alvo->id, 'clinica', $this->dono->id, self::T)->supervisor_setor);
         $this->assertNull($this->supervisao->marcarSupervisor($alvo->id, null, $this->dono->id, self::T)->supervisor_setor, 'o dono desmarca');
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $this->supervisao->gerarPin($this->dono->id, $admin->id, self::T));
     }
 
-    public function test_pin_definido_so_pelo_supervisor_minimo_de_6_guardado_so_como_hash_e_o_dono_so_zera(): void
+    public function test_pin_gerado_so_pelo_admin_guardado_so_como_hash_diferente_da_senha_e_revogar_zera(): void
     {
+        $admin = $this->usuarioClinica('admin');
         $naoSupervisor = $this->usuarioClinica('recepcao');
-        $this->recusa(fn () => $this->supervisao->definirProprioPin($naoSupervisor->id, self::PIN, self::T), 'Só um supervisor de setor');
+        $this->recusa(fn () => $this->supervisao->gerarPin($naoSupervisor->id, $admin->id, self::T), 'Só o dono e os supervisores');
+        $this->recusa(fn () => $this->supervisao->gerarPin($admin->id, $admin->id, self::T), 'Só o dono e os supervisores');
 
         $supervisor = $this->supervisor('recepcao', 'clinica', comPin: false);
-        $this->recusa(fn () => $this->supervisao->definirProprioPin($supervisor->id, '12345', self::T), 'pelo menos 6 caracteres');
-        $this->recusa(fn () => $this->supervisao->definirProprioPin($supervisor->id, '       ', self::T), 'espaços não contam');
-        $supervisor->update(['password' => 'Senha-De-Login-2026']);
-        $this->recusa(fn () => $this->supervisao->definirProprioPin($supervisor->id, 'Senha-De-Login-2026', self::T), 'não pode ser igual à sua senha de login');
-        $this->assertNull($supervisor->fresh()->pin_autorizacao);
-        $this->supervisao->definirProprioPin($supervisor->id, self::PIN, self::T);
+        $pin = $this->supervisao->gerarPin($supervisor->id, $admin->id, self::T);
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $pin);
 
         $guardado = $supervisor->fresh()->getRawOriginal('pin_autorizacao');
-        $this->assertNotSame(self::PIN, $guardado);
-        $this->assertTrue(Hash::check(self::PIN, $guardado));
-        $this->assertFalse(Hash::check(self::PIN, $supervisor->fresh()->password), 'o PIN não é a senha de login');
+        $this->assertNotSame($pin, $guardado);
+        $this->assertTrue(Hash::check($pin, $guardado));
+        $this->assertFalse(Hash::check($pin, $supervisor->fresh()->password), 'o PIN não é a senha de login');
         $this->assertArrayNotHasKey('pin_autorizacao', $supervisor->fresh()->toArray());
 
         // Nem PIN nem marcação entram por atribuição em massa.
         $supervisor->fresh()->update(['pin_autorizacao' => 'x', 'supervisor_setor' => 'petshop']);
         $this->assertSame([$guardado, 'clinica'], [$supervisor->fresh()->getRawOriginal('pin_autorizacao'), $supervisor->fresh()->supervisor_setor]);
 
-        $this->supervisao->resetarPin($supervisor->id, $this->dono->id, self::T);
+        $this->supervisao->revogarPin($supervisor->id, $admin->id, self::T);
         $this->assertNull($supervisor->fresh()->pin_autorizacao);
-        $this->recusa(fn () => $this->estornar($this->paga(), $this->usuarioClinica('recepcao'), $supervisor->fresh()), 'ainda não definiu o PIN');
+        $this->recusa(fn () => $this->estornar($this->paga(), $this->usuarioClinica('recepcao'), $supervisor->fresh()), 'ainda não tem PIN');
+    }
+
+    public function test_codigo_que_coincide_com_a_senha_de_login_e_sorteado_de_novo(): void
+    {
+        $admin = $this->usuarioClinica('admin');
+        $supervisor = $this->supervisor('recepcao', 'clinica', comPin: false);
+        $senha = (string) $supervisor->password;
+        // O 1º sorteio "coincide" com a senha de login (Hash::check true contra o hash da senha): o service sorteia outro.
+        $contraSenha = 0;
+        Hash::shouldReceive('make')->andReturnUsing(fn ($valor) => password_hash((string) $valor, PASSWORD_BCRYPT, ['cost' => 4]));
+        Hash::shouldReceive('check')->andReturnUsing(function ($valor, $hash) use (&$contraSenha, $senha) {
+            if ($hash === $senha) {
+                return ++$contraSenha === 1;
+            }
+
+            return password_verify((string) $valor, (string) $hash);
+        });
+
+        $pin = $this->supervisao->gerarPin($supervisor->id, $admin->id, self::T);
+        $this->assertSame(2, $contraSenha, 'sorteou de novo depois de coincidir');
+        $this->assertTrue(password_verify($pin, $supervisor->fresh()->getRawOriginal('pin_autorizacao')));
+    }
+
+    public function test_dono_sem_pin_e_admin_nao_autorizam(): void
+    {
+        $cobranca = $this->paga();
+        $recepcao = $this->usuarioClinica('recepcao');
+        $donoSemPin = $this->usuarioClinica('dono');
+        $admin = $this->comPin($this->usuarioClinica('admin'));
+        $admin->forceFill(['supervisor_setor' => 'clinica'])->save(); // dado antigo: nem marcado ele autoriza
+
+        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $donoSemPin), 'O dono ainda não tem PIN');
+        $this->recusa(fn () => $this->estornar($cobranca, $recepcao, $admin->fresh()), 'O Administrador não autoriza estorno');
+        $this->assertSame('paga', $cobranca->fresh()->status);
     }
 }

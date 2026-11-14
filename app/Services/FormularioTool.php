@@ -25,6 +25,8 @@ class FormularioTool
         'saida' => 'Saída', 'sim' => 'Sim', 'nao' => 'Não',
         // Clínica vet.
         'cao' => 'Cão', 'femea' => 'Fêmea', 'reptil' => 'Réptil', 'servico' => 'Serviço', 'clinica' => 'Clínica', 'diaria' => 'Diária',
+        // T2: o que estornar.
+        'tudo' => 'Tudo o que resta', 'tudo_menos_prontuario' => 'Tudo menos o que veio do prontuário', 'itens' => 'Só os itens escolhidos abaixo',
     ];
 
     /**

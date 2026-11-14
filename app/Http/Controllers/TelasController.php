@@ -62,6 +62,11 @@ class TelasController extends Controller
 
     public function cadastros()
     {
+        // T1: o Administrador da clínica só gerencia PINs.
+        if ($this->contexto->ehAdminDaClinica()) {
+            return redirect('/supervisao');
+        }
+
         // "Novo" só aparece para quem pode cadastrar aquela entidade (o /agente/formulario confere de novo).
         $cadastros = $this->contexto->dominio() === 'clinica' ? self::CADASTROS_CLINICA : self::CADASTROS;
         $entidades = array_map(fn (array $e) => [...$e, 'criar' => $this->agente->podeExecutar($e['criar']) ? $e['criar'] : null], $cadastros);
@@ -88,21 +93,22 @@ class TelasController extends Controller
     }
 
     /**
-     * Item I (clínica vet): o dono marca e desmarca os supervisores de setor e zera o PIN; o supervisor define o próprio
-     * PIN. Só monta a página: as rotas JSON /supervisao/* conferem dono, tenant, setor e a senha de login de novo.
-     * Fora da clínica não existe (404, como as rotas JSON); quem não é dono nem supervisor não tem o que fazer aqui (403).
+     * Item I (clínica vet), T1 (14/11): o dono marca e desmarca os supervisores de setor; o Administrador gera e revoga
+     * o PIN do dono e dos supervisores. Só monta a página: as rotas JSON /supervisao/* conferem dono, Administrador,
+     * tenant e a senha de login de novo. Fora da clínica não existe (404, como as rotas JSON); os outros papéis não
+     * têm o que fazer aqui (403), nem o supervisor (o PIN dele vem do Administrador).
      */
     public function supervisao()
     {
         abort_unless($this->contexto->dominio() === 'clinica', 404);
 
         $ehDono = $this->contexto->ehDono();
-        $setor = $this->contexto->setorSupervisionado();
-        abort_unless($ehDono || $setor !== null, 403);
+        $ehAdmin = $this->contexto->ehAdminDaClinica();
+        abort_unless($ehDono || $ehAdmin, 403);
 
         return view('telas.supervisao', [
             'ehDono' => $ehDono,
-            'meuSetor' => $setor,
+            'ehAdmin' => $ehAdmin,
             'rotulosPapeis' => (array) config('sentinel.rotulos_papeis', []),
         ]);
     }

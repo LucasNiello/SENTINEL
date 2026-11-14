@@ -407,7 +407,93 @@
                 if (campo.sensivel && entrada.value === '') return; // vazio = manter o valor informado
                 valores[campo.nome] = entrada.value;
             });
+            // T2: o editor do estorno por itens manda só item e quantidade (o valor é sempre do servidor). Vazio ou 0 = não estorna a linha.
+            const editor = form.querySelector('.estorno-itens');
+            if (editor) {
+                valores.linhas = Array.from(editor.querySelectorAll('input[data-item-id]'))
+                    .filter((entrada) => entrada.value.trim() !== '' && entrada.value.trim() !== '0')
+                    .map((entrada) => ({ item_id: Number(entrada.dataset.itemId), quantidade: entrada.value.trim() }));
+            }
             return valores;
+        }
+
+        // T2: o editor do estorno por itens (formulario.itens_estorno, montado pelo servidor). Cada linha: o que foi lançado,
+        // o que já foi estornado, o que resta e a quantidade a estornar agora. Tudo por textContent; o valor em reais
+        // aparece no resumo, calculado no servidor (nunca aqui).
+        function montarEditorEstorno(linhas, prefixo, form) {
+            const bloco = document.createElement('div');
+            bloco.className = 'campo estorno-itens';
+            const titulo = document.createElement('p');
+            titulo.className = 'estorno-itens__titulo';
+            titulo.id = prefixo + '-estorno-titulo';
+            titulo.textContent = 'Quanto estornar de cada item (0 = não estorna)';
+            const rolagem = document.createElement('div');
+            rolagem.className = 'tabela-rolagem';
+            const tabela = document.createElement('table');
+            tabela.setAttribute('aria-labelledby', titulo.id);
+            const cabecalho = document.createElement('tr');
+            ['Item', 'Preço', 'Lançado', 'Já estornado', 'Estornar agora'].forEach((texto) => {
+                const th = document.createElement('th');
+                th.scope = 'col';
+                th.textContent = texto;
+                cabecalho.appendChild(th);
+            });
+            const thead = document.createElement('thead');
+            thead.appendChild(cabecalho);
+            const tbody = document.createElement('tbody');
+            linhas.forEach((linha) => {
+                const tr = document.createElement('tr');
+                const item = document.createElement('td');
+                item.textContent = linha.descricao;
+                const origem = document.createElement('span');
+                origem.className = 'estorno-itens__origem';
+                origem.textContent = linha.origem === 'Prontuário' ? 'Prontuário: só o valor volta, o estoque não' : 'Avulso';
+                item.appendChild(origem);
+                tr.appendChild(item);
+                [linha.preco, String(linha.lancada), String(linha.estornada)].forEach((texto) => {
+                    const td = document.createElement('td');
+                    td.className = 'num';
+                    td.textContent = texto;
+                    tr.appendChild(td);
+                });
+                const celula = document.createElement('td');
+                const entrada = document.createElement('input');
+                entrada.type = 'text';
+                entrada.inputMode = 'numeric';
+                entrada.id = prefixo + '-estorno-' + linha.item_id;
+                entrada.dataset.itemId = String(linha.item_id);
+                entrada.dataset.restante = String(linha.restante);
+                entrada.dataset.prontuario = linha.origem === 'Prontuário' ? '1' : '0';
+                entrada.value = String(linha.quantidade || 0);
+                entrada.disabled = linha.restante < 1;
+                entrada.setAttribute('aria-label', 'Estornar quantos de ' + linha.descricao + ' (restam ' + linha.restante + ')');
+                const resta = document.createElement('span');
+                resta.className = 'estorno-itens__resta';
+                resta.textContent = 'restam ' + linha.restante;
+                celula.append(entrada, resta);
+                tr.appendChild(celula);
+                tbody.appendChild(tr);
+            });
+            tabela.append(thead, tbody);
+            rolagem.appendChild(tabela);
+            bloco.append(titulo, rolagem);
+
+            // Digitar uma quantidade é escolher "só os itens"; trocar o modo para "tudo" preenche o que resta (só visual:
+            // quem decide o que entra é o servidor, no Revisar, com o modo e as linhas).
+            const modo = form.elements.namedItem('modo');
+            bloco.addEventListener('input', () => {
+                if (modo && modo.value !== 'itens') modo.value = 'itens';
+            });
+            if (modo) {
+                modo.addEventListener('change', () => {
+                    if (modo.value === 'itens') return;
+                    bloco.querySelectorAll('input[data-item-id]').forEach((entrada) => {
+                        const resta = Number(entrada.dataset.restante) || 0;
+                        entrada.value = String(modo.value === 'tudo_menos_prontuario' && entrada.dataset.prontuario === '1' ? 0 : resta);
+                    });
+                });
+            }
+            return bloco;
         }
 
         // RF04 + Bloco 2b: o card de confirmação É o formulário, em duas etapas.
@@ -479,16 +565,16 @@
             card.querySelector('.rotulo-admin-email').htmlFor = adminEmail.id;
             card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
             autorizacao.hidden = !formulario.reautenticar;
-            // Item H (estorno): quem autoriza é o supervisor do setor, com o PIN, ou o dono, com a senha de login.
+            // Item H (estorno), T1: quem autoriza é o supervisor do setor ou o dono, cada um com o PIN gerado pelo Administrador.
             // A chave vem do servidor (formulario.tipo_autorizacao); sem ela, o texto é o da lixeira (administrador).
             const textosAutorizacao = formulario.tipo_autorizacao === 'estorno' ? {
                 titulo: 'Autorização do supervisor do setor ou do dono',
-                info: 'Supervisor do setor ou dono: e-mail e PIN (o dono usa a senha). O PIN só vai junto com a confirmação e não fica guardado.',
+                info: 'Supervisor do setor ou dono: e-mail e PIN de autorização. O PIN só vai junto com a confirmação e não fica guardado.',
                 email: 'E-mail de quem autoriza',
-                segredo: 'PIN do supervisor (o dono usa a senha)',
-                etapa: 'Confira os dados, chame o supervisor do setor (PIN) ou o dono (senha) para digitar aqui e clique em Revisar.',
-                apagado: 'O PIN ou a senha de quem autoriza foi apagado. Digite o e-mail e o PIN (ou a senha do dono) de novo antes de Revisar.',
-                falta: 'Informe o e-mail e o PIN do supervisor do setor (ou o e-mail e a senha do dono).',
+                segredo: 'PIN de quem autoriza',
+                etapa: 'Confira os dados, chame o supervisor do setor ou o dono para digitar o PIN aqui e clique em Revisar.',
+                apagado: 'O PIN de quem autoriza foi apagado. Digite o e-mail e o PIN de novo antes de Revisar.',
+                falta: 'Informe o e-mail e o PIN do supervisor do setor ou do dono.',
             } : {
                 titulo: 'Autorização de um administrador',
                 info: 'Um administrador digita o e-mail e a senha dele aqui. A senha só vai junto com a confirmação e não fica guardada.',
@@ -519,6 +605,7 @@
             function preencherFormulario(novo) {
                 formulario = novo;
                 campos.replaceChildren(...formulario.campos.map((campo) => montarCampo(campo, prefixo)));
+                if (formulario.itens_estorno) campos.appendChild(montarEditorEstorno(formulario.itens_estorno, prefixo, form));
                 aplicarCondicoes(form, formulario.campos);
                 // Lixeira (Bloco 4): o registro que vai sair ou voltar, só para conferir.
                 const linhasRegistro = [];
@@ -755,6 +842,9 @@
                     // Cancelado ou vencido enquanto a revisão ia e voltava: não mexe mais neste card.
                     if (!card.isConnected || card.classList.contains('card--expirado')) return;
                     if (resp.ok && dados.token) {
+                        // T2: no estorno, o servidor manda o card refeito com o modo e as quantidades revisados (o valor que
+                        // vai ser estornado), antes do segurar.
+                        if (dados.formulario) preencherFormulario(dados.formulario);
                         entrarNoSegurar(dados.token, dados.segurar);
                         return;
                     }

@@ -23,7 +23,9 @@ class PrepararAcessoLocal extends Command
         }
 
         if (! $this->option('exemplos')) {
-            $admin = User::query()->where('papel', 'admin')->whereNotNull('tenant_id')->orderBy('id')->first();
+            // T1 (2ª passada): o Administrador da clínica (só PINs) não conta como o administrador do domínio antigo.
+            $admin = User::query()->where('papel', 'admin')->whereNotNull('tenant_id')
+                ->whereNotIn('tenant_id', array_map('intval', (array) config('sentinel.tenants_clinica', [])))->orderBy('id')->first();
 
             if ($admin) {
                 $this->info("Administrador existente preservado: {$admin->email}. Nenhuma senha foi alterada.");

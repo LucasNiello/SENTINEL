@@ -61,10 +61,11 @@ class IsolamentoDeTenantTest extends TestCase
             'CobrancaService::abrir', 'CobrancaService::adicionarItem', 'CobrancaService::removerItem', 'CobrancaService::importarDoProntuario',
             'CobrancaService::fechar', 'CobrancaService::registrarPagamento', 'CobrancaService::cancelar', 'CobrancaService::estornar',
             'CobrancaService::cobrarAtendimento', 'CobrancaService::previaDaCobranca', 'CobrancaService::buscarPorFiltro', 'CobrancaService::localizar',
-            'CobrancaService::atendimentosParaCobrar',
+            'CobrancaService::atendimentosParaCobrar', 'CobrancaService::planoDoEstorno', 'CobrancaService::linhasParaEstornar',
             'VendaService::registrar', 'VendaService::registrarPagamento', 'VendaService::cancelar', 'VendaService::previa',
+            'VendaService::estornar', 'VendaService::planoDoEstorno', 'VendaService::linhasParaEstornar', 'VendaService::buscarPorFiltro', 'VendaService::localizar',
             'MensagemService::buscarPorFiltro', 'MensagemService::localizar', 'MensagemService::marcarTratada',
-            'SupervisaoService::marcarSupervisor', 'SupervisaoService::definirProprioPin', 'SupervisaoService::resetarPin',
+            'SupervisaoService::marcarSupervisor', 'SupervisaoService::gerarPin', 'SupervisaoService::revogarPin',
         ];
 
         return array_combine($nomes, array_map(fn (string $n) => [$n], $nomes));
@@ -276,6 +277,21 @@ class IsolamentoDeTenantTest extends TestCase
                 $this->inexistente(fn () => $cobrancas->estornar($cobranca->id, 'Duplicidade.', $dono->id, $dono->id, self::B, true));
                 $this->assertSame('paga', $cobranca->fresh()->status);
             },
+            // T2: o plano e as linhas do estorno por itens.
+            'CobrancaService::planoDoEstorno' => function () use ($cobrancas) {
+                $cobranca = $this->cobrancaAberta();
+                $cobrancas->fechar($cobranca->id, self::T);
+                $cobrancas->registrarPagamento($cobranca->id, 'pix', self::T);
+                $this->assertGreaterThan(0, $cobrancas->planoDoEstorno($cobranca->id, 'tudo', [], self::T)['valor_centavos'], 'no tenant dono, o plano sai');
+                $this->inexistente(fn () => $cobrancas->planoDoEstorno($cobranca->id, 'tudo', [], self::B));
+            },
+            'CobrancaService::linhasParaEstornar' => function () use ($cobrancas) {
+                $cobranca = $this->cobrancaAberta();
+                $cobrancas->fechar($cobranca->id, self::T);
+                $cobrancas->registrarPagamento($cobranca->id, 'pix', self::T);
+                $this->assertNotEmpty($cobrancas->linhasParaEstornar($cobranca->id, self::T));
+                $this->inexistente(fn () => $cobrancas->linhasParaEstornar($cobranca->id, self::B));
+            },
             'CobrancaService::cobrarAtendimento' => fn () => $this->inexistente(fn () => $cobrancas->cobrarAtendimento($this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item())->id, self::B), \App\Models\Cobranca::class),
             'CobrancaService::previaDaCobranca' => function () use ($cobrancas) {
                 $agendamento = $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item());
@@ -327,22 +343,52 @@ class IsolamentoDeTenantTest extends TestCase
                 $this->assertSame('aberta', $venda->fresh()->status);
             },
 
+            // T2: estorno por itens da venda paga e as leituras novas.
+            'VendaService::estornar' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $dono = $this->comPin($this->usuarioClinica('dono', self::B));
+                $this->inexistente(fn () => $vendas->estornar($venda->id, 'Duplicidade.', $dono->id, $dono->id, self::B, true), \App\Models\Estorno::class);
+                $this->assertSame('paga', $venda->fresh()->status);
+            },
+            'VendaService::planoDoEstorno' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $this->assertSame(2500, $vendas->planoDoEstorno($venda->id, 'tudo', [], self::T)['valor_centavos'], 'no tenant dono, o plano sai');
+                $this->inexistente(fn () => $vendas->planoDoEstorno($venda->id, 'tudo', [], self::B));
+            },
+            'VendaService::linhasParaEstornar' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $this->assertCount(1, $vendas->linhasParaEstornar($venda->id, self::T));
+                $this->inexistente(fn () => $vendas->linhasParaEstornar($venda->id, self::B));
+            },
+            'VendaService::buscarPorFiltro' => function () use ($vendas) {
+                $this->vendaPaga();
+                $this->assertCount(1, $vendas->buscarPorFiltro(null, null, self::T));
+                $this->assertCount(0, $vendas->buscarPorFiltro(null, null, self::B));
+            },
+            'VendaService::localizar' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $this->assertCount(1, $vendas->localizar($venda->id, null, self::T, ['paga']));
+                $this->assertCount(0, $vendas->localizar($venda->id, null, self::B, ['paga']));
+                $this->assertCount(0, $vendas->localizar(null, '', self::B, ['paga']));
+            },
+
             'SupervisaoService::marcarSupervisor' => function () use ($supervisao) {
                 $usuario = $this->usuarioClinica('recepcao');
                 $this->inexistente(fn () => $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono', self::B)->id, self::B));
                 $this->assertNull($usuario->fresh()->supervisor_setor);
             },
-            'SupervisaoService::definirProprioPin' => function () use ($supervisao) {
+            // T1: o Administrador de OUTRA clínica (o tenant B também é da clínica aqui) não alcança o usuário de T.
+            'SupervisaoService::gerarPin' => function () use ($supervisao) {
+                config(['sentinel.tenants_clinica' => [self::T, self::B]]);
                 $usuario = $this->usuarioClinica('recepcao');
                 $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
-                $this->inexistente(fn () => $supervisao->definirProprioPin($usuario->id, '482915', self::B));
+                $this->inexistente(fn () => $supervisao->gerarPin($usuario->id, $this->usuarioClinica('admin', self::B)->id, self::B));
                 $this->assertNull($usuario->fresh()->pin_autorizacao);
             },
-            'SupervisaoService::resetarPin' => function () use ($supervisao) {
-                $usuario = $this->usuarioClinica('recepcao');
-                $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
-                $supervisao->definirProprioPin($usuario->id, '482915', self::T);
-                $this->inexistente(fn () => $supervisao->resetarPin($usuario->id, $this->usuarioClinica('dono', self::B)->id, self::B));
+            'SupervisaoService::revogarPin' => function () use ($supervisao) {
+                config(['sentinel.tenants_clinica' => [self::T, self::B]]);
+                $usuario = $this->comPin($this->usuarioClinica('dono'));
+                $this->inexistente(fn () => $supervisao->revogarPin($usuario->id, $this->usuarioClinica('admin', self::B)->id, self::B));
                 $this->assertNotNull($usuario->fresh()->pin_autorizacao);
             },
         };
@@ -450,6 +496,12 @@ class IsolamentoDeTenantTest extends TestCase
     private function mensagem(): \App\Models\Mensagem
     {
         return \App\Models\Mensagem::create(['remetente' => 'Marcos', 'texto' => 'Vocês abrem no feriado?', 'status' => 'nova', 'tenant_id' => self::T]);
+    }
+
+    private function vendaPaga(): Venda
+    {
+        return app(VendaService::class)->registrar([['catalogo_item_id' => $this->produto(['estoque' => 10, 'preco_centavos' => 2500])->id, 'quantidade' => 1]],
+            $this->usuarioClinica('vendedor')->id, null, 'pix', self::T);
     }
 
     private function vendaAberta(): Venda
