@@ -577,7 +577,7 @@
             card.querySelector('.rotulo-admin-email').htmlFor = adminEmail.id;
             card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
             autorizacao.hidden = !formulario.reautenticar;
-            // Item H (estorno), T1: quem autoriza é o supervisor do setor ou o dono, cada um com o PIN gerado pelo Administrador.
+            // Item H (estorno), T1: quem autoriza é o supervisor do setor ou o dono, cada um com o PIN gerado pelo dono ou pelo Administrador.
             // A chave vem do servidor (formulario.tipo_autorizacao); sem ela, o texto é o da lixeira (administrador).
             const textosAutorizacao = formulario.tipo_autorizacao === 'estorno' ? {
                 titulo: 'Autorização do supervisor do setor ou do dono',

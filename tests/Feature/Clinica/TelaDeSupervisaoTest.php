@@ -8,7 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Item I (clínica vet), tela, T1 (14/11): o dono marca os supervisores de setor; o Administrador gera e revoga os PINs.
+ * Item I (clínica vet), tela, T1 (14/11): o dono marca os supervisores de setor; o Administrador e o dono (15/11) geram e revogam os PINs.
  * A tela só monta a página e chama as rotas JSON /supervisao/* (provadas em SupervisaoEndpointsTest); aqui se prova
  * quem abre a tela, o que cada um vê e que o menu segue a mesma regra.
  */
@@ -16,7 +16,8 @@ class TelaDeSupervisaoTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_dono_ve_a_marcacao_de_setor_e_nao_os_botoes_do_pin(): void
+    /** Bloco B (15/11, decisão do Lucas): o dono também gera e revoga PIN, então vê o formulário do PIN. */
+    public function test_dono_ve_a_marcacao_de_setor_e_os_botoes_do_pin(): void
     {
         $this->logarComo('dono', 3);
 
@@ -24,7 +25,8 @@ class TelaDeSupervisaoTest extends TestCase
             ->assertSee('Supervisores de setor')
             ->assertSee("enviar('/supervisao/supervisores', 'GET')", false)
             ->assertSee('const EH_ADMIN = false;', false)
-            ->assertDontSee('id="form-gerar-pin"', false)
+            ->assertSee('id="form-gerar-pin"', false)
+            ->assertSee('este código não aparece de novo')
             ->assertDontSee('id="form-meu-pin"', false);
         $this->get('/agente')->assertOk()->assertSee('href="/supervisao"', false);
     }

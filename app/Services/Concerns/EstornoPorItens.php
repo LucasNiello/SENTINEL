@@ -203,14 +203,14 @@ trait EstornoPorItens
             throw new RegraDeNegocioException('O Administrador não autoriza estorno: chame o dono ou um supervisor do setor.');
         }
         if ($autorizador->papel === 'dono' && $autorizador->pin_autorizacao === null) {
-            throw new RegraDeNegocioException('O dono ainda não tem PIN de autorização: peça ao Administrador para gerar um.');
+            throw new RegraDeNegocioException('O dono ainda não tem PIN de autorização: ele ou o Administrador gera um na tela Supervisão.');
         }
         if ($autorizador->papel !== 'dono') {
             if ($autorizador->supervisor_setor !== $setor) {
                 throw new RegraDeNegocioException('Só o dono ou um supervisor do setor '.$nomeDoSetor.' autoriza este estorno.');
             }
             if ($autorizador->pin_autorizacao === null) {
-                throw new RegraDeNegocioException('Este supervisor ainda não tem PIN de autorização: peça ao Administrador para gerar um.');
+                throw new RegraDeNegocioException('Este supervisor ainda não tem PIN de autorização: peça ao dono ou ao Administrador para gerar um.');
             }
         }
 

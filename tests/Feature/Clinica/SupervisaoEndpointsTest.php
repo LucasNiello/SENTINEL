@@ -133,12 +133,13 @@ class SupervisaoEndpointsTest extends TestCase
         $this->assertNull($dono->fresh()->supervisor_setor);
     }
 
-    public function test_so_o_admin_gera_e_revoga_e_nada_muda(): void
+    /** Bloco B (15/11): o dono saiu desta lista (agora gera e revoga: SupervisaoPinPeloDonoTest). */
+    public function test_quem_nao_e_admin_nem_dono_nao_gera_nem_revoga_e_nada_muda(): void
     {
         $vet = $this->comPin($this->supervisor());
         $hash = $vet->pin_autorizacao;
 
-        foreach (['dono', 'veterinario', 'recepcao', 'atendente', 'vendedor'] as $papel) {
+        foreach (['veterinario', 'recepcao', 'atendente', 'vendedor'] as $papel) {
             $logado = User::factory()->papel($papel)->doTenant(self::T)->create(['password' => Hash::make(self::SENHA_ADMIN)]);
             $this->actingAs($logado);
             $this->gerar($vet)->assertStatus(403)->assertJsonPath('codigo', 'AI_FORBIDDEN')->assertJsonMissingPath('pin');

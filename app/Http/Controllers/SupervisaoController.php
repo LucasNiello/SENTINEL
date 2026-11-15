@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\Validator;
 /**
  * Item I (clínica vet), em JSON; a tela /supervisao (TelasController::supervisao) chama estas rotas. T1 (14/11): o dono
  * lista, marca e desmarca os supervisores de setor; o Administrador (papel 'admin' do tenant da clínica) lista o dono e
- * os supervisores, gera o PIN (confirmando a senha de login dele) e o revoga. Papel, tenant e "quem" vêm sempre do
+ * os supervisores. O Administrador e o dono (Bloco B de 15/11) geram o PIN (confirmando a própria senha de login) e o
+ * revogam. Papel, tenant e "quem" vêm sempre do
  * ContextoUsuario, nunca do corpo. O código gerado sai UMA vez, na resposta do "gerar" (sem cache), e nunca vai para
  * a sessão, o log, a auditoria nem outra resposta; a senha também não. A escrita e a auditoria do sucesso ficam na
  * mesma transação; a negação e a recusa também são auditadas (a listagem só audita a negação). O SupervisaoService
@@ -26,10 +27,12 @@ use Illuminate\Support\Facades\Validator;
  */
 class SupervisaoController extends Controller
 {
-    /** Tentativas de conferir a senha de login do Administrador ao gerar um PIN, por Administrador, a cada JANELA_PIN_S. */
+    /** Tentativas de conferir a senha de login de quem gera um PIN (Administrador ou dono), por pessoa, a cada JANELA_PIN_S. */
     private const LIMITE_PIN = 5;
 
     private const JANELA_PIN_S = 600;
+
+    private const SO_QUEM_GERE_PIN = 'Só o dono e o Administrador geram e revogam PIN.';
 
     public function __construct(
         private ContextoUsuario $contexto,
@@ -83,15 +86,15 @@ class SupervisaoController extends Controller
     }
 
     /**
-     * POST /supervisao/pins/{id}/gerar {senha_atual}: só o Administrador, confirmando a própria senha de login. Devolve o
+     * POST /supervisao/pins/{id}/gerar {senha_atual}: o Administrador ou o dono, confirmando a própria senha de login. Devolve o
      * código UMA vez ("pin"), com Cache-Control: no-store; a auditoria diz para quem e por quem, nunca o código.
      */
     public function gerarPin(Request $request, int $id): JsonResponse
     {
-        if ($resposta = $this->barrar('gerar_pin', 'atualizar', $id, ['admin'])) {
+        if ($resposta = $this->barrar('gerar_pin', 'atualizar', $id, ['dono', 'admin'], self::SO_QUEM_GERE_PIN)) {
             return $resposta;
         }
-        $admin = $this->contexto->usuario();
+        $gestor = $this->contexto->usuario();
 
         $validador = Validator::make($request->all(), ['senha_atual' => 'required|string|max:255'],
             ['senha_atual.*' => 'Informe a sua senha de login para gerar o PIN.']);
@@ -101,24 +104,25 @@ class SupervisaoController extends Controller
 
         // Quem pegou a sessão aberta não gera PIN sem a senha. A tentativa conta ANTES de conferir (incremento atômico,
         // como no ReautenticacaoAdmin): rajadas em paralelo não passam do teto. Barrada ou acertada, devolve.
-        $chave = 'pin-admin:'.$admin->id;
+        // A chave mantém o nome antigo ("pin-admin"), mas o contador é por pessoa: vale para o Administrador e para o dono.
+        $chave = 'pin-admin:'.$gestor->id;
         if (RateLimiter::hit($chave, self::JANELA_PIN_S) > self::LIMITE_PIN) {
             $this->devolverTentativa($chave);
 
             return $this->erro(429, 'AI_RATE_LIMIT', 'rate_limit', 'Muitas tentativas. Aguarde alguns minutos.');
         }
 
-        if (! Hash::check($validador->validated()['senha_atual'], (string) $admin->password)) {
-            $this->auditar('gerar_pin', $id, [], 'negado', 'Senha de login do Administrador não confere.', false);
+        if (! Hash::check($validador->validated()['senha_atual'], (string) $gestor->password)) {
+            $this->auditar('gerar_pin', $id, [], 'negado', 'Senha de login de quem gera o PIN não confere.', false);
 
             return $this->erro(403, 'AI_REAUTH_FAILED', 'authorization_error', 'A senha de login não confere.');
         }
         $this->devolverTentativa($chave);
 
         $codigo = null;
-        $resposta = $this->executar('gerar_pin', $id, [], fn () => 'PIN gerado para '.$this->nome($id).' por '.$admin->name.'.',
-            function () use ($id, $admin, &$codigo) {
-                $codigo = $this->supervisao->gerarPin($id, $admin->id, $this->contexto->tenantId());
+        $resposta = $this->executar('gerar_pin', $id, [], fn () => 'PIN gerado para '.$this->nome($id).' por '.$gestor->name.'.',
+            function () use ($id, $gestor, &$codigo) {
+                $codigo = $this->supervisao->gerarPin($id, $gestor->id, $this->contexto->tenantId());
             });
 
         // Só entrega o código se a gravação e a auditoria foram confirmadas (cosmético 2 da 1ª passada).
@@ -130,16 +134,16 @@ class SupervisaoController extends Controller
             ->header('Cache-Control', 'no-store');
     }
 
-    /** POST /supervisao/pins/{id}/revogar: só o Administrador; zera o PIN (a pessoa deixa de autorizar até ganhar outro). */
+    /** POST /supervisao/pins/{id}/revogar: o Administrador ou o dono; zera o PIN (a pessoa deixa de autorizar até ganhar outro). */
     public function revogarPin(int $id): JsonResponse
     {
-        if ($resposta = $this->barrar('revogar_pin', 'atualizar', $id, ['admin'])) {
+        if ($resposta = $this->barrar('revogar_pin', 'atualizar', $id, ['dono', 'admin'], self::SO_QUEM_GERE_PIN)) {
             return $resposta;
         }
-        $admin = $this->contexto->usuario();
+        $gestor = $this->contexto->usuario();
 
-        return $this->executar('revogar_pin', $id, [], fn () => 'PIN revogado para '.$this->nome($id).' por '.$admin->name.'.',
-            fn () => $this->supervisao->revogarPin($id, $admin->id, $this->contexto->tenantId()));
+        return $this->executar('revogar_pin', $id, [], fn () => 'PIN revogado para '.$this->nome($id).' por '.$gestor->name.'.',
+            fn () => $this->supervisao->revogarPin($id, $gestor->id, $this->contexto->tenantId()));
     }
 
     /** Nome de um usuário do tenant, para a frase da auditoria (fora do tenant: só o número). */
@@ -161,7 +165,7 @@ class SupervisaoController extends Controller
      *
      * @param  string[]  $quem
      */
-    private function barrar(string $tool, string $acao, ?int $id, array $quem): ?JsonResponse
+    private function barrar(string $tool, string $acao, ?int $id, array $quem, ?string $recusa = null): ?JsonResponse
     {
         if ($this->contexto->dominio() !== 'clinica') {
             return $this->erro(404, 'AI_NOT_FOUND', 'not_found', 'Recurso não encontrado.');
@@ -171,7 +175,7 @@ class SupervisaoController extends Controller
             || (in_array('admin', $quem, true) && $this->contexto->ehAdminDaClinica());
 
         if (! $pode) {
-            $mensagem = match (true) {
+            $mensagem = $recusa ?? match (true) {
                 $quem === ['admin'] => 'Só o Administrador gera e revoga PIN.',
                 $quem === ['dono'] => 'Só o dono marca supervisores.',
                 default => 'Só o dono e o Administrador gerenciam a supervisão.',

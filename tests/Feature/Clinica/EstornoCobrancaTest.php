@@ -190,7 +190,8 @@ class EstornoCobrancaTest extends TestCase
         $this->cobrancas->estornar($cobranca->id, 'Motivo.', $recepcao->id, $this->dono->id, self::OUTRO_TENANT, true);
     }
 
-    public function test_so_o_dono_marca_supervisor_e_so_o_admin_gera_e_revoga_pin(): void
+    /** Bloco B (15/11, decisão do Lucas): o dono também gera e revoga PIN; os outros papéis continuam recusados. */
+    public function test_so_o_dono_marca_supervisor_e_so_o_admin_e_o_dono_geram_e_revogam_pin(): void
     {
         $alvo = $this->usuarioClinica('recepcao');
         $admin = $this->usuarioClinica('admin');
@@ -199,20 +200,23 @@ class EstornoCobrancaTest extends TestCase
             $outro = $this->usuarioClinica($papel);
             $this->recusa(fn () => $this->supervisao->marcarSupervisor($alvo->id, 'clinica', $outro->id, self::T), 'Só o dono');
         }
-        foreach (['veterinario', 'recepcao', 'atendente', 'vendedor', 'dono'] as $papel) {
+        foreach (['veterinario', 'recepcao', 'atendente', 'vendedor'] as $papel) {
             $outro = $this->usuarioClinica($papel);
-            $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $outro->id, self::T), 'Só o Administrador');
-            $this->recusa(fn () => $this->supervisao->revogarPin($this->dono->id, $outro->id, self::T), 'Só o Administrador');
+            $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $outro->id, self::T), 'Só o dono e o Administrador');
+            $this->recusa(fn () => $this->supervisao->revogarPin($this->dono->id, $outro->id, self::T), 'Só o dono e o Administrador');
         }
         $this->recusa(fn () => $this->supervisao->marcarSupervisor($alvo->id, 'clinica', $this->usuarioClinica('dono', self::OUTRO_TENANT)->id, self::T), 'Não encontrei o dono');
         $this->recusa(fn () => $this->supervisao->marcarSupervisor($this->usuarioClinica('recepcao', self::OUTRO_TENANT)->id, 'clinica', $this->dono->id, self::T), 'Não encontrei o usuário');
         $this->recusa(fn () => $this->supervisao->marcarSupervisor($alvo->id, 'farmacia', $this->dono->id, self::T), '"clinica" ou "petshop"');
-        $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $this->usuarioClinica('admin', self::OUTRO_TENANT)->id, self::T), 'Não encontrei o Administrador');
+        $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $this->usuarioClinica('admin', self::OUTRO_TENANT)->id, self::T), 'Não encontrei o dono ou o Administrador');
+        $this->recusa(fn () => $this->supervisao->gerarPin($this->dono->id, $this->usuarioClinica('dono', self::OUTRO_TENANT)->id, self::T), 'Não encontrei o dono ou o Administrador');
         $this->assertNull($alvo->fresh()->supervisor_setor);
 
         $this->assertSame('clinica', $this->supervisao->marcarSupervisor($alvo->id, 'clinica', $this->dono->id, self::T)->supervisor_setor);
         $this->assertNull($this->supervisao->marcarSupervisor($alvo->id, null, $this->dono->id, self::T)->supervisor_setor, 'o dono desmarca');
         $this->assertMatchesRegularExpression('/^\d{6}$/', $this->supervisao->gerarPin($this->dono->id, $admin->id, self::T));
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $this->supervisao->gerarPin($this->dono->id, $this->dono->id, self::T), 'o dono gera o dele');
+        $this->assertNull($this->supervisao->revogarPin($this->dono->id, $this->dono->id, self::T)->pin_autorizacao, 'e revoga');
     }
 
     public function test_pin_gerado_so_pelo_admin_guardado_so_como_hash_diferente_da_senha_e_revogar_zera(): void
