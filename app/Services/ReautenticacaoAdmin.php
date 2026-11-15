@@ -67,8 +67,8 @@ class ReautenticacaoAdmin
 
     /**
      * H (clínica): quem autoriza um ESTORNO, pelo mesmo card e com os MESMOS limites (os contadores são os de
-     * autorizar(): errar aqui também conta lá). O segredo é o PIN de autorização (gerado pelo Administrador, T1 de
-     * 14/11) de um supervisor ou do dono, do mesmo tenant de quem está logado. A senha de login NÃO serve, nem a do
+     * autorizar(): errar aqui também conta lá). O segredo é o PIN de autorização (gerado pelo Administrador ou pelo dono, T1 de
+     * 14/11; o dono desde 15/11) de um supervisor ou do dono, do mesmo tenant de quem está logado. A senha de login NÃO serve, nem a do
      * dono; o Administrador não autoriza, mesmo com um código. Se a pessoa pode autorizar ESTE estorno (setor,
      * autoaprovação, papel válido) é conferido de novo no service do estorno.
      *

@@ -26,7 +26,7 @@
         <h1>Supervisão</h1>
         <p class="intro">
             @if ($ehDono)
-                Marque quem supervisiona cada setor. O supervisor do setor e o dono autorizam estornos com o PIN que o Administrador gera.
+                Marque quem supervisiona cada setor e gere ou revogue o PIN de autorização (o seu e o dos supervisores). O supervisor do setor e o dono autorizam estornos só com o PIN, que aparece uma vez só, aqui.
             @else
                 Gere ou revogue o PIN de autorização do dono e dos supervisores de setor. O código aparece uma vez só, aqui, para você entregar à pessoa.
             @endif
@@ -35,7 +35,7 @@
 
     <div id="aviso-supervisao" class="supervisao-aviso msg" role="status" aria-live="polite"></div>
 
-    @if ($ehAdmin)
+    @if ($ehAdmin || $ehDono)
         {{-- O código gerado só existe neste bloco até "Já anotei"; não vai para outra resposta, sessão ou armazenamento do navegador. --}}
         <div id="pin-gerado" class="pin-gerado" role="alert" hidden>
             <p id="pin-gerado-para"></p>
@@ -61,7 +61,7 @@
         <h2 id="titulo-supervisores">{{ $ehDono ? 'Supervisores de setor' : 'PIN de autorização' }}</h2>
         <p>
             @if ($ehDono)
-                Desmarcar ou trocar o setor zera o PIN da pessoa. O dono não é marcado: ele já autoriza em qualquer setor.
+                Desmarcar ou trocar o setor zera o PIN da pessoa. O dono não é marcado: ele já autoriza em qualquer setor. Gerar PIN pede a sua senha de login.
             @else
                 Gerar pede a sua senha de login. Revogar zera o PIN: a pessoa deixa de autorizar até ganhar outro.
             @endif
@@ -89,6 +89,7 @@
             const ROTULOS_PAPEIS = @json($rotulosPapeis);
             const EH_DONO = @json($ehDono);
             const EH_ADMIN = @json($ehAdmin);
+            const EU = @json(auth()->id());
             const SETORES = [['', 'Nenhum'], ['clinica', 'Clínica'], ['petshop', 'Petshop']];
 
             function mostrar(texto, tipo) {
@@ -181,7 +182,8 @@
 
                 tr.append(tdSetor, celula(u.tem_pin ? 'Gerado' : 'Sem PIN'));
 
-                if (EH_ADMIN) {
+                // O Administrador vê só quem pode ter PIN; o dono vê a equipe toda e gera o dele e o dos supervisores.
+                if (EH_ADMIN || (EH_DONO && (u.id === EU || (u.papel !== 'dono' && u.papel !== 'admin' && u.supervisor_setor)))) {
                     acoes.append(botao('Gerar novo PIN', 'Gerar novo PIN para ' + u.nome, '', () => abrirGerar(u)));
                     if (u.tem_pin) {
                         acoes.append(botao('Revogar PIN', 'Revogar o PIN de ' + u.nome, 'btn-danger', async (revogar) => {
@@ -199,7 +201,7 @@
                 return tr;
             }
 
-            // Administrador: gerar pede a senha de login; o código volta UMA vez e só fica no bloco até "Já anotei".
+            // Administrador ou dono: gerar pede a senha de login; o código volta UMA vez e só fica no bloco até "Já anotei".
             const formGerar = document.getElementById('form-gerar-pin');
             const caixaPin = document.getElementById('pin-gerado');
             let alvo = null;
@@ -252,6 +254,11 @@
                     document.getElementById('pin-gerado-ok').focus();
                     alvo = null;
                     carregar();
+                });
+                // Saiu da página sem "Já anotei": o código e a senha não ficam na tela guardada para o Voltar.
+                window.addEventListener('pagehide', () => {
+                    esconderPin();
+                    document.getElementById('senha-admin').value = '';
                 });
             }
 

@@ -1,0 +1,7 @@
+n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao;papel
+1;consulta;me mostra a agenda do banho e tosa de amanha;;consultar_agenda;resultado_leitura;pedido 2 da bateria (atendente);atendente
+2;consulta;mostra a agenda da clinica de hoje;;consultar_agenda;resultado_leitura;Bloco A: o atendente pede a clinica e o servidor devolve so o banho e tosa;atendente
+3;agenda;o Bidu não veio hoje, marca falta;;alterar_status_agendamento;confirmacao_pendente;pedido 10 da bateria, arg:novo_status=faltou;atendente
+4;agenda;a Amora já fez a tosa, pode marcar como realizado;;alterar_status_agendamento;confirmacao_pendente;parafrase 4, arg:novo_status=realizado;atendente
+5;permissao;quais atendimentos temos hoje?;;consultar_agenda;negado;Bloco A: o vendedor nao consulta a agenda;vendedor
+6;permissao;agenda um banho pro Thor sexta às 14h;;agendar_atendimento;negado;pedido 37 da bateria (vendedor nao agenda);vendedor

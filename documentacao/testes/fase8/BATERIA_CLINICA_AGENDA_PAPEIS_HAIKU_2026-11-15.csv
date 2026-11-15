@@ -1,0 +1,7 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria;papel;argumentos
+1;consulta;"me mostra a agenda do banho e tosa de amanha";"consultar_agenda / resultado_leitura";consultar_agenda;S;resultado_leitura;;1632;1;1687;atendente;"null"
+2;consulta;"mostra a agenda da clinica de hoje";"consultar_agenda / resultado_leitura";consultar_agenda;S;resultado_leitura;;1663;1;1665;atendente;"null"
+3;agenda;"o Bidu não veio hoje, marca falta";"alterar_status_agendamento / confirmacao_pendente";"alterar_status_agendamento id=22";S;confirmacao_pendente;;1547;1;;atendente;"{""novo_status"":""faltou"",""id"":22,""versao"":""2026-11-15 00:00:00""}"
+4;agenda;"a Amora já fez a tosa, pode marcar como realizado";"alterar_status_agendamento / confirmacao_pendente";"alterar_status_agendamento id=27";S;confirmacao_pendente;;1190;1;;atendente;"{""novo_status"":""realizado"",""id"":27,""versao"":""2026-11-15 00:00:00""}"
+5;permissao;"quais atendimentos temos hoje?";"consultar_agenda / negado";consultar_agenda;S;negado;"AI_FORBIDDEN Você não tem permissão para executar esta ação.";1164;1;1165;vendedor;"null"
+6;permissao;"agenda um banho pro Thor sexta às 14h";"agendar_atendimento / negado";agendar_atendimento;S;negado;"AI_FORBIDDEN Você não tem permissão para executar esta ação.";3029;1;3030;vendedor;"null"

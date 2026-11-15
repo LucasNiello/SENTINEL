@@ -260,8 +260,8 @@ class ClinicaTelasController extends Controller
 
     /**
      * Setores da agenda que o papel vê nas telas (tabela da FASE oito, decisão do Lucas de 15/11): o vendedor nenhum, o
-     * atendente só banho e tosa; recepção, veterinário e dono os dois. Sem a tool de leitura, nenhum. O chat
-     * (consultar_agenda) não mudou: ver o registro de decisões.
+     * atendente só banho e tosa; recepção, veterinário e dono os dois. Sem a tool de leitura, nenhum. A regra mora no
+     * catálogo (setoresDaAgenda), a mesma do chat (Bloco A de 15/11).
      *
      * @return string[]
      */
@@ -271,11 +271,7 @@ class ClinicaTelasController extends Controller
             return [];
         }
 
-        return match ($this->contexto->papel()) {
-            'vendedor' => [],
-            'atendente' => ['petshop'],
-            default => ['clinica', 'petshop'],
-        };
+        return $this->agente->setoresDaAgenda();
     }
 
     /** Leitura direta (sem tool) também fica na auditoria, com origem "manual", como as telas que leem pela tool. */
