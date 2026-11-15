@@ -93,10 +93,10 @@ class TelasController extends Controller
     }
 
     /**
-     * Item I (clínica vet), T1 (14/11): o dono marca e desmarca os supervisores de setor; o Administrador gera e revoga
+     * Item I (clínica vet), T1 (14/11): o dono marca e desmarca os supervisores de setor; o Administrador e o dono geram e revogam
      * o PIN do dono e dos supervisores. Só monta a página: as rotas JSON /supervisao/* conferem dono, Administrador,
      * tenant e a senha de login de novo. Fora da clínica não existe (404, como as rotas JSON); os outros papéis não
-     * têm o que fazer aqui (403), nem o supervisor (o PIN dele vem do Administrador).
+     * têm o que fazer aqui (403), nem o supervisor (o PIN dele vem do dono ou do Administrador).
      */
     public function supervisao()
     {

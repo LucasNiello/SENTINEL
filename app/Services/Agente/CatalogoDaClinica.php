@@ -45,6 +45,9 @@ trait CatalogoDaClinica
 
     private const PAPEIS_DO_DONO = ['dono'];
 
+    /** Quem vê e mexe na agenda (tabela da FASE oito, 15/11): o vendedor não. Mesma lista no chat e na tela /agenda. */
+    private const PAPEIS_DA_AGENDA = ['atendente', 'recepcao', 'veterinario', 'dono'];
+
     /** Caixa de entrada: quantos pets do tutor vão no pedido ao agente e o limite do campo do chat (AgenteController). */
     private const PETS_NO_PEDIDO = 5;
 
@@ -197,7 +200,7 @@ trait CatalogoDaClinica
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Agendamento',
-                papeis: self::PAPEIS_EQUIPE,
+                papeis: self::PAPEIS_DA_AGENDA,
                 propriedades: [
                     'data_inicio' => ['type' => 'string', 'format' => 'date'],
                     'data_fim' => ['type' => 'string', 'format' => 'date'],
@@ -207,7 +210,7 @@ trait CatalogoDaClinica
                     'status' => ['type' => 'string', 'enum' => Agendamento::STATUS],
                 ],
                 obrigatorios: [],
-                executar: fn (array $a) => $agenda->buscarPorFiltro($a['data_inicio'] ?? null, $a['data_fim'] ?? null, $a['setor'] ?? null,
+                executar: fn (array $a) => $agenda->buscarPorFiltro($a['data_inicio'] ?? null, $a['data_fim'] ?? null, $this->setorDaAgendaPedido($a['setor'] ?? null),
                     isset($a['profissional_id']) ? (int) $a['profissional_id'] : null, isset($a['pet_id']) ? (int) $a['pet_id'] : null, $a['status'] ?? null, $a['tenant_id'])
                     ->map(fn (Agendamento $ag) => [
                         'id' => (int) $ag->id,
@@ -227,7 +230,7 @@ trait CatalogoDaClinica
                 descricao: 'Muda o status de um agendamento em aberto (agendado ou confirmado) para confirmado, realizado, cancelado ou faltou. Achado pelo id ou pelo nome do pet.',
                 acao: 'atualizar',
                 entidade: 'Agendamento',
-                papeis: ['atendente', 'recepcao', 'veterinario', 'dono'],
+                papeis: self::PAPEIS_DA_AGENDA,
                 propriedades: ['novo_status' => ['type' => 'string', 'enum' => ['confirmado', 'realizado', 'cancelado', 'faltou']]],
                 obrigatorios: ['novo_status'],
                 formRequest: AlterarStatusAgendamentoRequest::class,
@@ -236,7 +239,8 @@ trait CatalogoDaClinica
                 titulo: 'Mudar o status do agendamento',
                 sucesso: 'Status do agendamento atualizado',
                 conferir: function (array $a) use ($agenda): ?array {
-                    $motivo = $agenda->motivoParaNaoAlterarStatus((int) ($a['id'] ?? 0), (string) ($a['novo_status'] ?? ''), (int) $a['tenant_id']);
+                    $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoAlterarStatus((int) ($a['id'] ?? 0), (string) ($a['novo_status'] ?? ''), (int) $a['tenant_id']);
 
                     return $motivo === null ? null : ['campo' => 'novo_status', 'motivo' => $motivo];
                 },
@@ -271,12 +275,13 @@ trait CatalogoDaClinica
                 titulo: $t['titulo'],
                 sucesso: $t['sucesso'],
                 conferir: function (array $a) use ($agenda, $t): ?array {
-                    $motivo = $agenda->motivoParaNaoAgendar([...$a, 'origem' => $t['origem']], (int) $a['tenant_id']);
+                    $motivo = $this->motivoForaDoSetorDaAgenda(CatalogoItem::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['catalogo_item_id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoAgendar([...$a, 'origem' => $t['origem']], (int) $a['tenant_id']);
 
                     return $motivo === null ? null : ['campo' => 'inicio', 'motivo' => $motivo];
                 },
             ), [
-                ['nome' => 'agendar_atendimento', 'origem' => 'normal', 'papeis' => ['atendente', 'recepcao', 'veterinario', 'dono'],
+                ['nome' => 'agendar_atendimento', 'origem' => 'normal', 'papeis' => self::PAPEIS_DA_AGENDA,
                     'titulo' => 'Agendar', 'sucesso' => 'Atendimento agendado',
                     'descricao' => 'Agenda um atendimento da clínica ou do banho e tosa, de agora em diante, sem conflito com outro horário do mesmo profissional.'],
                 ['nome' => 'registrar_encaixe_emergencia', 'origem' => 'encaixe_emergencia', 'papeis' => ['recepcao', 'veterinario', 'dono'],
@@ -623,6 +628,38 @@ trait CatalogoDaClinica
         $pedido = 'Mensagem da caixa de entrada ('.$contexto.'): '.json_encode((string) $mensagem->texto, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
         return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : (string) $mensagem->texto;
+    }
+
+    /**
+     * Setores da agenda do papel logado, a fonte única do chat e das telas (tabela da FASE oito, decisão do Lucas de
+     * 15/11; Bloco A de 15/11): o atendente só o banho e tosa; recepção, veterinário e dono os dois; quem não está em
+     * PAPEIS_DA_AGENDA (o vendedor), nenhum.
+     *
+     * @return string[]
+     */
+    public function setoresDaAgenda(): array
+    {
+        return match ($this->contexto->papel()) {
+            'atendente' => ['petshop'],
+            'recepcao', 'veterinario', 'dono' => ['clinica', 'petshop'],
+            default => [],
+        };
+    }
+
+    /** Quem só vê um setor fica preso nele, qualquer que seja o setor pedido (como na tela /agenda). */
+    private function setorDaAgendaPedido(mixed $setor): ?string
+    {
+        $setores = $this->setoresDaAgenda();
+
+        return count($setores) === 1 ? $setores[0] : (is_string($setor) ? $setor : null);
+    }
+
+    /** Agendar ou mudar o status fora do setor do papel (o atendente na agenda da clínica) é recusado no Revisar. */
+    private function motivoForaDoSetorDaAgenda(?string $setor): ?string
+    {
+        return $setor === null || in_array($setor, $this->setoresDaAgenda(), true)
+            ? null
+            : 'Seu papel só mexe na agenda do banho e tosa. Este atendimento é da clínica: peça à recepção.';
     }
 
     /** O agendamento no card: pet, serviço, profissional, horário e situação (só leitura, do tenant). */
