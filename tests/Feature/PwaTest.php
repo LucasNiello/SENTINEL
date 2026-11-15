@@ -40,14 +40,20 @@ class PwaTest extends TestCase
                 ->assertSee('<link rel="manifest" href="/manifest.webmanifest">', false)
                 ->assertSee('<meta name="theme-color"', false)
                 ->assertSee("navigator.serviceWorker.register('/sw.js')", false)
-                ->assertSee('<link rel="stylesheet" href="/css/sentinel-extra.css">', false);
+                // F1 do front (14/11): o CSS de 360 px e do estorno foi para o build do Vite; não há mais folha estática.
+                ->assertDontSee('/css/sentinel-extra.css', false);
         }
 
         auth()->logout();
         $this->get('/login')->assertOk()
             ->assertSee('<link rel="manifest" href="/manifest.webmanifest">', false)
             ->assertSee("navigator.serviceWorker.register('/sw.js')", false)
-            ->assertSee('<link rel="stylesheet" href="/css/sentinel-login-extra.css">', false);
+            ->assertDontSee('/css/sentinel-login-extra.css', false);
+
+        $this->assertFileDoesNotExist(public_path('css/sentinel-extra.css'));
+        $this->assertFileDoesNotExist(public_path('css/sentinel-login-extra.css'));
+        $this->assertStringContainsString('.estorno-itens', (string) file_get_contents(resource_path('css/workspace.css')));
+        $this->assertStringContainsString('.mobile-brand {min-height:44px', (string) file_get_contents(resource_path('css/login.css')));
     }
 
     public function test_service_worker_so_guarda_o_shell_estatico_e_nunca_o_agente(): void

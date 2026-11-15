@@ -19,10 +19,22 @@
             <h2>Por onde começamos?</h2>
             <p>Uma pergunta abre caminhos. Uma ação começa pela sua revisão.</p>
             <div class="agent-suggestions" aria-label="Exemplos de pedidos">
+                @if (app(\App\Services\ContextoUsuario::class)->dominio() === 'clinica')
+                    {{-- F3 do front (14/11): na clínica, os exemplos são da clínica (antes eram os do domínio antigo). Só preenchem o campo. --}}
+                    <button type="button" data-suggestion="mostre a agenda de hoje"><small>AGENDA</small>Agenda de hoje <span aria-hidden="true">↗</span></button>
+                    <button type="button" data-suggestion="mostre as mensagens novas da caixa de entrada"><small>CAIXA DE ENTRADA</small>Mensagens novas <span aria-hidden="true">↗</span></button>
+                    @if (app(\App\Services\AiAgentService::class)->podeExecutar('agendar_atendimento'))
+                        <button type="button" data-suggestion="agende uma consulta para o pet "><small>AGENDAR</small>Agendar uma consulta <span aria-hidden="true">↗</span></button>
+                    @endif
+                    @if (app(\App\Services\AiAgentService::class)->podeExecutar('registrar_venda'))
+                        <button type="button" data-suggestion="registre uma venda de "><small>VENDA</small>Registrar uma venda <span aria-hidden="true">↗</span></button>
+                    @endif
+                @else
                 <button type="button" data-suggestion="liste meus clientes"><small>CONSULTAR</small>Liste meus clientes <span aria-hidden="true">↗</span></button>
                 <button type="button" data-suggestion="quais lançamentos estão pendentes?"><small>FINANCEIRO</small>Lançamentos pendentes <span aria-hidden="true">↗</span></button>
                 @if (app(\App\Services\AiAgentService::class)->podeExecutar('criar_cliente'))
                     <button type="button" data-suggestion="cadastre um cliente chamado "><small>CADASTRO</small>Cadastre um cliente <span aria-hidden="true">↗</span></button>
+                @endif
                 @endif
             </div>
         </div>
@@ -37,7 +49,7 @@
     <form id="form-comando">
         <label for="campo-mensagem" class="sr-only">Seu pedido ao agente</label>
         <span class="composer-mark" aria-hidden="true">⌘</span>
-        <input type="text" id="campo-mensagem" data-foco placeholder="Pergunte ou descreva uma ação…" required>
+        <input type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required>
         <kbd class="composer-key" aria-hidden="true">ENTER ↵</kbd>
         <button type="submit" id="botao-enviar">Enviar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button>
     </form>

@@ -360,21 +360,38 @@ class ClinicaSeeder extends Seeder
         });
     }
 
-    /** Despesas gerais do mês (lançamentos de categoria "despesa"), para o lucro dos Resultados. */
+    /**
+     * Despesas gerais (lançamentos de categoria "despesa"), para o lucro dos Resultados.
+     *
+     * Decisão do Lucas (15/11): a demo não mostra prejuízo. O seed recebe ~R$ 3.014 entre 15 e 29 dias atrás e ~R$ 1.463
+     * nos últimos 14; as despesas ficam em ~50% e ~70% disso, e CADA uma cai num dia em que o seed recebe mais do que
+     * ela (o "dias atrás" ao lado do valor). Assim nenhum dia, semana ou mês fica negativo, qualquer que seja a data em
+     * que o seed rodar (as datas são relativas a hoje). ClinicaSeederTest prova isso. Os valores são simulados, na
+     * escala da receita do seed, não de uma clínica real.
+     */
     private function despesas(): void
     {
         $categoria = fn (string $nome) => CategoriaLancamento::create(['nome' => $nome, 'tipo' => 'despesa', 'tenant_id' => self::TENANT]);
         $fornecedor = Fornecedor::create(['nome' => 'Distribuidora PetMais Ltda', 'documento' => '11.222.333/0001-81', 'tenant_id' => self::TENANT]);
         $c = ['aluguel' => $categoria('Aluguel'), 'energia' => $categoria('Energia elétrica'), 'agua' => $categoria('Água'),
-            'compras' => $categoria('Compras de estoque'), 'salarios' => $categoria('Salários')];
+            'compras' => $categoria('Compras de estoque'), 'manutencao' => $categoria('Manutenção e higiene')];
 
         foreach ([
-            ['Aluguel do imóvel', '4500.00', 25, 'aluguel', 'conciliado', null],
-            ['Conta de energia', '850.40', 18, 'energia', 'conciliado', null],
-            ['Conta de água', '220.15', 18, 'agua', 'pendente', null],
-            ['Compra de ração e petiscos', '3200.00', 20, 'compras', 'conciliado', $fornecedor->id],
-            ['Compra de medicamentos da farmácia', '1480.90', 12, 'compras', 'pendente', $fornecedor->id],
-            ['Folha de pagamento', '6800.00', 5, 'salarios', 'pendente', null],
+            // 15 a 29 dias atrás (receita ~R$ 3.014): R$ 1.551,60
+            ['Aluguel (parcela quinzenal)', '450.00', 19, 'aluguel', 'conciliado', null],              // dia: R$ 600,00
+            ['Compra de ração e petiscos', '320.00', 18, 'compras', 'conciliado', $fornecedor->id],      // dia: R$ 420,00
+            ['Conta de energia', '210.80', 16, 'energia', 'conciliado', null],                          // dia: R$ 310,00
+            ['Compra de medicamentos da farmácia', '175.50', 28, 'compras', 'conciliado', $fornecedor->id], // dia: R$ 240,00
+            ['Manutenção do secador do banho e tosa', '160.00', 29, 'manutencao', 'conciliado', null], // dia: R$ 240,00
+            ['Material de higiene do banho e tosa', '140.00', 21, 'manutencao', 'conciliado', null],    // dia: R$ 215,00
+            ['Conta de água', '95.30', 26, 'agua', 'conciliado', null],                                 // dia: R$ 215,00
+            // últimos 14 dias (receita ~R$ 1.463): R$ 1.021,45
+            ['Aluguel (parcela quinzenal)', '450.00', 9, 'aluguel', 'pendente', null],                  // dia: R$ 770,00
+            ['Compra de medicamentos da farmácia', '180.90', 9, 'compras', 'pendente', $fornecedor->id],
+            ['Conta de energia', '165.40', 3, 'energia', 'pendente', null],                             // dia: R$ 240,00
+            ['Compra de ração e petiscos', '98.00', 8, 'compras', 'pendente', $fornecedor->id],         // dia: R$ 120,00
+            ['Material de higiene do banho e tosa', '85.00', 10, 'manutencao', 'pendente', null],       // dia: R$ 120,00
+            ['Conta de água', '42.15', 1, 'agua', 'pendente', null],                                    // dia: R$ 50,00
         ] as [$descricao, $valor, $dias, $cat, $status, $fornecedorId]) {
             Lancamento::create(['descricao' => $descricao, 'valor' => $valor, 'data' => $this->dia($dias, '08:00')->toDateString(), 'status' => $status,
                 'categoria_lancamento_id' => $c[$cat]->id, 'fornecedor_id' => $fornecedorId, 'tenant_id' => self::TENANT]);

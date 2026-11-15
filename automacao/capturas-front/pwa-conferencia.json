@@ -1,0 +1,14 @@
+{
+ "como": "Edge headless pelo DevTools Protocol, 360x780, servidor local de capturas (porta 8123, SQLite do scratchpad), login como recepcao; navegou por /agente, /agente/consultar, /agenda, /cobrancas, /vendas, /pets/1, /cadastros.",
+ "manifestoUrl": "http://localhost:8123/manifest.webmanifest",
+ "errosDoManifesto": [],
+ "errosDeInstalacao": "1a execucao: [] (nenhum erro de instalacao). 2a execucao: a consulta Page.getInstallabilityErrors nao respondeu no headless. O botao Instalar em si nao aparece em headless: conferir a mao em http://localhost:8000.",
+ "sw": {
+  "ativo": true,
+  "escopo": "http://localhost:8123/",
+  "controla": true,
+  "caches": ["sentinel-shell-v1"],
+  "itens": ["/manifest.webmanifest", "/icons/sentinel-192.png", "/icons/sentinel-512.png", "/favicon-sentinel.svg", "/build/assets/workspace-*.css", "/build/assets/workspace-*.js", "/build/assets/ibm-plex-sans-400-600-*.woff2", "/build/assets/ibm-plex-mono-400-*.woff2", "/build/assets/sora-300-600-*.woff2"]
+ },
+ "errosNoConsole": []
+}

@@ -141,6 +141,9 @@
             formConsulta.requestSubmit();
         });
 
+        // Cadastros › Pets: cada linha leva à ficha do pet (tela de leitura; a rota confere papel e tenant).
+        window.linkDaLinha = (linha) => entidadeAtual().consultar === 'consultar_pets' && Number.isInteger(linha.id) ? { href: '/pets/' + linha.id, rotulo: 'Ver ficha' } : null;
+
         botaoNovo.addEventListener('click', () => abrirFormulario(entidadeAtual().criar, null, botaoNovo));
 
         if (seletorEntidade) {

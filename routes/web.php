@@ -3,6 +3,7 @@
 use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
+use App\Http\Controllers\ClinicaTelasController;
 use App\Http\Controllers\SupervisaoController;
 use App\Http\Controllers\TelasController;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
@@ -40,6 +41,16 @@ Route::middleware('auth')->group(function () {
         Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
         // Item I (clínica vet): a tela usa as rotas JSON /supervisao/* abaixo, que conferem tudo de novo.
         Route::get('/supervisao', [TelasController::class, 'supervisao']);
+
+        // Front de 14/11 (F2): telas de LEITURA da clínica + petshop. Cada uma confere domínio, papel (o da tool de leitura) e tenant.
+        // Teto próprio (60/min por usuário, 429 em HTML): as cinco telas gravam uma linha de auditoria por acesso,
+        // e sem teto um F5 em laço encheria a audit_logs. Balde separado do 'agente-sem-ia', para navegar não gastar o Revisar.
+        Route::get('/agenda', [ClinicaTelasController::class, 'agenda'])->middleware('throttle:60,1,telas-clinica');
+        Route::get('/cobrancas', [ClinicaTelasController::class, 'cobrancas'])->middleware('throttle:60,1,telas-clinica');
+        Route::get('/vendas', [ClinicaTelasController::class, 'vendas'])->middleware('throttle:60,1,telas-clinica');
+        // Até 18 dígitos: número maior não cabe em inteiro e daria erro em vez de 404.
+        Route::get('/pets/{id}', [ClinicaTelasController::class, 'pet'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,telas-clinica');
+        Route::get('/resultados', [ClinicaTelasController::class, 'resultados'])->middleware('throttle:60,1,telas-clinica');
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
         Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);

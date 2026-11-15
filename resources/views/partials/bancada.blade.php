@@ -104,7 +104,10 @@
             const colunas = colunasServidor && colunasServidor.length ? colunasServidor : ['id', 'descricao', 'valor', 'status', 'data'];
             // P-B5 (caixa de entrada): a linha com "pedido" ganha "Pedir ao agente", só na tela que tem o chat.
             const temPedido = typeof window.pedirAoAgente === 'function' && linhas.some((l) => typeof l.pedido === 'string');
-            const temAcao = editar || temPedido || linhas.some((l) => l.acao && l.acao.tool);
+            // Front de 14/11 (F2): a tela pode dar um link por linha (Cadastros › Pets: a ficha do pet). Só navegação (GET).
+            const linkDaLinha = typeof window.linkDaLinha === 'function' ? window.linkDaLinha : null;
+            const temLink = !!linkDaLinha && linhas.some((l) => linkDaLinha(l));
+            const temAcao = editar || temPedido || temLink || linhas.some((l) => l.acao && l.acao.tool);
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const trCabecalho = document.createElement('tr');
@@ -147,6 +150,15 @@
                         botao.setAttribute('aria-label', 'Editar o registro ' + l.id);
                         botao.addEventListener('click', () => abrirFormulario(editar, l.id, botao));
                         td.appendChild(botao);
+                    }
+                    const destino = temLink ? linkDaLinha(l) : null;
+                    if (destino) {
+                        const link = document.createElement('a');
+                        link.className = 'btn-ver link-linha';
+                        link.href = destino.href;
+                        link.textContent = destino.rotulo;
+                        link.setAttribute('aria-label', destino.rotulo + ' do registro ' + l.id);
+                        td.appendChild(link);
                     }
                     // O texto vira um pedido normal: o agente propõe e a escrita continua passando por Revisar e segurar.
                     if (temPedido && typeof l.pedido === 'string') {

@@ -48,3 +48,18 @@ document.querySelectorAll('[data-suggestion]').forEach(button => {
         field.focus(); // Preenche; nunca envia nem confirma uma operação.
     });
 });
+// F4 (14/11): tamanho do texto em 3 níveis, guardado no navegador por usuário (sem migration). O <head> já aplicou a
+// escolha antes de pintar; aqui os botões trocam, gravam e dizem qual está ativo (aria-pressed + contorno).
+const botoesTexto = [...document.querySelectorAll('.texto-tamanho [data-texto]')];
+if (botoesTexto.length) {
+    const raiz = document.documentElement;
+    const chave = 'sentinel:texto:' + (raiz.dataset.usuario || '0');
+    const marcar = () => botoesTexto.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.texto === (raiz.dataset.texto || '1'))));
+    botoesTexto.forEach(botao => botao.addEventListener('click', () => {
+        const nivel = botao.dataset.texto;
+        if (nivel === '1') delete raiz.dataset.texto; else raiz.dataset.texto = nivel;
+        try { nivel === '1' ? localStorage.removeItem(chave) : localStorage.setItem(chave, nivel); } catch (e) { /* sem armazenamento: vale só nesta página */ }
+        marcar();
+    }));
+    marcar();
+}

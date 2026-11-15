@@ -125,7 +125,8 @@ class TelasController extends Controller
         return view('telas.auditoria', [
             'usuarios' => User::query()->where('tenant_id', $this->contexto->tenantId())->orderBy('name')->pluck('name', 'id')->all(),
             'resultados' => ConsultaAuditoria::resultados(),
-            'tools' => [...array_column(array_column($this->agente->tools(), 'function'), 'name'), ConsultaAuditoria::TOOL],
+            'tools' => [...array_column(array_column($this->agente->tools(), 'function'), 'name'), ConsultaAuditoria::TOOL,
+                ...($this->contexto->dominio() === 'clinica' ? [ClinicaTelasController::TOOL_FICHA, ClinicaTelasController::TOOL_RESULTADOS] : [])],
         ]);
     }
 }

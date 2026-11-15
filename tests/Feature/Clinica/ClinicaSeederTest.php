@@ -152,6 +152,31 @@ class ClinicaSeederTest extends TestCase
         $this->assertSame(4, Mensagem::where('tenant_id', self::T)->where('status', 'nova')->count());
     }
 
+    /**
+     * Decisão do Lucas (15/11): a demo não mostra prejuízo nos Resultados. Prova em todo dia, semana e mês dos 35 dias do
+     * seed, e que outubro e novembro têm lucro com margem plausível (nem prejuízo, nem despesa quase zero).
+     */
+    public function test_resultados_do_seed_nao_mostram_prejuizo_em_nenhum_periodo(): void
+    {
+        $resultados = app(\App\Services\ResultadosClinica::class);
+        $hoje = \Carbon\CarbonImmutable::now();
+
+        foreach (['dia', 'semana', 'mes'] as $periodo) {
+            for ($d = 0; $d <= 35; $d++) {
+                [$inicio, $fim] = $resultados->intervalo($periodo, $hoje->subDays($d));
+                $r = $resultados->resumo(self::T, $inicio, $fim);
+                $this->assertGreaterThanOrEqual(0, $r['lucro'], "{$periodo} de {$inicio->toDateString()}: lucro {$r['lucro']}");
+            }
+        }
+
+        foreach ([$hoje, $hoje->subMonthNoOverflow()] as $mes) {
+            $r = $resultados->resumo(self::T, ...$resultados->intervalo('mes', $mes));
+            $this->assertGreaterThan(0, $r['despesas'], $mes->format('m/Y'));
+            $margem = $r['lucro'] / max(1, $r['faturamento']);
+            $this->assertTrue($margem > 0.1 && $margem < 0.7, $mes->format('m/Y').': margem '.round($margem * 100).'%');
+        }
+    }
+
     public function test_rodar_de_novo_nao_duplica_nada(): void
     {
         $antes = [User::count(), Tutor::count(), Venda::count(), Cobranca::count()];

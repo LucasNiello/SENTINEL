@@ -44,5 +44,5 @@ Mudanças já feitas no código que a Documentação 1.2 (`Documentacao-Sentinel
 ## 4. Instalável no celular (PWA) e 360 px (14/11/2026)
 
 - `public/manifest.webmanifest` (Sentinel, standalone, início em `/agente`), ícones do farol 192/512 e `public/sw.js`, que só guarda o shell estático (nunca páginas, `/agente`, JSON, login ou dados; sem modo offline).
-- Ajustes de 360 px (toque ≥ 44 px, corpo ≥ 15 px, tabelas da Supervisão e do estorno empilhadas) em CSS estático (`public/css/sentinel-extra.css` e `sentinel-login-extra.css`), porque não há build do Vite nesta máquina.
+- Ajustes de 360 px (toque ≥ 44 px, corpo ≥ 15 px, tabelas da Supervisão e do estorno empilhadas) no build do Vite (`resources/css/workspace.css` e `login.css`); os arquivos estáticos de `public/css/` saíram em 14/11 (front, F1).
 - **Onde atualizar na 1.3:** RNF de usabilidade/acessibilidade e a seção de interface.

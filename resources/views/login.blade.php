@@ -7,15 +7,11 @@
   <meta name="theme-color" content="#0B1119">
   <title>SENTINEL — Acesso</title>
   <link rel="icon" type="image/svg+xml" href="{{ asset('favicon-sentinel.svg') }}">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   @vite(['resources/css/login.css', 'resources/js/login.js'])
   {{-- T3 (14/11): PWA. O service worker só guarda o shell estático (ícones, manifest, build); nunca /agente, JSON, login ou dados. --}}
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/sentinel-192.png">
     <script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {})); }</script>
-  <link rel="stylesheet" href="/css/sentinel-login-extra.css">
 </head>
 <body>
 <a class="skip-link" href="#email">Ir para o login</a>

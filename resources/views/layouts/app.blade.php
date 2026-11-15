@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR"@if (rescue(fn () => auth()->id(), null, false)) data-usuario="{{ (int) auth()->id() }}"@endif>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,12 +8,14 @@
     <title>@yield('titulo', 'Sentinel') — {{ config('app.name', 'Sentinel') }}</title>
     <link rel="icon" href="/favicon-sentinel.svg" type="image/svg+xml">
     @vite(['resources/css/workspace.css', 'resources/js/workspace.js'])
-    {{-- Estilos depois do último build do Vite (sem node nesta máquina): editor do estorno (T2) e 360 px (T3). --}}
-    <link rel="stylesheet" href="/css/sentinel-extra.css">
     {{-- T3 (14/11): PWA. O service worker só guarda o shell estático (ícones, manifest, build); nunca /agente, JSON, login ou dados. --}}
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/sentinel-192.png">
     <script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {})); }</script>
+    @if (rescue(fn () => auth()->id(), null, false))
+        {{-- Aplica o tamanho do texto escolhido antes de pintar a tela (sem piscar). Só lê a preferência deste usuário, neste navegador. --}}
+        <script>try { var t = localStorage.getItem('sentinel:texto:{{ (int) auth()->id() }}'); if (t === '2' || t === '3') document.documentElement.dataset.texto = t; } catch (e) {}</script>
+    @endif
     @stack('estilos')
 </head>
 @php
@@ -28,6 +30,20 @@
         ['agente', 'Agente', 'M4 5h16v11H8l-4 4V5m4 4h8m-8 3h5'],
         ['cadastros', 'Cadastros', 'M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z'],
     ];
+    // Front de 14/11 (F2): telas de leitura da clínica. Cada item segue a tool de leitura da tela (a rota confere de novo);
+    // Resultados é só do dono.
+    $naClinica = $papel !== null && ! $adminDaClinica && rescue(fn () => app(\App\Services\ContextoUsuario::class)->dominio() === 'clinica', false, false);
+    if ($naClinica) {
+        $podeTool = fn (string $tool) => rescue(fn () => app(\App\Services\AiAgentService::class)->podeExecutar($tool), false, false);
+        $daClinica = [];
+        if ($podeTool('consultar_agenda') && $papel !== 'vendedor') $daClinica[] = ['agenda', 'Agenda', 'M5 5h14v15H5zM5 10h14M9 3v4m6-4v4'];
+        if ($podeTool('consultar_cobrancas')) $daClinica[] = ['cobrancas', 'Cobranças', 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6m-6 4h6'];
+        if ($podeTool('consultar_vendas')) $daClinica[] = ['vendas', 'Vendas', 'M4 6h2l2 10h10l2-7H8m1 11h.01M17 20h.01'];
+        if (rescue(fn () => app(\App\Services\ContextoUsuario::class)->ehDono(), false, false)) $daClinica[] = ['resultados', 'Resultados', 'M5 20V10m7 10V4m7 16v-7'];
+        // Agente, Agenda, Cadastros e o resto: a agenda logo depois do agente, que é o que a recepção mais abre.
+        array_splice($itens, 1, 0, array_slice($daClinica, 0, 1));
+        array_push($itens, ...array_slice($daClinica, 1));
+    }
     // O menu segue as mesmas regras do servidor (que confere de novo em cada rota): a lixeira, a lista de
     // papéis da tool; a auditoria, o papel administrativo (ConsultaAuditoria).
     $pode = fn (callable $regra) => $papel !== null && rescue($regra, false, false);
@@ -51,10 +67,19 @@
             <p class="sidebar-caption">Área de trabalho</p>
             <nav class="menu" aria-label="Principal">
                 @foreach ($itens as [$caminho, $rotulo, $icone])
-                    <a href="/{{ $caminho }}" @if (request()->is($caminho)) aria-current="page" @endif><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="{{ $icone }}"/></svg><span>{{ $rotulo }}</span></a>
+                    <a href="/{{ $caminho }}" @if (request()->is($caminho) || ($caminho === 'cadastros' && request()->is('pets/*'))) aria-current="page" @endif><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="{{ $icone }}"/></svg><span>{{ $rotulo }}</span></a>
                 @endforeach
             </nav>
             <p class="sidebar-note">Inteligência para agir.<br>Controle para decidir.</p>
+            {{-- F4 do front (14/11): tamanho do texto em 3 níveis. A escolha fica no navegador, por usuário (localStorage), sem migration. --}}
+            <div class="texto-tamanho" role="group" aria-labelledby="rotulo-texto">
+                <span id="rotulo-texto">Tamanho do texto</span>
+                <div class="texto-tamanho__botoes">
+                    <button type="button" data-texto="1" aria-pressed="true" aria-label="Texto normal">A</button>
+                    <button type="button" data-texto="2" aria-pressed="false" aria-label="Texto grande">A+</button>
+                    <button type="button" data-texto="3" aria-pressed="false" aria-label="Texto maior">A++</button>
+                </div>
+            </div>
             <div class="sidebar-account">
                 <span class="account-initials" aria-hidden="true">{{ mb_strtoupper($iniciais) }}</span>
                 <span class="usuario"><span>{{ $usuario->name }}</span><span class="papel-tag"><span class="sr-only">Papel: </span>{{ $rotulosPapel[$papel] ?? $papel }}</span></span>
