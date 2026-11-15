@@ -39,12 +39,15 @@
   da proposta (sem espera mínima), e executa com os valores da sessão — nunca
   com o que vem do navegador.
 - **Estorno e PIN (clínica; decisões do Lucas A–F, 14/11)**:
-  - O PIN de autorização é gerado só pelo Administrador da clínica (papel
-    `admin` num tenant de `sentinel.tenants_clinica`, conta do `ClinicaSeeder`)
-    na `/supervisao`: 6 dígitos aleatórios, mostrados uma vez, só o hash
-    gravado; vale até o Admin gerar outro; "Revogar" zera. O dono marca o
-    supervisor do setor. O Admin da clínica só gerencia PINs: nenhuma tool,
-    sem auditoria, sem autorizar a lixeira nem estorno.
+  - O PIN de autorização é gerado e revogado pelo Administrador da clínica
+    (papel `admin` num tenant de `sentinel.tenants_clinica`, conta do
+    `ClinicaSeeder`) ou pelo dono (decisão do Lucas, 15/11), na `/supervisao`:
+    6 dígitos aleatórios, mostrados uma vez, só o hash gravado; vale até
+    alguém gerar outro; "Revogar" zera. O dono gera e revoga o próprio PIN e o
+    dos supervisores (não o de outro dono) e marca o supervisor do setor. O
+    dono sem PIN não autoriza, e a senha de login dele não serve como PIN. O
+    Admin da clínica só gerencia PINs: nenhuma tool, sem auditoria, sem
+    autorizar a lixeira nem estorno.
   - O estorno (cobrança paga e venda paga) é por itens: `estornar_cobranca` e
     `estornar_venda`, modo `tudo` | `tudo_menos_prontuario` | `itens` (argumento
     `linhas`). Valor = preço copiado na linha × quantidade; a IA nunca informa
