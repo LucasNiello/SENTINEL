@@ -243,6 +243,47 @@ class EstornoPorItensNoCardTest extends TestCase
         $this->assertSame(['R$ 420,00', 'R$ 210,00', 'R$ 210,00'], [$linha['total'], $linha['estornado'], $linha['liquido']]);
     }
 
+    /**
+     * Pontos fracos da bateria (15/11, pedido 24): a IA propõe o modo "itens" com a quantidade, mas sem o item_id (ela não
+     * sabe o número da linha). A linha sem item sai: o card abre com a lista dos itens e pede o item, e o Revisar sem item é
+     * recusado, sem gravar nada. Com o item escolhido no card, segue normal. Valor, PIN e regra do estorno não mudam.
+     */
+    public function test_linha_sem_item_da_ia_sai_e_o_card_pede_o_item_antes_de_revisar(): void
+    {
+        $racao = $this->produto();
+        $venda = app(VendaService::class)->registrar([['catalogo_item_id' => $racao->id, 'quantidade' => 2]], $this->usuarioClinica('vendedor')->id, null, 'pix', self::T);
+        $linha = (int) $venda->itens()->value('id');
+        $this->logarComo('atendente', self::T);
+
+        $proposta = $this->comando('estornar_venda', ['id' => $venda->id, 'motivo' => 'Devolveu uma.', 'modo' => 'itens', 'linhas' => [['quantidade' => 1]]])
+            ->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente');
+        $this->assertSame([[$linha, 'Ração 10 kg', 2, 0]],
+            array_map(fn ($l) => [$l['item_id'], $l['descricao'], $l['restante'], $l['quantidade']], $proposta->json('formulario.itens_estorno')));
+        $this->assertSame(['Escolha pelo menos um item e a quantidade a estornar.'], $proposta->json('formulario.avisos'));
+
+        // Revisar sem escolher o item (a linha sem item_id de novo, ou nenhuma): recusado com a mesma frase, nada gravado.
+        foreach ([[['quantidade' => '1']], [['item_id' => 'abc', 'quantidade' => '1']], []] as $linhas) {
+            $this->postJson('/agente/revisar', ['proposta' => $proposta->json('proposta'), 'valores' => ['modo' => 'itens', 'motivo' => 'Devolveu uma.', 'linhas' => $linhas]])
+                ->assertStatus(422)->assertJsonPath('formulario.erro', 'Escolha pelo menos um item e a quantidade a estornar.');
+        }
+        $this->assertSame(0, Estorno::count());
+
+        // O item escolhido no card: segue, com o valor da época (1 × R$ 210,00).
+        $revisao = $this->postJson('/agente/revisar', ['proposta' => $proposta->json('proposta'),
+            'valores' => ['modo' => 'itens', 'motivo' => 'Devolveu uma.', 'linhas' => [['item_id' => (string) $linha, 'quantidade' => '1']]]])->assertOk();
+        $this->assertSame('R$ 210,00', $this->resumo($revisao)['Valor do estorno']);
+    }
+
+    /** A descrição das linhas diz que o item é obrigatório e que, sem o número, a IA não manda linhas. */
+    public function test_descricao_das_linhas_pede_o_item_ou_nenhuma_linha(): void
+    {
+        foreach (['estornar_cobranca', 'estornar_venda'] as $tool) {
+            $descricao = collect(app(\App\Services\AiAgentService::class)->tools())->firstWhere('function.name', $tool)['function']['parameters']['properties']['linhas']['description'];
+            $this->assertStringContainsString('item_id (o número da linha da venda ou da cobrança, obrigatório)', $descricao, $tool);
+            $this->assertStringContainsString('Se você não souber o número da linha, não mande linhas', $descricao, $tool);
+        }
+    }
+
     public function test_quem_nao_pode_pedir_nao_propoe_o_estorno_da_venda_e_outro_tenant_nao_acha(): void
     {
         $venda = app(VendaService::class)->registrar([['catalogo_item_id' => $this->produto()->id, 'quantidade' => 1]], $this->usuarioClinica('vendedor')->id, null, 'pix', self::T);

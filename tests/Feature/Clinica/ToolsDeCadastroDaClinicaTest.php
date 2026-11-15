@@ -377,6 +377,28 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
         $this->assertSame([['Com tudo', true, true, 4], ['Com nao', false, false, 0]], $flags);
     }
 
+    /**
+     * Pontos fracos da bateria (15/11, pedido 16): a IA preenchia controla_estoque e exige_receita com "nao" sem o usuário
+     * dizer (a descrição sugeria 'Serviço: "nao"'). Agora a descrição e o prompt mandam deixar de fora o que não foi dito.
+     */
+    public function test_descricao_e_prompt_mandam_nao_presumir_estoque_nem_receita(): void
+    {
+        $this->logarComo('dono', self::T);
+        $propriedades = collect(app(\App\Services\AiAgentService::class)->tools())->firstWhere('function.name', 'criar_item_catalogo')['function']['parameters']['properties'];
+
+        $this->assertStringStartsWith('Só preencha se o usuário disser se o item controla estoque; se ele não disse, deixe de fora, mesmo para serviço', $propriedades['controla_estoque']['description']);
+        $this->assertStringStartsWith('Só preencha se o usuário disser se o item exige receita; se ele não disse, deixe de fora', $propriedades['exige_receita']['description']);
+        foreach (['controla_estoque', 'exige_receita'] as $campo) {
+            $this->assertStringNotContainsString('Serviço: "nao"', $propriedades[$campo]['description']);
+            $this->assertStringContainsString('Nunca presuma.', $propriedades[$campo]['description']);
+        }
+
+        $this->respostaIa = ['choices' => [['message' => ['content' => 'Ok.']]]];
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk();
+        $sistema = (string) \Illuminate\Support\Facades\Http::recorded()[count(\Illuminate\Support\Facades\Http::recorded()) - 1][0]['system'];
+        $this->assertStringContainsString('controla estoque e exige receita só entram se o usuário disser, mesmo para serviço', $sistema);
+    }
+
     /** @return array<string, array{string, string}> campo obrigatório => trecho da frase */
     public static function camposSemPadrao(): array
     {

@@ -5,6 +5,7 @@
 - **Git**: Claude Code nunca executa `git add`, `git commit`, `git push` ou qualquer comando que altere o histórico. Apenas sugere mensagem de commit como texto.
 - **Arquitetura**: já está fechada e documentada no Notion (workspace "SENTINEL", página "Arquitetura") e em `documentacao/Documentacao-Sentinel1.2.docx` (Documentação 1.2, de 04/11/2026, vigente — arquivos anteriores em `documentacao/versoes-antigas/`, ex.: `Sentinel_0.x.docx`, `Sentinel_Doc_0.5.docx`, estão desatualizados). Não decidir ou alterar decisão de arquitetura autonomamente — se um conflito aparecer entre uma instrução e o que está documentado, sinalizar e perguntar, nunca escolher sozinho.
 - **Escopo**: protótipo acadêmico de TCC, não produto em produção. Não adicionar pacotes, dependências ou infraestrutura (filas, cache distribuído, 2FA, observabilidade, etc.) além do estritamente pedido em cada tarefa. **Isso é controle de escopo, não desculpa para segurança relapsa** — dado sensível (CPF, salário, financeiro) é tratado com cuidado mesmo em protótipo, como já feito no mascaramento de PII em audit_logs (Fase 2). Ver seção "Agenda: quando deixar de ser protótipo acadêmico" para o que fica pendente por enquanto, não por já ter sido descartado.
+- **Branches**: a `main` é a clínica (fast-forward em 15/11, commit `44f4a1f`). A contabilidade ficou na tag `contabilidade-plano-b` (aponta para `03b8505`); não é mais "plano B na main" e a clínica não está mais pendente de merge.
 - Não instalar `laravel/boost` nem qualquer pacote sugerido automaticamente por templates padrão do Laravel sem autorização explícita a cada vez.
 
 ## Pendências conhecidas (não resolver sem pedido explícito)
@@ -89,8 +90,18 @@ Notion, quando todas as fases/etapas do projeto estiverem concluídas.
 - Pare só em: (1) ação irreversível (perda de dado que os seeders não
   recriam, apagar arquivo fora da tarefa); (2) conflito com decisão de
   arquitetura documentada.
-- Testes sempre pelo subagente `test-runner`; revisão pelo `reviewer`, 1
-  passada por bloco (2 se mexer em senha, permissão ou exportação).
+- Testes, sempre pelo subagente `test-runner`, que devolve só o resumo
+  (total, falhas, arquivos):
+  - durante o trabalho, só os testes dos arquivos tocados;
+  - se o bloco mexeu em senha, PIN, permissão, tenant ou estorno, rode também
+    os arquivos de teste dessas áreas (não a suíte inteira);
+  - suíte completa: uma vez a cada renovação do limite de uso, quando o Lucas
+    avisar, e antes de enviar para a main ou entregar;
+  - mudança só de texto, doc, relatório ou CSV: nenhum teste;
+  - em cada relatório, registrar quando foi a última suíte completa e o
+    resultado.
+- Revisão pelo `reviewer`, 1 passada por bloco (2 se mexer em senha,
+  permissão ou exportação).
 - Mudança cirúrgica: tocar só o necessário para a tarefa pedida — nunca
   refatorar código que já funciona "já que estou aqui".
 - Se a solução ficou grande ou complexa, questionar antes de entregar: dava
