@@ -75,8 +75,8 @@ O CSV original e o critério dele não mudaram (há teste).
 ## O que ainda é fraco (a bateria acerta, mas não é perfeito)
 
 - **Agendamento:** o modelo não sabe os números do pet, do serviço e do profissional; o card abre com as listas para escolher (pedidos 7, 8, 9). O conflito de horário (pedido 8) só aparece no Revisar, depois que a pessoa escolhe o profissional. Na bateria ele não é testado até o fim.
-- **Estorno parcial (pedido 24):** o modelo mandou `linhas` sem `item_id`. O editor do card mostra os itens para escolher, mas a proposta vem incompleta.
-- **Item do catálogo incompleto (pedido 16):** o modelo preencheu "nao" em `controla_estoque` e `exige_receita` sem o usuário dizer, contra a regra do prompt. O card mostra os valores, e quem revisa pode trocar. Não corrigi: seria um 3º ciclo, e o limite eram 2.
+- ~~**Estorno parcial (pedido 24):** o modelo mandou `linhas` sem `item_id`.~~ **Corrigido em 15/11 (ver "Pontos fracos corrigidos").**
+- ~~**Item do catálogo incompleto (pedido 16):** o modelo preencheu "nao" em `controla_estoque` e `exige_receita` sem o usuário dizer.~~ **Corrigido em 15/11 (ver "Pontos fracos corrigidos").**
 - **Descrição da venda:** a lista do catálogo vai em todo pedido da clínica (cerca de 250 tokens). Num catálogo grande, o certo é resolver o item pelo nome no servidor (trabalho futuro).
 - **Uma rodada só por versão:** não medi a variação do modelo entre execuções do mesmo pedido.
 
@@ -102,6 +102,20 @@ Sabotagens: tirar a recusa do `DB_URL` e tirar o tenant da chave do cache. As du
    - Os arquivos se repetem com os commits 1 e 2: use `git add -p`, ou junte 2 e 3 num commit só.
 4. `docs(bateria): resultados da bateria da clinica com o Haiku real (28/44 -> 44/44; parafrases 15/16; 125 chamadas)`
    - `documentacao/testes/fase8/BATERIA_CLINICA_PARAFRASES.csv`, `documentacao/testes/fase8/BATERIA_CLINICA_HAIKU_2026-11-15_{R1,C1,C2,R2}.csv`, `documentacao/testes/fase8/BATERIA_CLINICA_PARAFRASES_HAIKU_2026-11-15.csv`, este relatório, `.claude/decisoes/2026-11-15.md`, `automacao/RETOMADA.md`
+
+## Pontos fracos corrigidos (15/11, pedido do Lucas)
+
+| Ponto | Correção | Teste e sabotagem | IA real |
+|---|---|---|---|
+| Estorno parcial sem `item_id` (pedido 24) | A linha sem `item_id` sai (camada da tool); o card abre com a lista e o aviso "Escolha pelo menos um item…"; o Revisar sem item é recusado com essa frase e nada grava. A descrição de `linhas` diz que o item é obrigatório e que, sem o número, a IA não manda linhas. Valor, PIN, service e regra do estorno não mudaram. | `EstornoPorItensNoCardTest`: 2 testes novos; tirar o filtro derrubou | Pedido 24 e paráfrase 10: `linhas: null`, e o card pede o item |
+| Estoque e receita presumidos (pedido 16) | As descrições dos dois campos dizem "Só preencha se o usuário disser… Nunca presuma." (antes: 'Serviço: "nao"'), e o prompt da clínica diz o mesmo. Descartar os campos no rascunho ficou de fora: mudaria o contrato do cadastro e uns 10 testes. | `ToolsDeCadastroDaClinicaTest`: 1 teste novo; voltar a descrição antiga derrubou | Pedido 16: os dois campos ficaram de fora, e o card pergunta |
+
+- **Chamadas:** 5, todas acertos (pedidos 16 e 24; paráfrases 5, 6 e 10). **Acumulado: 294 → 299.** Suíte depois das correções: **996/996** (7876 asserções).
+- **Saídas:** `documentacao/testes/fase8/BATERIA_CLINICA_HAIKU_2026-11-15_PF.csv` e `BATERIA_CLINICA_PARAFRASES_HAIKU_2026-11-15_PF.csv`.
+- **Limite:** o ponto 2 é instrução ao modelo, não trava no servidor. O card mostra os valores, e quem revisa decide.
+
+**Commit sugerido:** `fix(clinica): estorno sem item pede o item no card; IA nao presume estoque nem receita no item do catalogo`
+- `app/Services/Agente/CatalogoDaClinica.php`, `app/Services/AiAgentService.php` (uma frase do prompt da clínica), `tests/Feature/Clinica/{EstornoPorItensNoCardTest,ToolsDeCadastroDaClinicaTest}.php`, os 2 CSVs `_PF`, `.claude/decisoes/2026-11-15.md`, este relatório e `automacao/RETOMADA.md`
 
 ## Revisão (reviewer, 1 passada): 0 bloqueadores, 4 importantes, 4 cosméticos
 

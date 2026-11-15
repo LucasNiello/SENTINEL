@@ -125,9 +125,9 @@ trait CatalogoDaClinica
                     'nome_comercial' => ['type' => 'string'],
                     'preco_centavos' => ['type' => 'integer', 'description' => 'Preço em CENTAVOS inteiros (4590 = R$ 45,90). Nunca decimal.'],
                     'cobranca_por' => ['type' => 'string', 'enum' => CatalogoItem::COBRANCA_POR],
-                    'controla_estoque' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Obrigatório. Serviço: "nao".'],
+                    'controla_estoque' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Só preencha se o usuário disser se o item controla estoque; se ele não disse, deixe de fora, mesmo para serviço: quem cadastra escolhe no card. Nunca presuma.'],
                     'estoque' => ['type' => 'integer', 'description' => 'Estoque inicial, só produto que controla estoque.'],
-                    'exige_receita' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Obrigatório. Só item de farmácia da clínica pode ser "sim".'],
+                    'exige_receita' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Só preencha se o usuário disser se o item exige receita; se ele não disse, deixe de fora: quem cadastra escolhe no card. Nunca presuma. Só item de farmácia da clínica pode ser "sim".'],
                 ],
                 obrigatorios: ['tipo', 'setor', 'categoria', 'nome_comercial', 'preco_centavos', 'cobranca_por', 'controla_estoque', 'exige_receita'],
                 propriedadesAtualizar: [
@@ -755,7 +755,7 @@ trait CatalogoDaClinica
     {
         return [
             'modo' => ['type' => 'string', 'enum' => $modos],
-            'linhas' => ['type' => 'array', 'description' => 'Só no modo "itens": cada linha (item_id = número da linha) e a quantidade inteira a estornar.', 'items' => [
+            'linhas' => ['type' => 'array', 'description' => 'Só no modo "itens": cada linha com item_id (o número da linha da venda ou da cobrança, obrigatório) e a quantidade inteira a estornar. Se você não souber o número da linha, não mande linhas: o card mostra os itens para a pessoa escolher.', 'items' => [
                 'type' => 'object',
                 'properties' => ['item_id' => ['type' => 'integer'], 'quantidade' => ['type' => 'integer']],
                 'required' => ['item_id', 'quantidade'],
@@ -771,7 +771,17 @@ trait CatalogoDaClinica
             return [];
         }
 
-        return array_values(array_map(fn ($linha) => is_array($linha) ? array_intersect_key($linha, array_flip(['item_id', 'quantidade'])) : [], $itens));
+        // Pontos fracos da bateria (15/11): linha sem item_id inteiro positivo não é linha (a IA não sabe o número e manda só a
+        // quantidade). Ela sai aqui, e o card pede o item na lista; o service continua recusando item que não é da venda/cobrança.
+        $comItem = array_filter($itens, fn ($linha) => is_array($linha) && $this->itemDaLinha($linha['item_id'] ?? null));
+
+        return array_values(array_map(fn (array $linha) => array_intersect_key($linha, array_flip(['item_id', 'quantidade'])), $comItem));
+    }
+
+    /** O item_id de uma linha do estorno é um inteiro positivo (ou texto só de dígitos, como o formulário manda). */
+    private function itemDaLinha(mixed $id): bool
+    {
+        return (is_int($id) && $id >= 1) || (is_string($id) && preg_match('/^[1-9]\d{0,8}$/', trim($id)) === 1);
     }
 
     /**
