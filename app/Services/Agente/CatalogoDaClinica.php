@@ -50,6 +50,9 @@ trait CatalogoDaClinica
 
     private const LIMITE_DO_PEDIDO = 1000;
 
+    /** Quantos itens do catálogo cabem na descrição da venda (numerosDoCatalogo). */
+    private const LIMITE_CATALOGO_NA_DESCRICAO = 80;
+
     /** @return array<int, array<string, mixed>> */
     private function toolsDaClinica(): array
     {
@@ -289,7 +292,8 @@ trait CatalogoDaClinica
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Cobranca',
-                papeis: $quemCobra,
+                // Decisão do Lucas (15/11), tabela da FASE oito: o veterinário VÊ as cobranças (não cobra, não recebe, não cancela).
+                papeis: [...$quemCobra, 'veterinario'],
                 propriedades: [
                     'status' => ['type' => 'string', 'enum' => Cobranca::STATUS],
                     'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
@@ -432,7 +436,7 @@ trait CatalogoDaClinica
                 entidade: 'Venda',
                 papeis: self::PAPEIS_EQUIPE,
                 propriedades: [
-                    'itens' => ['type' => 'array', 'description' => 'Cada item: o id do item do catálogo e a quantidade inteira.', 'items' => [
+                    'itens' => ['type' => 'array', 'description' => 'Cada item: o id do item do catálogo e a quantidade inteira.'.$this->numerosDoCatalogo(), 'items' => [
                         'type' => 'object',
                         'properties' => ['catalogo_item_id' => ['type' => 'integer'], 'quantidade' => ['type' => 'integer']],
                         'required' => ['catalogo_item_id', 'quantidade'],
@@ -723,6 +727,27 @@ trait CatalogoDaClinica
             fn (array $l) => ['item_id' => $l['item_id'], 'quantidade' => $l['quantidade']],
             array_filter($plano['linhas'], fn (array $l) => $l['quantidade'] >= 1),
         ))];
+    }
+
+    /**
+     * Bateria da clínica (15/11): o card da venda não escolhe itens, e o pedido tem uma resposta só (a consulta do catálogo
+     * não volta para a IA). A descrição dos itens leva o número e o nome de cada item ativo do catálogo DO TENANT logado:
+     * nada de preço, estoque ou dado de pessoa. Acima de LIMITE_CATALOGO_NA_DESCRICAO itens, a lista sai (protótipo).
+     */
+    private function numerosDoCatalogo(): string
+    {
+        $itens = app(CatalogoService::class)->buscarPorFiltro(null, null, null, $this->contexto->tenantId());
+        if ($itens->isEmpty() || $itens->count() > self::LIMITE_CATALOGO_NA_DESCRICAO) {
+            return '';
+        }
+
+        return ' Números do catálogo (número = item): '.$itens->sortBy('id')->map(fn (CatalogoItem $i) => $i->id.' = '.$this->nomeNaDescricao((string) $i->nome_comercial))->implode('; ').'.';
+    }
+
+    /** Revisão de 15/11 (C4): nome do item na descrição, em uma linha, sem os separadores da lista e com até 60 caracteres. */
+    private function nomeNaDescricao(string $nome): string
+    {
+        return \Illuminate\Support\Str::limit(trim((string) preg_replace('/[;=\s]+/u', ' ', $nome)), 60, '');
     }
 
     /** As propriedades do estorno por itens no esquema da tool (a IA nunca informa valor). */

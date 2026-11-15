@@ -90,9 +90,15 @@ class ConversaAgente
     /**
      * Escrita confirmada no card: o agente passa a saber que ela aconteceu. Entra como
      * a confirmação do humano e a frase fixa do servidor, sem valores do registro.
+     *
+     * Bateria da clínica (15/11): na clínica, a frase leva também o NÚMERO do registro gravado (só o id interno, nenhum
+     * valor), para "esse mesmo" depois de gravar ter a que se referir. Na contabilidade, nada muda.
      */
-    public function registrarResultado(Session $sessao, string $frase): void
+    public function registrarResultado(Session $sessao, string $frase, ?int $idGravado = null): void
     {
+        if ($idGravado !== null && $idGravado > 0 && $this->contexto->dominio() === 'clinica') {
+            $frase = rtrim($frase).' Número do registro gravado: '.$idGravado.'.';
+        }
         $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase);
     }
 

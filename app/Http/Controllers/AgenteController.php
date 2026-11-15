@@ -301,7 +301,7 @@ class AgenteController extends Controller
 
         // O agente passa a saber que a escrita aconteceu: só a frase fixa do servidor, sem valores.
         if (($resultado['tipo'] ?? null) === 'resultado_escrita') {
-            $this->conversa->registrarResultado($request->session(), $resultado['mensagem']);
+            $this->conversa->registrarResultado($request->session(), $resultado['mensagem'], $this->idGravado($resultado));
         }
 
         $status = $resultado['http_status'] ?? match ($resultado['tipo'] ?? null) {
@@ -530,5 +530,13 @@ class AgenteController extends Controller
     {
         return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_UNAVAILABLE',
             'http_status' => 422, 'mensagem' => 'Esta proposta não está mais disponível. Nada foi gravado. Peça de novo.'], 422);
+    }
+
+    /** O id do registro que a escrita confirmada gravou (para o histórico da clínica; ver ConversaAgente::registrarResultado). */
+    private function idGravado(array $resultado): ?int
+    {
+        $id = $resultado['resultado']['id'] ?? null;
+
+        return is_int($id) || (is_string($id) && ctype_digit($id)) ? (int) $id : null;
     }
 }

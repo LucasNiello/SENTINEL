@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\AiAgentService;
+use App\Services\AuditoriaService;
 use App\Services\ConversaAgente;
 use Illuminate\Console\Command;
 use Illuminate\Http\Client\Events\ConnectionFailed;
@@ -21,7 +22,16 @@ use Illuminate\Support\Facades\Event;
  * operador do tenant 1, sessão em memória, ConversaAgente::ler() -> AiAgentService::processar()
  * -> ConversaAgente::guardar(); cada pedido com sessão nova, e a continuação na sessão da sua consulta.
  * Faz chamadas REAIS ao provedor (custa dinheiro): só roda no SQLite de arquivo database/bateria.sqlite.
- * Não guarda nem imprime chave, prompt ou corpo de resposta; só nome da tool, tipo, código e tempos.
+ * Não guarda nem imprime chave, prompt ou corpo de resposta; só nome da tool, tipo, código, tempos e os argumentos
+ * que o servidor montou (dados do seed, no SQLite da bateria).
+ *
+ * Bateria da clínica (15/11): --csv escolhe o arquivo e --tenant o tenant; a coluna opcional "papel" escolhe o usuário
+ * de cada pedido (o primeiro com esse papel no tenant; sem a coluna, o operador, como antes). Na "observacao":
+ *  - arg:campo=valor   o argumento da proposta tem de ter esse valor;
+ *  - posicao=N|ultima  continuação: o id proposto é o da linha N (ou da última) da consulta da qual depende;
+ *  - confirmar         a bateria confirma a proposta como o card faria (executarConfirmada + registrarResultado, sem IA);
+ *  - id_gravado:campo  o campo da proposta é o id que a confirmação do pedido do qual depende gravou.
+ * Grupo "recusa": acerta com texto e nenhuma tool (não exige pergunta, ao contrário do "-" dos ambíguos).
  */
 class BateriaAgente extends Command
 {
@@ -29,7 +39,9 @@ class BateriaAgente extends Command
         {--modelo= : modelo da Anthropic (ex.: claude-sonnet-5-5); vazio = o configurado}
         {--saida= : CSV de saída, relativo à raiz do projeto}
         {--somente= : números dos pedidos, separados por vírgula (as dependências entram juntas)}
-        {--limite=50 : teto de chamadas reais nesta rodada}';
+        {--limite=50 : teto de chamadas reais nesta rodada}
+        {--csv=documentacao/testes/fase6/BATERIA_PEDIDOS.csv : CSV dos pedidos, relativo à raiz do projeto}
+        {--tenant=1 : tenant dos usuários da bateria}';
 
     protected $description = 'Roda a bateria de pedidos do agente contra o provedor real e grava o CSV';
 
@@ -38,8 +50,12 @@ class BateriaAgente extends Command
 
     public function handle(AiAgentService $agente, ConversaAgente $conversa): int
     {
-        $banco = (string) config('database.connections.'.config('database.default').'.database');
-        if (config('database.default') !== 'sqlite' || ! str_ends_with(str_replace('\\', '/', $banco), 'database/bateria.sqlite')) {
+        // Revisão de 15/11 (I2): o caminho tem de ser EXATAMENTE o database/bateria.sqlite deste projeto, e um DB_URL
+        // (que o Laravel usa no lugar do database) é recusado, para a conexão real não ir para outro banco.
+        $conexao = (array) config('database.connections.'.config('database.default'), []);
+        $normalizar = fn (string $caminho) => strtolower(str_replace('\\', '/', $caminho));
+        if (config('database.default') !== 'sqlite' || (string) ($conexao['url'] ?? '') !== ''
+            || $normalizar((string) ($conexao['database'] ?? '')) !== $normalizar(database_path('bateria.sqlite'))) {
             $this->error('A bateria só roda no SQLite de arquivo database/bateria.sqlite (DB_CONNECTION=sqlite, DB_DATABASE=<raiz>/database/bateria.sqlite).');
 
             return self::FAILURE;
@@ -54,15 +70,25 @@ class BateriaAgente extends Command
             config(['services.anthropic.model' => (string) $this->option('modelo')]);
         }
 
-        $operador = User::query()->where('papel', 'operador')->where('tenant_id', 1)->orderBy('id')->first();
-        if ($operador === null) {
-            $this->error('Sem operador no tenant 1: rode migrate e db:seed neste banco.');
+        $tenant = (int) $this->option('tenant');
+        $arquivo = base_path((string) $this->option('csv'));
+        if (! is_file($arquivo)) {
+            $this->error("CSV não encontrado: {$this->option('csv')}");
 
             return self::FAILURE;
         }
-        Auth::setUser($operador);
+        $pedidos = CriterioDaBateria::lerPedidos($arquivo);
 
-        $pedidos = $this->lerPedidos(base_path('documentacao/testes/fase6/BATERIA_PEDIDOS.csv'));
+        // Um usuário por papel (o primeiro do tenant); todos conferidos antes da primeira chamada.
+        $usuarios = [];
+        foreach (array_unique(array_map(fn ($p) => ($p['papel'] ?? '') ?: 'operador', $pedidos)) as $papel) {
+            $usuarios[$papel] = User::query()->where('papel', $papel)->where('tenant_id', $tenant)->orderBy('id')->first();
+            if ($usuarios[$papel] === null) {
+                $this->error("Sem usuário com papel {$papel} no tenant {$tenant}: rode migrate e os seeders neste banco.");
+
+                return self::FAILURE;
+            }
+        }
         if ($this->option('somente')) {
             $escolhidos = array_map('intval', explode(',', (string) $this->option('somente')));
             $comDependencias = $escolhidos;
@@ -101,6 +127,7 @@ class BateriaAgente extends Command
 
         $sessoes = [];
         $resultados = [];
+        $gravados = [];
         $linhas = [];
         $limite = (int) $this->option('limite');
 
@@ -111,6 +138,7 @@ class BateriaAgente extends Command
             }
 
             $dependencia = $p['depende_de'] === '' ? null : (int) $p['depende_de'];
+            Auth::setUser($usuarios[($p['papel'] ?? '') ?: 'operador']);
             $sessao = $dependencia !== null && isset($sessoes[$dependencia]) ? $sessoes[$dependencia] : new Store('bateria', new ArraySessionHandler(120));
             $chamada = ['inicio' => null, 'ms' => 0, 'qtd' => 0, 'tool' => null];
             $ultimoLog = (int) AuditLog::query()->max('id');
@@ -132,7 +160,23 @@ class BateriaAgente extends Command
             $novos = AuditLog::query()->where('id', '>', $ultimoLog);
             // Como em 05/11: sem chamada à IA (negado antes dela), a tool obtida é a da negativa auditada.
             $obtido = $chamada['tool'] ?? ($resposta['tool'] ?? (clone $novos)->orderBy('id')->value('tool'));
-            $acertou = $this->acertou($p, $tipo, $obtido, $resposta, $dependencia === null ? null : ($resultados[$dependencia] ?? null));
+            $acertou = CriterioDaBateria::acertou($p, $tipo, $obtido, $resposta, $dependencia === null ? null : ($resultados[$dependencia] ?? null),
+                $dependencia === null ? null : ($gravados[$dependencia] ?? null));
+
+            // "confirmar": o que o card faria depois do Revisar → Confirmar (sem IA). O id gravado vale para "id_gravado".
+            if (CriterioDaBateria::marcas($p)['confirmar'] && $tipo === 'confirmacao_pendente') {
+                $argumentos = (array) ($resposta['argumentos'] ?? []);
+                $propostos = (array) ($resposta['propostos'] ?? []);
+                // Revisão de 15/11 (I1): como o card, passa pelo Revisar (regras do Form Request e conferir) antes de
+                // gravar, e a auditoria recebe o que a IA propôs de verdade (RF04). Revisar recusado = nada é gravado.
+                $recusa = $agente->revisar((string) $resposta['tool'], $argumentos, $propostos);
+                $gravado = $recusa ?? $agente->executarConfirmada((string) $resposta['tool'], $argumentos, $propostos);
+                if (($gravado['tipo'] ?? null) === 'resultado_escrita') {
+                    $conversa->registrarResultado($sessao, (string) $gravado['mensagem'], is_numeric($gravado['resultado']['id'] ?? null) ? (int) $gravado['resultado']['id'] : null);
+                    $gravados[$p['n']] = $gravado['resultado']['id'] ?? null;
+                }
+                $this->line('   confirmado: '.($gravado['tipo'] ?? '?').(isset($gravados[$p['n']]) ? ' id='.$gravados[$p['n']] : ''));
+            }
             $tempoAuditoria = (clone $novos)->max('tempo_ia_ms');
             $id = $resposta['argumentos']['id'] ?? null;
             $texto = fn (string $s) => '"'.str_replace(['"', "\r", "\n"], ['""', ' ', ' '], mb_substr($s, 0, 160)).'"';
@@ -146,6 +190,10 @@ class BateriaAgente extends Command
                 $p['n'], $p['grupo'], '"'.str_replace('"', '""', $p['pedido']).'"', '"'.$p['esperado_tool'].' / '.$p['esperado_tipo'].'"',
                 $obtido === null ? '(nenhuma)' : ($id === null ? $obtido : '"'.$obtido.' id='.$id.'"'), $acertou ? 'S' : 'N', $tipo, $erro,
                 $chamada['qtd'] > 0 ? $chamada['ms'] : '', $chamada['qtd'], $tempoAuditoria ?? '',
+                ($p['papel'] ?? '') ?: 'operador',
+                // O CSV de saída fica versionado: os argumentos passam pela mesma máscara LGPD da auditoria (revisão de 15/11, C3).
+                $texto(json_encode(is_array($resposta['argumentos'] ?? null) ? AuditoriaService::mascararCamposSensiveis($resposta['argumentos']) : null,
+                    JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) ?: ''),
             ];
             $this->line(sprintf('%2d %-12s %s %-32s %-22s %s', $p['n'], $p['grupo'], $acertou ? 'S' : 'N', $obtido ?? '-', $tipo, $resposta['codigo'] ?? ''));
 
@@ -158,54 +206,13 @@ class BateriaAgente extends Command
 
         $saida = $this->option('saida');
         if ($saida) {
-            $cabecalho = 'n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria';
+            $cabecalho = 'n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria;papel;argumentos';
             file_put_contents(base_path((string) $saida), $cabecalho."\n".implode("\n", array_map(fn ($l) => implode(';', $l), $linhas))."\n");
         }
 
         $this->resumo($linhas, $total, $tokens);
 
         return self::SUCCESS;
-    }
-
-    /** @return array<int, array<string, mixed>> */
-    private function lerPedidos(string $arquivo): array
-    {
-        $linhas = array_values(array_filter(array_map('trim', file($arquivo))));
-        $cabecalho = str_getcsv(array_shift($linhas), ';', '"', '');
-        $pedidos = [];
-        foreach ($linhas as $linha) {
-            $p = array_combine($cabecalho, array_pad(str_getcsv($linha, ';', '"', ''), count($cabecalho), ''));
-            $p['n'] = (int) $p['n'];
-            $pedidos[$p['n']] = $p;
-        }
-
-        return $pedidos;
-    }
-
-    /** Critério de 05/11 (PROGRESSO.md, item 6 do desenho). */
-    private function acertou(array $p, string $tipo, ?string $obtido, array $resposta, ?array $consulta): bool
-    {
-        if ($p['esperado_tool'] === '-') {
-            return $tipo === 'texto' && $obtido === null && str_contains((string) ($resposta['mensagem'] ?? ''), '?');
-        }
-        if ($obtido !== $p['esperado_tool'] || ! in_array($tipo, explode('|', $p['esperado_tipo']), true)) {
-            return false;
-        }
-        if ($p['grupo'] !== 'continuacao') {
-            return true;
-        }
-
-        // Continuação: o id proposto tem de ser o da linha certa da consulta anterior.
-        $ids = array_column($consulta['resultado'] ?? [], 'id');
-        $esperado = match ((int) $p['n']) {
-            27 => $ids[1] ?? null,
-            28 => $ids[0] ?? null,
-            29 => $ids[2] ?? null,
-            30 => $ids === [] ? null : $ids[array_key_last($ids)],
-            default => null,
-        };
-
-        return $esperado !== null && (int) ($resposta['argumentos']['id'] ?? 0) === (int) $esperado;
     }
 
     private function resumo(array $linhas, int $total, array $tokens): void
