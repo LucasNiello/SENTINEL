@@ -5,7 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Agendamento;
 use App\Models\Cobranca;
 use App\Models\Pet;
+use App\Models\Tutor;
 use App\Models\Venda;
+use App\Exceptions\RegraDeNegocioException;
+use App\Services\AgendaService;
 use App\Services\AiAgentService;
 use App\Services\AuditoriaService;
 use App\Services\DetalhesAuditoria;
@@ -35,6 +38,8 @@ class ClinicaTelasController extends Controller
     public const TOOL_FICHA = 'ver_ficha_pet';
 
     public const TOOL_RESULTADOS = 'ver_resultados';
+
+    public const TOOL_FICHA_TUTOR = 'ver_ficha_tutor';
 
     public function __construct(private AiAgentService $agente, private ContextoUsuario $contexto, private AuditoriaService $auditoria, private DetalhesAuditoria $detalhes)
     {
@@ -211,6 +216,60 @@ class ClinicaTelasController extends Controller
             // O bloco do tutor segue a consulta de tutores, como os outros blocos seguem a deles.
             'verTutor' => $this->agente->podeExecutar('consultar_tutores'),
         ]);
+    }
+
+    /**
+     * Ficha do tutor (15/11, só leitura): cadastro e os pets dele (nome, espécie, link para a ficha do pet). O cadastro
+     * continua separado (Cadastros › Tutores). Outro tenant, lixeira ou inexistente: 404.
+     */
+    public function tutor(int $id)
+    {
+        if ($desvio = $this->entrada('consultar_tutores')) {
+            return $desvio;
+        }
+
+        $tenantId = $this->contexto->tenantId();
+        $tutor = Tutor::query()->where('tenant_id', $tenantId)->findOrFail($id);
+        $pets = $this->agente->podeExecutar('consultar_pets')
+            ? Pet::query()->where('tenant_id', $tenantId)->where('tutor_id', $tutor->id)->orderBy('nome')->orderBy('id')->get(['id', 'nome', 'especie', 'raca'])
+            : null;
+
+        $this->auditarLeitura(self::TOOL_FICHA_TUTOR, 'Tutor', $tutor->id, [], 'Ficha do tutor aberta.');
+
+        return view('clinica.tutor', [
+            'tutor' => $tutor,
+            'pets' => $pets,
+            'podeEditar' => $this->agente->podeExecutar('atualizar_tutor'),
+        ]);
+    }
+
+    /**
+     * Calendário da ficha de agendamento (15/11), em JSON: os horários de um dia (?dia=AAAA-MM-DD) ou os dias com vaga
+     * de um mês (?mes=AAAA-MM) para um serviço (?servico=), opcionalmente de um profissional (?profissional=) e sem
+     * contar o próprio agendamento (?ignorar=). Só mostra: a vaga é conferida de novo na gravação. Papel e tenant do
+     * servidor (mesma regra da tela /agenda: o vendedor não consulta, o atendente só o banho e tosa). Devolve hora,
+     * vagas e o nome dos profissionais do setor; nunca pet, tutor ou o que está agendado. Sem linha de auditoria por
+     * chamada (decisão de 15/11: o calendário chama muitas vezes e não devolve dado pessoal); o teto é o da rota.
+     */
+    public function disponibilidade(Request $request, AgendaService $agenda)
+    {
+        abort_unless($this->contexto->dominio() === 'clinica', 404);
+        $setores = $this->contexto->ehAdminDaClinica() ? [] : $this->setoresDaAgenda();
+        if ($setores === []) {
+            return response()->json(['tipo' => 'erro', 'mensagem' => 'Seu papel não consulta a agenda.'], 403);
+        }
+
+        $q = array_map(fn ($v) => is_string($v) ? $v : null, $request->only(['servico', 'dia', 'mes', 'profissional', 'ignorar']));
+
+        try {
+            $dados = filled($q['mes'] ?? null)
+                ? $agenda->disponibilidadeDoMes($q['servico'] ?? null, $q['mes'], $q['profissional'] ?? null, $q['ignorar'] ?? null, $setores, $this->contexto->tenantId())
+                : $agenda->disponibilidadeDoDia($q['servico'] ?? null, $q['dia'] ?? null, $q['profissional'] ?? null, $q['ignorar'] ?? null, $setores, $this->contexto->tenantId());
+        } catch (RegraDeNegocioException $e) {
+            return response()->json(['tipo' => 'erro', 'mensagem' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['tipo' => 'disponibilidade', ...$dados]);
     }
 
     /** Resultados (BI): só o dono. O cálculo é do ResultadosClinica (só leitura). */

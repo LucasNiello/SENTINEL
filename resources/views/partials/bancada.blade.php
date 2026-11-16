@@ -376,6 +376,19 @@
                 bloco.classList.add('campo--faltando');
                 bloco.appendChild(paragrafo('campo-falta', id + '-falta', 'Falta preencher.'));
                 descricoes.push(id + '-falta');
+                // O "Falta preencher" vale só enquanto o campo está vazio: ao escolher ou digitar, some (e volta se esvaziar).
+                const aviso = bloco.querySelector('.campo-falta');
+                const atualizarFalta = () => {
+                    const vazio = entrada.value.trim() === '';
+                    aviso.hidden = !vazio;
+                    bloco.classList.toggle('campo--faltando', vazio);
+                    const outras = (entrada.getAttribute('aria-describedby') || '').split(' ').filter((d) => d && d !== aviso.id);
+                    if (vazio) outras.push(aviso.id);
+                    if (outras.length) entrada.setAttribute('aria-describedby', outras.join(' '));
+                    else entrada.removeAttribute('aria-describedby');
+                };
+                entrada.addEventListener('input', atualizarFalta);
+                entrada.addEventListener('change', atualizarFalta);
             }
             if (campo.erro) {
                 bloco.classList.add('campo--erro');
@@ -576,10 +589,22 @@
             adminErro.id = prefixo + '-admin-erro';
             card.querySelector('.rotulo-admin-email').htmlFor = adminEmail.id;
             card.querySelector('.rotulo-admin-senha').htmlFor = adminSenha.id;
-            autorizacao.hidden = !formulario.reautenticar;
             // Item H (estorno), T1: quem autoriza é o supervisor do setor ou o dono, cada um com o PIN gerado pelo dono ou pelo Administrador.
             // A chave vem do servidor (formulario.tipo_autorizacao); sem ela, o texto é o da lixeira (administrador).
-            const textosAutorizacao = formulario.tipo_autorizacao === 'estorno' ? {
+            // 15/11 (cirurgia e internação): 'crmv' = o próprio usuário digita o CRMV do perfil e a senha. Recalculado a cada
+            // montagem do card: o Revisar pode devolver a ficha pedindo CRMV (o serviço mudou para cirurgia no card).
+            let textosAutorizacao;
+            function aplicarAutorizacao() {
+                const crmv = formulario.tipo_autorizacao === 'crmv';
+                textosAutorizacao = crmv ? {
+                titulo: 'Confirme com o seu CRMV e a sua senha',
+                info: 'Cirurgia: só quem tem CRMV no perfil grava, com o CRMV e a senha de login. A senha só vai junto com a confirmação e não fica guardada.',
+                email: 'Seu CRMV (como está no perfil)',
+                segredo: 'Sua senha',
+                etapa: 'Digite o seu CRMV e a sua senha, escolha o horário (clicar já revisa) e depois clique em Confirmar.',
+                apagado: 'A senha foi apagada. Digite o CRMV e a senha de novo antes de Revisar.',
+                falta: 'Informe o seu CRMV e a sua senha.',
+            } : formulario.tipo_autorizacao === 'estorno' ? {
                 titulo: 'Autorização do supervisor do setor ou do dono',
                 info: 'Supervisor do setor ou dono: e-mail e PIN de autorização. O PIN só vai junto com a confirmação e não fica guardado.',
                 email: 'E-mail de quem autoriza',
@@ -596,10 +621,15 @@
                 apagado: 'A senha do administrador foi apagada. Digite o e-mail e a senha de novo antes de Revisar.',
                 falta: 'Informe o e-mail e a senha de um administrador.',
             };
-            card.querySelector('.autorizacao-titulo').textContent = textosAutorizacao.titulo;
-            card.querySelector('.autorizacao-info').textContent = textosAutorizacao.info;
-            card.querySelector('.rotulo-admin-email').textContent = textosAutorizacao.email;
-            card.querySelector('.rotulo-admin-senha').textContent = textosAutorizacao.segredo;
+                autorizacao.hidden = !formulario.reautenticar;
+                adminEmail.type = crmv ? 'text' : 'email';
+                adminEmail.maxLength = crmv ? 40 : 255;
+                card.querySelector('.autorizacao-titulo').textContent = textosAutorizacao.titulo;
+                card.querySelector('.autorizacao-info').textContent = textosAutorizacao.info;
+                card.querySelector('.rotulo-admin-email').textContent = textosAutorizacao.email;
+                card.querySelector('.rotulo-admin-senha').textContent = textosAutorizacao.segredo;
+            }
+            aplicarAutorizacao();
             const resumoErro = card.querySelector('.card-resumo-erro');
             const avisos = card.querySelector('.card-avisos');
             const etapa = card.querySelector('.card-etapa');
@@ -616,16 +646,30 @@
             // Campos montados a partir do servidor; com erro de revisão, voltam com a frase de cada campo.
             function preencherFormulario(novo) {
                 formulario = novo;
+                aplicarAutorizacao();
                 campos.replaceChildren(...formulario.campos.map((campo) => montarCampo(campo, prefixo)));
                 if (formulario.itens_estorno) campos.appendChild(montarEditorEstorno(formulario.itens_estorno, prefixo, form));
                 aplicarCondicoes(form, formulario.campos);
+                // 15/11: ficha de agendamento (agendar, remarcar, trocar o serviço): o calendário no lugar do profissional e do início.
+                if (formulario.ficha && typeof window.montarFichaAgendamento === 'function') {
+                    window.montarFichaAgendamento({ card, form, campos, formulario, prefixo, revisar: () => revisar(), abrirOutra: abrirOutraFicha });
+                }
                 // Lixeira (Bloco 4): o registro que vai sair ou voltar, só para conferir.
                 const linhasRegistro = [];
                 (formulario.resumo || []).forEach((item) => {
                     const dt = document.createElement('dt');
                     dt.textContent = item.rotulo;
                     const dd = document.createElement('dd');
-                    dd.textContent = item.valor === null || item.valor === undefined || item.valor === '' ? '—' : String(item.valor);
+                    const texto = item.valor === null || item.valor === undefined || item.valor === '' ? '—' : String(item.valor);
+                    // 15/11: link só para caminho interno (ficha do pet, do tutor); o texto continua por textContent.
+                    if (typeof item.href === 'string' && /^\/[a-z]+\/\d+$/.test(item.href)) {
+                        const link = document.createElement('a');
+                        link.href = item.href;
+                        link.textContent = texto;
+                        dd.appendChild(link);
+                    } else {
+                        dd.textContent = texto;
+                    }
                     linhasRegistro.push(dt, dd);
                 });
                 registro.replaceChildren(...linhasRegistro);
@@ -690,9 +734,17 @@
             // O prazo do card começa no Revisar: as credenciais são digitadas antes dele.
             // Função (não const): o formulario é trocado em preencherFormulario() e o Editar a chama depois.
             function textoPrimeiraEtapa() {
+                if (formulario.ficha && !formulario.reautenticar) return 'Escolha o horário no calendário (clicar já revisa) ou, mantendo o horário, clique em Revisar.';
                 return formulario.reautenticar
                     ? textosAutorizacao.etapa
                     : 'Confira os dados e clique em Revisar.';
+            }
+
+            // Atalho da ficha (Trocar serviço, Mudar status): esta proposta sai sem gravar e a outra ficha abre, sem IA.
+            function abrirOutraFicha(tool, id) {
+                encerrarSemGravar(token ? { token } : { proposta });
+                encerrarCard();
+                abrirFormulario(tool, id);
             }
 
             preencherFormulario(formulario);
@@ -770,7 +822,8 @@
                 precisaSegurar = segurar !== false;
                 entrouNaEtapa2Em = performance.now();
                 campos.disabled = true;
-                autorizacao.disabled = true;
+                // 15/11: a ficha pode passar a pedir CRMV + senha só no Revisar (cirurgia escolhida no card): aí os campos ficam abertos.
+                autorizacao.disabled = !(formulario.tipo_autorizacao === 'crmv' && adminSenha.value === '');
                 resumoErro.hidden = true;
                 btnRevisar.hidden = true;
                 btnConfirmar.hidden = false;
@@ -928,6 +981,13 @@
             }
 
             async function confirmarAcao() {
+                // 15/11: CRMV + senha que passaram a ser pedidos no Revisar precisam estar preenchidos antes de sair.
+                if (formulario.reautenticar && (adminEmail.value.trim() === '' || adminSenha.value === '')) {
+                    adminErro.textContent = textosAutorizacao.falta;
+                    adminErro.hidden = false;
+                    (adminEmail.value.trim() === '' ? adminEmail : adminSenha).focus();
+                    return;
+                }
                 // A confirmação saiu: o prazo de 5 min não pode mais marcar o card como expirado enquanto ela vai e volta.
                 clearTimeout(rascunhoTimer);
                 // Confirmação a caminho: Cancelar ou Editar agora disputariam o mesmo token com ela.
@@ -1008,3 +1068,5 @@
             });
         }
 </script>
+
+@include('partials.ficha-agendamento')

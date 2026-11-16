@@ -145,7 +145,9 @@ Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são
         $this->assertStringNotContainsString('consulte os tutores para achar o número', $principal);
         $this->assertStringNotContainsString('hold-to-confirm', $principal);
         $this->assertStringContainsString('tela de revisão e confirmação humana', $principal);
-        $this->assertStringContainsString('remarcar — que é agendar o novo horário —', $principal);
+        // 15/11: remarcar tem tool própria (antes o prompt dizia "remarcar = agendar o novo horário", e abria o card de criar).
+        $this->assertStringContainsString('use remarcar_agendamento e nunca agende de novo no lugar dele', $principal);
+        $this->assertStringNotContainsString('remarcar — que é agendar o novo horário —', $principal);
         $this->assertStringContainsString('o histórico traz o número do registro gravado', $principal);
     }
 

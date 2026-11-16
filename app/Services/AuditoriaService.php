@@ -70,6 +70,10 @@ class AuditoriaService
         $detalhes = app(DetalhesAuditoria::class)->atuais();
         $propostos = $detalhes['parametros_propostos'] ?? null;
         $anteriores = $detalhes['valores_anteriores'] ?? null;
+        // Adendo final (15/11): o tipo de conferência que autorizou (crmv+senha, pin, senha de admin), no detalhe da mensagem.
+        if (is_string($detalhes['conferencia'] ?? null)) {
+            $mensagem = $mensagem === null ? 'conferência: '.$detalhes['conferencia'] : Str::limit($mensagem, 220, '').' (conferência: '.$detalhes['conferencia'].')';
+        }
 
         return AuditLog::create([
             'user_id' => $this->contexto->usuario()->id,

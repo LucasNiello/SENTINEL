@@ -48,7 +48,7 @@
             <h2 id="titulo-tutor">Tutor</h2>
             @if ($pet->tutor)
                 <dl class="ficha">
-                    <dt>Nome</dt><dd>{{ $pet->tutor->nome }}</dd>
+                    <dt>Nome</dt><dd><a href="/tutores/{{ $pet->tutor->id }}">{{ $pet->tutor->nome }}</a></dd>
                     <dt>Telefone</dt><dd class="mono">{{ $pet->tutor->telefone ?: '—' }}</dd>
                     <dt>E-mail</dt><dd>{{ $pet->tutor->email ?: '—' }}</dd>
                 </dl>

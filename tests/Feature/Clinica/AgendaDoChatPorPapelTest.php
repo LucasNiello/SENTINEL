@@ -75,7 +75,7 @@ class AgendaDoChatPorPapelTest extends TestCase
     public function test_atendente_nao_agenda_na_clinica_mas_agenda_no_banho_e_tosa(): void
     {
         $this->logarComo('atendente', self::T);
-        $base = ['pet_id' => $this->pet()->id, 'inicio' => '2026-11-11 09:00', 'fim' => '2026-11-11 09:30'];
+        $base = ['pet_id' => $this->pet()->id, 'inicio' => '2026-11-11 09:00'];
 
         $proposta = (string) $this->comando('agendar_atendimento', [...$base, 'catalogo_item_id' => $this->item()->id,
             'profissional_id' => $this->usuarioClinica('veterinario')->id])->assertOk()->json('proposta');
@@ -94,9 +94,12 @@ class AgendaDoChatPorPapelTest extends TestCase
         [$clinica, $banho] = $this->doisSetores();
         $this->logarComo('atendente', self::T);
 
-        $proposta = (string) $this->comando('alterar_status_agendamento', ['id' => $clinica->id, 'novo_status' => 'cancelado'])->assertOk()->json('proposta');
-        $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => []])
-            ->assertStatus(422)->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'só mexe na agenda do banho e tosa'));
+        // 15/11 (reviewer): o horário da clínica nem é achado pelo atendente (antes o card abria, com pet, tutor e veterinário, e
+        // só o Revisar recusava): fora do setor, o agendamento é inexistente.
+        $this->comando('alterar_status_agendamento', ['id' => $clinica->id, 'novo_status' => 'cancelado'])
+            ->assertStatus(422)->assertJsonMissingPath('proposta')->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'Não encontrei'));
+        $this->comando('alterar_status_agendamento', ['busca' => 'thor', 'novo_status' => 'cancelado'])->assertOk()
+            ->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('argumentos.id', $banho->id);
         $this->assertSame('agendado', $clinica->fresh()->status);
 
         $this->confirmar($this->propor(['id' => $banho->id, 'novo_status' => 'cancelado'], 'alterar_status_agendamento'))->assertOk();

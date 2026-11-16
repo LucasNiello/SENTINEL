@@ -30,7 +30,7 @@ class ToolsDeAgendaDaClinicaTest extends TestCase
     {
         return [
             'pet_id' => $this->pet()->id, 'catalogo_item_id' => $this->item()->id, 'profissional_id' => $this->usuarioClinica('veterinario')->id,
-            'inicio' => '2026-11-11 09:00', 'fim' => '2026-11-11 09:30', ...$extra,
+            'inicio' => '2026-11-11 09:00', ...$extra,
         ];
     }
 
@@ -61,16 +61,19 @@ class ToolsDeAgendaDaClinicaTest extends TestCase
     public function test_regra_da_agenda_recusa_no_revisar_e_nada_e_gravado(): void
     {
         $dados = $this->dados();
-        $this->agendamentoDireto(\App\Models\Pet::find($dados['pet_id']), \App\Models\User::find($dados['profissional_id']), \App\Models\CatalogoItem::find($dados['catalogo_item_id']),
-            ['inicio' => '2026-11-11 09:15', 'fim' => '2026-11-11 09:45', 'status' => 'agendado']);
+        // Regra de 15/11 (blocos): a consulta ocupa 1 das 4 vagas do bloco do veterinário; a 5ª é recusada no Revisar. (A duração máxima, que dependia do
+        // fim informado, segue testada no AgendaServiceTest: o fim agora é calculado pelo servidor e nunca passa do máximo.)
+        foreach (range(1, 4) as $i) {
+            $this->agendamentoDireto(\App\Models\Pet::find($dados['pet_id']), \App\Models\User::find($dados['profissional_id']), \App\Models\CatalogoItem::find($dados['catalogo_item_id']),
+                ['inicio' => '2026-11-11 09:15', 'fim' => '2026-11-11 09:45', 'status' => 'agendado']);
+        }
 
-        $this->recusadaNoRevisar('agendar_atendimento', $dados, 'já tem um agendamento nesse horário');
-        $this->recusadaNoRevisar('agendar_atendimento', [...$dados, 'inicio' => '2026-11-09 09:00', 'fim' => '2026-11-09 09:30'], 'no passado');
-        $this->recusadaNoRevisar('agendar_atendimento', [...$dados, 'fim' => '2026-11-11 18:00'], 'no máximo');
+        $this->recusadaNoRevisar('agendar_atendimento', $dados, 'não tem vaga no bloco das 09:00');
+        $this->recusadaNoRevisar('agendar_atendimento', [...$dados, 'inicio' => '2026-11-09 09:00'], 'no passado');
         $this->recusadaNoRevisar('agendar_atendimento', [...$dados, 'profissional_id' => $this->usuarioClinica('recepcao')->id], 'veterinário');
         $this->recusadaNoRevisar('agendar_atendimento', [...$dados, 'catalogo_item_id' => $this->produto()->id], 'é um produto');
 
-        $this->assertSame(1, Agendamento::count(), 'só o que já existia');
+        $this->assertSame(4, Agendamento::count(), 'só o que já existia');
     }
 
     public function test_pet_servico_ou_profissional_de_outro_tenant_nao_agenda(): void
@@ -104,12 +107,15 @@ class ToolsDeAgendaDaClinicaTest extends TestCase
     {
         $dados = $this->dados();
         $token = $this->propor($dados, 'agendar_atendimento');
-        $this->agendamentoDireto(\App\Models\Pet::find($dados['pet_id']), \App\Models\User::find($dados['profissional_id']), \App\Models\CatalogoItem::find($dados['catalogo_item_id']),
-            ['inicio' => '2026-11-11 09:00', 'fim' => '2026-11-11 09:30', 'status' => 'agendado']);
+        // Outros pedidos (agente, telefone, app) ocupam as 4 vagas entre o Revisar e o Confirmar: o 5º é recusado na gravação.
+        foreach (range(1, 4) as $i) {
+            $this->agendamentoDireto(\App\Models\Pet::find($dados['pet_id']), \App\Models\User::find($dados['profissional_id']), \App\Models\CatalogoItem::find($dados['catalogo_item_id']),
+                ['inicio' => '2026-11-11 09:00', 'fim' => '2026-11-11 09:30', 'status' => 'agendado']);
+        }
 
         $this->confirmar($token)->assertStatus(422);
 
-        $this->assertSame(1, Agendamento::count());
+        $this->assertSame(4, Agendamento::count());
         $this->assertSame('recusado', AuditLog::query()->where('tool', 'agendar_atendimento')->latest('id')->value('resultado'));
     }
 
@@ -119,7 +125,7 @@ class ToolsDeAgendaDaClinicaTest extends TestCase
         $this->comando('agendar_atendimento', $this->dados())->assertStatus(403)->assertJsonPath('tipo', 'negado');
 
         $this->logarComo('atendente', self::T);
-        $this->comando('registrar_encaixe_emergencia', $this->dados(['inicio' => '2026-11-10 09:30', 'fim' => '2026-11-10 10:30']))
+        $this->comando('registrar_encaixe_emergencia', $this->dados(['inicio' => '2026-11-10 09:30']))
             ->assertStatus(403)->assertJsonPath('tipo', 'negado');
 
         $this->assertSame(['negado', 'negado'], AuditLog::query()->orderBy('id')->pluck('resultado')->all());
@@ -142,15 +148,15 @@ class ToolsDeAgendaDaClinicaTest extends TestCase
 
     public function test_encaixe_registra_emergencia_ja_comecada_mesmo_em_horario_ocupado(): void
     {
-        $dados = $this->dados(['inicio' => '2026-11-10 09:30', 'fim' => '2026-11-10 10:30']);
+        $dados = $this->dados(['inicio' => '2026-11-10 09:30']);
         $this->agendamentoDireto(\App\Models\Pet::find($dados['pet_id']), \App\Models\User::find($dados['profissional_id']), \App\Models\CatalogoItem::find($dados['catalogo_item_id']),
             ['inicio' => '2026-11-10 09:00', 'fim' => '2026-11-10 10:00', 'status' => 'agendado']);
 
         $this->confirmar($this->propor($dados, 'registrar_encaixe_emergencia'))->assertOk();
 
         $this->assertSame('encaixe_emergencia', Agendamento::query()->latest('id')->value('origem'));
-        $this->recusadaNoRevisar('registrar_encaixe_emergencia', $this->dados(['inicio' => '2026-11-10 11:00', 'fim' => '2026-11-10 11:30']), 'não pode estar no futuro');
+        $this->recusadaNoRevisar('registrar_encaixe_emergencia', $this->dados(['inicio' => '2026-11-10 11:00']), 'não pode estar no futuro');
         $this->recusadaNoRevisar('registrar_encaixe_emergencia', $this->dados(['catalogo_item_id' => $this->item(['setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho'])->id,
-            'profissional_id' => $this->usuarioClinica('atendente')->id, 'inicio' => '2026-11-10 09:00', 'fim' => '2026-11-10 09:30']), 'só da clínica');
+            'profissional_id' => $this->usuarioClinica('atendente')->id, 'inicio' => '2026-11-10 09:00']), 'só da clínica');
     }
 }

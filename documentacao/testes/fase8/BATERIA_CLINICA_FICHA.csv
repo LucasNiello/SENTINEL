@@ -1,0 +1,8 @@
+n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao;papel
+1;ficha;do bidu foi marcado errado. é uma consulta;;alterar_servico_agendamento;confirmacao_pendente|resultado_leitura;caso do navegador de 15/11 (o agente discutia em texto);recepcao
+2;ficha;troca o banho do Thor por tosa;;alterar_servico_agendamento;confirmacao_pendente|resultado_leitura;troca no mesmo setor (petshop);recepcao
+3;ficha;abre a ficha do agendamento 21;;remarcar_agendamento;confirmacao_pendente;arg:id=21;recepcao
+4;ficha;remarcar a Luna;;remarcar_agendamento;confirmacao_pendente|resultado_leitura;sem horário: a ficha abre com o calendário ou a lista de escolha;recepcao
+5;ficha;marca uma consulta para a Luna amanhã com qualquer veterinário;;agendar_atendimento;confirmacao_pendente;profissional em branco: a ficha mostra o calendário;recepcao
+6;crmv;agende uma castração para o Thor sexta às 14h;;agendar_atendimento;confirmacao_pendente;veterinário com CRMV: o card pede CRMV + senha;veterinario
+7;crmv;agende uma castração para o Thor sexta às 14h;;agendar_atendimento;confirmacao_pendente;recepção sem CRMV: o card avisa que só consulta e o Revisar recusa;recepcao

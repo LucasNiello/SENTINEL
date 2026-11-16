@@ -56,6 +56,9 @@ class IsolamentoDeTenantTest extends TestCase
             'CatalogoService::restaurarDaLixeira', 'CatalogoService::excluirDefinitivo',
             'AgendaService::agendar', 'AgendaService::motivoParaNaoAgendar', 'AgendaService::alterarStatus',
             'AgendaService::motivoParaNaoAlterarStatus', 'AgendaService::buscarPorFiltro', 'AgendaService::localizarEmAberto',
+            'AgendaService::remarcar', 'AgendaService::motivoParaNaoRemarcar', 'AgendaService::localizarParaRemarcar',
+            'AgendaService::trocarServico', 'AgendaService::motivoParaNaoTrocarServico', 'AgendaService::disponibilidadeDoDia',
+            'AgendaService::disponibilidadeDoMes', 'AgendaService::exigeCrmv', 'AgendaService::exigeCrmvNoStatus',
             'ProntuarioService::abrir', 'ProntuarioService::atualizar', 'ProntuarioService::adicionarItem', 'ProntuarioService::removerItem',
             'ProntuarioService::assinar', 'ProntuarioService::adendar', 'ProntuarioService::vincular', 'ProntuarioService::metadados',
             'CobrancaService::abrir', 'CobrancaService::adicionarItem', 'CobrancaService::removerItem', 'CobrancaService::importarDoProntuario',
@@ -204,6 +207,57 @@ class IsolamentoDeTenantTest extends TestCase
                 $agendamento = $this->agendado();
                 $this->assertCount(1, $agenda->localizarEmAberto($agendamento->id, null, self::T));
                 $this->vazio($agenda->localizarEmAberto($agendamento->id, null, self::B));
+            },
+            'AgendaService::remarcar' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $this->inexistente(fn () => $agenda->remarcar($agendamento->id, '2030-01-10 10:00', self::B), \App\Models\Agendamento::class, 'inicio');
+            },
+            'AgendaService::motivoParaNaoRemarcar' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $this->assertStringStartsWith('Não encontrei', (string) $agenda->motivoParaNaoRemarcar($agendamento->id, '2030-01-10 10:00', self::B));
+                $this->assertNull($agenda->motivoParaNaoRemarcar($agendamento->id, '2030-01-10 10:00', self::T), 'no tenant dono, a remarcação vale');
+            },
+            'AgendaService::localizarParaRemarcar' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $this->assertCount(1, $agenda->localizarParaRemarcar($agendamento->id, null, self::T));
+                $this->assertCount(1, $agenda->localizarParaRemarcar(null, 'thor', self::T), 'por palavra do pet');
+                $this->vazio($agenda->localizarParaRemarcar($agendamento->id, null, self::B));
+                $this->vazio($agenda->localizarParaRemarcar(null, 'thor', self::B));
+            },
+            // 15/11 (ficha de agendamento e cirurgia com CRMV): os métodos novos, no lugar dos sobrepostos* (que saíram com o
+            // modelo de blocos).
+            'AgendaService::trocarServico' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $retorno = $this->item(['nome_comercial' => 'Retorno']);
+                $this->inexistente(fn () => $agenda->trocarServico($agendamento->id, $retorno->id, $agendamento->profissional_id, '2026-11-11 09:00', self::B));
+                $this->assertSame($agendamento->catalogo_item_id, $agendamento->fresh()->catalogo_item_id, 'nada mudou');
+            },
+            'AgendaService::motivoParaNaoTrocarServico' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $retorno = $this->item(['nome_comercial' => 'Retorno']);
+                $this->assertStringStartsWith('Não encontrei', (string) $agenda->motivoParaNaoTrocarServico($agendamento->id, $retorno->id, $agendamento->profissional_id, '2026-11-11 09:00', self::B));
+                $this->assertNull($agenda->motivoParaNaoTrocarServico($agendamento->id, $retorno->id, $agendamento->profissional_id, '2026-11-11 09:00', self::T), 'no tenant dono, a troca vale');
+            },
+            'AgendaService::disponibilidadeDoDia' => function () use ($agenda) {
+                $servico = $this->item();
+                $this->usuarioClinica('veterinario');
+                $this->assertNotEmpty($agenda->disponibilidadeDoDia($servico->id, '2026-11-11', null, null, ['clinica', 'petshop'], self::T)['horarios']);
+                $this->inexistente(fn () => $agenda->disponibilidadeDoDia($servico->id, '2026-11-11', null, null, ['clinica', 'petshop'], self::B));
+            },
+            'AgendaService::disponibilidadeDoMes' => function () use ($agenda) {
+                $servico = $this->item();
+                $this->assertArrayHasKey('2026-11-11', $agenda->disponibilidadeDoMes($servico->id, '2026-11', null, null, ['clinica', 'petshop'], self::T)['dias']);
+                $this->inexistente(fn () => $agenda->disponibilidadeDoMes($servico->id, '2026-11', null, null, ['clinica', 'petshop'], self::B));
+            },
+            'AgendaService::exigeCrmv' => function () use ($agenda) {
+                $cirurgia = $this->item(['categoria' => 'cirurgia', 'nome_comercial' => 'Castração']);
+                $this->assertTrue($agenda->exigeCrmv(null, $cirurgia->id, self::T));
+                $this->assertFalse($agenda->exigeCrmv(null, $cirurgia->id, self::B), 'o serviço de outro tenant não existe para ele');
+            },
+            'AgendaService::exigeCrmvNoStatus' => function () use ($agenda) {
+                $cirurgia = $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(['categoria' => 'cirurgia', 'nome_comercial' => 'Castração']), ['status' => 'agendado']);
+                $this->assertTrue($agenda->exigeCrmvNoStatus($cirurgia->id, 'cancelado', self::T));
+                $this->assertFalse($agenda->exigeCrmvNoStatus($cirurgia->id, 'cancelado', self::B));
             },
 
             'ProntuarioService::abrir' => fn () => $this->inexistente(fn () => $prontuarios->abrir(['pet_id' => $this->pet()->id, 'tipo' => 'consulta'], $this->usuarioClinica('veterinario', self::B)->id, self::B), \App\Models\Prontuario::class),

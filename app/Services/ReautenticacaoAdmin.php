@@ -36,6 +36,9 @@ class ReautenticacaoAdmin
     /** Janela dos dois limites: 10 minutos. */
     public const JANELA_S = 600;
 
+    /** CRMV + senha (cirurgia e internação, 15/11): o mesmo limite do login, 5 tentativas erradas por minuto (usuário + IP). */
+    public const LIMITE_CRMV_POR_MINUTO = 5;
+
     public function __construct(private ContextoUsuario $contexto)
     {
     }
@@ -77,6 +80,69 @@ class ReautenticacaoAdmin
     public function autorizarEstorno(mixed $email, mixed $segredo): array
     {
         return $this->comLimite($email, $segredo, fn (string $e, string $s) => $this->autorizadorDeEstorno($e, $s));
+    }
+
+    /**
+     * Cirurgia e internação (decisão do Lucas, 15/11): o próprio usuário logado confirma com o CRMV do perfil e a senha de
+     * login. Os DOIS precisam ser dele: CRMV de outro veterinário ou senha de outra pessoa não servem. Limite igual ao do
+     * login (5 erradas por minuto, por usuário + IP); a tentativa conta antes de conferir e volta no acerto. A senha só
+     * existe nesta chamada: nunca vai para log, auditoria, sessão ou IA (a auditoria só registra o autorizado_por).
+     *
+     * @return array{admin: int}|array{falha: 'faltando'|'limite'|'invalido'}  "admin" = o próprio usuário, reautenticado
+     */
+    public function autorizarComCrmv(mixed $crmv, mixed $senha): array
+    {
+        $usuario = $this->contexto->usuario();
+
+        if (! is_string($crmv) || ! is_string($senha) || trim($crmv) === '' || $senha === '') {
+            return ['falha' => 'faltando'];
+        }
+
+        try {
+            $chave = 'reautenticacao:crmv:'.$usuario->id.'|'.(string) request()->ip();
+            if (RateLimiter::hit($chave, 60) > self::LIMITE_CRMV_POR_MINUTO) {
+                $this->devolverTentativa60s($chave);
+
+                return ['falha' => 'limite'];
+            }
+
+            $crmvConfere = strlen($crmv) <= 40 && strlen($senha) <= 255 && filled($usuario->crmv)
+                && self::crmvNormalizado($crmv) === self::crmvNormalizado((string) $usuario->crmv);
+            // A senha é conferida mesmo com o CRMV errado: o tempo de resposta não diz qual dos dois errou.
+            $senhaConfere = Hash::check($senha, $crmvConfere ? (string) $usuario->password : self::HASH_FICTICIO);
+
+            if (! $crmvConfere || ! $senhaConfere) {
+                return ['falha' => 'invalido'];
+            }
+
+            $this->devolverTentativa60s($chave);
+
+            return ['admin' => (int) $usuario->id];
+        } catch (AuthenticationException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            Log::warning('ReautenticacaoAdmin: falha ao conferir o CRMV', [
+                'correlation_id' => (string) Str::uuid(),
+                'excecao' => $e::class,
+                'local' => basename($e->getFile()).':'.$e->getLine(),
+            ]);
+
+            return ['falha' => 'invalido'];
+        }
+    }
+
+    /** Como devolverTentativa(), na janela de 60 s do CRMV (se a chave venceu no meio, não recria com a janela de 10 min). */
+    private function devolverTentativa60s(string $chave): void
+    {
+        if (RateLimiter::attempts($chave) > 0) {
+            RateLimiter::decrement($chave, 60);
+        }
+    }
+
+    /** "crmv-sp 12.345" e "CRMV-SP 12345" são o mesmo: só letras e números, em maiúsculas, sem acento. */
+    private static function crmvNormalizado(string $crmv): string
+    {
+        return (string) preg_replace('/[^A-Z0-9]/', '', Str::upper(Str::ascii(trim($crmv))));
     }
 
     /**
