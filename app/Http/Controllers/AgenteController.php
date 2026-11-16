@@ -209,7 +209,7 @@ class AgenteController extends Controller
         // T2: no estorno por itens, o card mostra de novo o que vai ser estornado, com os valores REVISADOS (o humano pode
         // ter mudado o modo ou as quantidades), antes do segurar.
         // Só nas tools do estorno: nas outras, o resumo pode rodar uma prévia (transação desfeita) sem necessidade.
-        $refeito = $this->aiAgentService->tipoReautenticacao($tool) === 'estorno'
+        $refeito = $this->aiAgentService->tipoReautenticacao($tool) === 'estorno' || $this->aiAgentService->avisaNoRevisar($tool)
             ? $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho)) : null;
 
         return response()->json([
@@ -218,7 +218,8 @@ class AgenteController extends Controller
             'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
             'risco' => $this->aiAgentService->risco($tool),
             'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados),
-            ...(isset($refeito['itens_estorno']) ? ['formulario' => $refeito] : []),
+            // Agendar e remarcar: o aviso "já há N agendamentos neste horário" vale para o horário REVISADO, antes do confirmar.
+            ...($refeito !== null && (isset($refeito['itens_estorno']) || isset($refeito['avisos']) || $this->aiAgentService->avisaNoRevisar($tool)) ? ['formulario' => $refeito] : []),
         ]);
     }
 
@@ -275,22 +276,35 @@ class AgenteController extends Controller
         // aqui). Sem permissão, a senha nem é conferida nem gasta tentativa: a execução abaixo nega pelo
         // papel, com a mesma resposta para senha certa ou errada (o card não serve de verificador de senha).
         $autorizadoPor = null;
+        $conferencia = null;
 
         if ($this->aiAgentService->exigeReautenticacao($pendente['tool']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
             // H, T1: o estorno é autorizado pelo PIN do supervisor ou do dono (mesmos campos do card e mesmos limites).
             $estorno = $this->aiAgentService->tipoReautenticacao($pendente['tool']) === 'estorno';
-            $autorizacao = $this->reautenticar($request, $estorno);
+            $autorizacao = $this->reautenticar($request, $estorno ? 'estorno' : 'admin');
 
             if (! isset($autorizacao['admin'])) {
-                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], $estorno);
+                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], $estorno ? 'estorno' : 'admin');
             }
 
             $autorizadoPor = $autorizacao['admin'];
+            $conferencia = $estorno ? 'pin' : 'senha de admin';
+        } elseif ($this->aiAgentService->exigeCrmv($pendente['tool'], $pendente['argumentos']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
+            // 15/11: cirurgia e internação. O próprio usuário confirma com o CRMV do perfil e a senha (mesmos campos do
+            // card: "email_admin" leva o CRMV e "senha_admin" a senha). A regra do CRMV é conferida de novo no service.
+            $autorizacao = $this->reautenticar($request, 'crmv');
+
+            if (! isset($autorizacao['admin'])) {
+                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], 'crmv');
+            }
+
+            $autorizadoPor = $autorizacao['admin'];
+            $conferencia = 'crmv+senha';
         }
 
         try {
             $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
-                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente), ConfirmacoesPendentes::loteIds($pendente));
+                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente), ConfirmacoesPendentes::loteIds($pendente), $conferencia);
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -473,13 +487,16 @@ class AgenteController extends Controller
      *
      * @return array{admin: int}|array{falha: string}
      */
-    private function reautenticar(Request $request, bool $estorno = false): array
+    private function reautenticar(Request $request, string $tipo = 'admin'): array
     {
         try {
             // H, T1: no estorno, "senha_admin" leva o PIN do supervisor ou do dono (o card é o mesmo).
-            return $estorno
-                ? $this->reautenticacao->autorizarEstorno($request->input('email_admin'), $request->input('senha_admin'))
-                : $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin'));
+            // 15/11: no CRMV, "email_admin" leva o CRMV do próprio usuário e "senha_admin" a senha dele.
+            return match ($tipo) {
+                'estorno' => $this->reautenticacao->autorizarEstorno($request->input('email_admin'), $request->input('senha_admin')),
+                'crmv' => $this->reautenticacao->autorizarComCrmv($request->input('email_admin'), $request->input('senha_admin')),
+                default => $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin')),
+            };
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -499,9 +516,16 @@ class AgenteController extends Controller
      * gravar — o desfecho dela é "negado", com quem estava logado e sem o e-mail digitado (ele
      * poderia ser a senha digitada no campo errado). Para tentar de novo, abre-se outro card.
      */
-    private function reautenticacaoRecusada(array $pendente, string $falha, bool $estorno = false)
+    private function reautenticacaoRecusada(array $pendente, string $falha, string $tipo = 'admin')
     {
-        [$codigo, $status, $motivo, $mensagem] = $estorno ? match ($falha) {
+        [$codigo, $status, $motivo, $mensagem] = $tipo === 'crmv' ? match ($falha) {
+            'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de CRMV e senha atingido.',
+                'Muitas tentativas com o CRMV ou a senha errados. Aguarde um minuto. Nada foi gravado.'],
+            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem CRMV e senha para cirurgia.',
+                'Informe o seu CRMV e a sua senha. Nada foi gravado.'],
+            default => ['AI_REAUTH_FAILED', 403, 'CRMV e senha não conferiram.',
+                'CRMV ou senha inválidos. Nada foi gravado.'],
+        } : ($tipo === 'estorno' ? match ($falha) {
             'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de autorização do estorno atingido.',
                 'Muitas tentativas com o PIN errado. Aguarde alguns minutos. Nada foi gravado.'],
             'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e PIN de quem autoriza o estorno.',
@@ -515,7 +539,7 @@ class AgenteController extends Controller
                 'Informe o e-mail e a senha de um administrador. Nada foi gravado.'],
             default => ['AI_REAUTH_FAILED', 403, 'Senha de administrador não conferiu.',
                 'E-mail ou senha de administrador inválidos. Nada foi gravado.'],
-        };
+        });
 
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'negado', $motivo,
             ConfirmacoesPendentes::origem($pendente), permitido: false,

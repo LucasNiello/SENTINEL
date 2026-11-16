@@ -3,6 +3,7 @@
 namespace App\Services\Agente;
 
 use App\Http\Requests\AgendarRequest;
+use App\Http\Requests\AlterarServicoAgendamentoRequest;
 use App\Http\Requests\AlterarStatusAgendamentoRequest;
 use App\Http\Requests\CatalogoItemAtualizacaoRequest;
 use App\Http\Requests\CatalogoItemRequest;
@@ -10,6 +11,7 @@ use App\Http\Requests\EstornarCobrancaRequest;
 use App\Http\Requests\EstornarVendaRequest;
 use App\Http\Requests\PetRequest;
 use App\Http\Requests\ReceberCobrancaRequest;
+use App\Http\Requests\RemarcarRequest;
 use App\Http\Requests\RegistrarVendaRequest;
 use App\Http\Requests\RegistroIdRequest;
 use App\Http\Requests\TutorRequest;
@@ -47,6 +49,9 @@ trait CatalogoDaClinica
 
     /** Quem vê e mexe na agenda (tabela da FASE oito, 15/11): o vendedor não. Mesma lista no chat e na tela /agenda. */
     private const PAPEIS_DA_AGENDA = ['atendente', 'recepcao', 'veterinario', 'dono'];
+
+    /** As colunas da tabela da agenda: a lista de escolha (vários candidatos) usa as mesmas (15/11). */
+    private const COLUNAS_DA_AGENDA = ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'setor', 'status'];
 
     /** Caixa de entrada: quantos pets do tutor vão no pedido ao agente e o limite do campo do chat (AgenteController). */
     private const PETS_NO_PEDIDO = 5;
@@ -86,6 +91,7 @@ trait CatalogoDaClinica
                 sucessoCriar: 'Tutor cadastrado',
                 tituloAtualizar: 'Alterar tutor',
                 sucessoAtualizar: 'Tutor atualizado',
+                resumirAtualizar: fn (array $v, int $tenantId) => $this->petsDoTutorNoCard((int) ($v['id'] ?? 0), $tenantId),
             ),
             ...$this->definirCadastro(
                 entidade: 'Pet',
@@ -112,6 +118,7 @@ trait CatalogoDaClinica
                 sucessoCriar: 'Pet cadastrado',
                 tituloAtualizar: 'Alterar pet',
                 sucessoAtualizar: 'Pet atualizado',
+                resumirAtualizar: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
             ),
             ...$this->definirCadastro(
                 entidade: 'CatalogoItem',
@@ -234,59 +241,160 @@ trait CatalogoDaClinica
                 propriedades: ['novo_status' => ['type' => 'string', 'enum' => ['confirmado', 'realizado', 'cancelado', 'faltou']]],
                 obrigatorios: ['novo_status'],
                 formRequest: AlterarStatusAgendamentoRequest::class,
-                executar: fn (array $d, int $tenantId) => $agenda->alterarStatus($d['id'], $d['novo_status'], $tenantId),
+                executar: fn (array $d, int $tenantId, User $ator) => $agenda->alterarStatus($d['id'], $d['novo_status'], $tenantId, $d['versao'], $this->autorizacaoDaAgenda($ator)),
                 mensagemErro: 'Não consegui mudar o status do agendamento. Tente novamente.',
                 titulo: 'Mudar o status do agendamento',
                 sucesso: 'Status do agendamento atualizado',
                 conferir: function (array $a) use ($agenda): ?array {
                     $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['id'] ?? 0))?->setor)
-                        ?? $agenda->motivoParaNaoAlterarStatus((int) ($a['id'] ?? 0), (string) ($a['novo_status'] ?? ''), (int) $a['tenant_id']);
+                        ?? $agenda->motivoParaNaoAlterarStatus((int) ($a['id'] ?? 0), (string) ($a['novo_status'] ?? ''), (int) $a['tenant_id'], $this->versaoDaFicha($a),
+                            $this->autorizacaoDaAgenda(null));
 
                     return $motivo === null ? null : ['campo' => 'novo_status', 'motivo' => $motivo];
                 },
-                localizar: $agenda->localizarEmAberto(...),
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $agenda->localizarEmAberto($id, $busca, $tenantId, $this->setoresDaAgenda()),
                 rotulo: 'o agendamento',
                 colunaRotulo: 'pet',
+                rotuloAcao: 'Escolher',
                 campos: ['novo_status'],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDoAgendamento((int) ($v['id'] ?? 0), $tenantId),
+                colunasLista: self::COLUNAS_DA_AGENDA,
+                comVersao: true,
+                // Adendo final (15/11): cancelar cirurgia pede CRMV + senha; faltou e realizado seguem a regra atual.
+                exigeCrmv: fn (array $v, int $tenantId) => $agenda->exigeCrmvNoStatus((int) ($v['id'] ?? 0), $v['novo_status'] ?? null, $tenantId),
+            ),
+            // Remarcar (15/11): muda o início (e, se escolhido no calendário, o profissional do mesmo setor) de um agendamento
+            // que já existe. Nunca cria agendamento novo; o fim recalcula. "Abrir a ficha do agendamento" também abre esta.
+            $this->definirAcao(
+                nome: 'remarcar_agendamento',
+                descricao: 'Remarca um agendamento que já existe (em aberto): muda o início (e, se o usuário pedir, o profissional do mesmo setor); o servidor recalcula o fim; pet, tutor e serviço continuam. Também é a tool para "ver", "abrir" ou "mostrar a ficha" de um agendamento. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional). Nunca cria um agendamento novo. Novo início no formato AAAA-MM-DD HH:MM (horário de São Paulo); sem horário dito, deixe em branco: a ficha abre com o calendário.',
+                acao: 'atualizar',
+                entidade: 'Agendamento',
+                papeis: self::PAPEIS_DA_AGENDA,
+                propriedades: [
+                    'inicio' => ['type' => 'string', 'description' => 'Novo início: AAAA-MM-DD HH:MM'],
+                    'profissional_id' => ['type' => 'integer', 'description' => 'Só se o usuário pedir outro profissional (do mesmo setor).'],
+                ],
+                obrigatorios: [],
+                formRequest: RemarcarRequest::class,
+                executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    $agendamento = $agenda->remarcar($d['id'], $d['inicio'], $tenantId, $d['profissional_id'], $d['versao'], $this->autorizacaoDaAgenda($ator));
+                    // O "antes" na auditoria: de que horário e de que profissional saiu (o update() guarda em getPrevious()).
+                    $campos = ['profissional_id', 'inicio', 'fim'];
+                    $this->detalhesAuditoria->anotar('valores_anteriores', array_intersect_key([...$agendamento->only($campos), ...$agendamento->getPrevious()], array_flip($campos)));
+
+                    return $agendamento;
+                },
+                mensagemErro: 'Não consegui remarcar o agendamento. Nada foi gravado.',
+                titulo: 'Remarcar o agendamento',
+                sucesso: 'Agendamento remarcado',
+                conferir: function (array $a) use ($agenda): ?array {
+                    $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoRemarcar((int) ($a['id'] ?? 0), $a['inicio'] ?? null, (int) $a['tenant_id'], $a['profissional_id'] ?? null, $this->versaoDaFicha($a),
+                            $this->autorizacaoDaAgenda(null));
+
+                    return $motivo === null ? null : ['campo' => 'inicio', 'motivo' => $motivo];
+                },
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $agenda->localizarParaRemarcar($id, $busca, $tenantId, $this->setoresDaAgenda()),
+                rotulo: 'o agendamento',
+                buscaPor: 'pet, serviço ou profissional',
+                colunaRotulo: 'resumo',
+                rotuloAcao: 'Escolher',
+                campos: ['profissional_id', 'inicio'],
+                resumir: fn (array $v, int $tenantId) => $this->fichaDoAgendamento('remarcar', $v, $tenantId),
+                colunasLista: self::COLUNAS_DA_AGENDA,
+                comVersao: true,
+                exigeCrmv: fn (array $v, int $tenantId) => $agenda->exigeCrmv((int) ($v['id'] ?? 0), null, $tenantId),
+            ),
+            // Trocar o serviço (15/11): "não era banho, era consulta". O MESMO agendamento é alterado, nunca duplicado. No
+            // mesmo setor a ficha mantém o profissional e o horário (o fim recalcula); em outro setor, o profissional fica
+            // em branco e a ficha abre com a lista do setor novo e o calendário.
+            $this->definirAcao(
+                nome: 'alterar_servico_agendamento',
+                descricao: 'Troca o serviço de um agendamento que já existe (em aberto), quando foi marcado errado ("não era banho, era consulta", "troca o banho do Thor por tosa"). Altera o mesmo agendamento, nunca cria outro. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional) no campo busca. Informe em catalogo_item_id o número do serviço novo, escolhido na lista de serviços; sem certeza, deixe em branco: a ficha mostra a lista.',
+                acao: 'atualizar',
+                entidade: 'Agendamento',
+                papeis: self::PAPEIS_DA_AGENDA,
+                propriedades: [
+                    'catalogo_item_id' => ['type' => 'integer', 'description' => 'Número do serviço NOVO.'.$this->numerosDosServicos()],
+                ],
+                obrigatorios: [],
+                formRequest: AlterarServicoAgendamentoRequest::class,
+                executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    $agendamento = $agenda->trocarServico($d['id'], $d['catalogo_item_id'], $d['profissional_id'], $d['inicio'], $tenantId, $d['versao'],
+                        $this->autorizacaoDaAgenda($ator));
+                    // O "antes" na auditoria: serviço, setor, profissional, início e fim de antes da troca.
+                    $campos = ['catalogo_item_id', 'setor', 'profissional_id', 'inicio', 'fim'];
+                    $this->detalhesAuditoria->anotar('valores_anteriores', array_intersect_key([...$agendamento->only($campos), ...$agendamento->getPrevious()], array_flip($campos)));
+
+                    return $agendamento;
+                },
+                mensagemErro: 'Não consegui trocar o serviço do agendamento. Nada foi gravado.',
+                titulo: 'Trocar o serviço do agendamento',
+                sucesso: 'Serviço do agendamento trocado',
+                conferir: function (array $a) use ($agenda): ?array {
+                    $tenantId = (int) $a['tenant_id'];
+                    $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', $tenantId)->find((int) ($a['id'] ?? 0))?->setor)
+                        ?? $this->motivoForaDoSetorDaAgenda(CatalogoItem::query()->where('tenant_id', $tenantId)->find((int) ($a['catalogo_item_id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoTrocarServico((int) ($a['id'] ?? 0), $a['catalogo_item_id'] ?? null, $a['profissional_id'] ?? null, $a['inicio'] ?? null,
+                            $tenantId, $this->versaoDaFicha($a), $this->autorizacaoDaAgenda(null));
+
+                    return $motivo === null ? null : ['campo' => 'catalogo_item_id', 'motivo' => $motivo];
+                },
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $agenda->localizarParaRemarcar($id, $busca, $tenantId, $this->setoresDaAgenda()),
+                rotulo: 'o agendamento',
+                buscaPor: 'pet, serviço ou profissional',
+                colunaRotulo: 'resumo',
+                rotuloAcao: 'Escolher',
+                campos: ['catalogo_item_id', 'profissional_id', 'inicio'],
+                resumir: fn (array $v, int $tenantId) => $this->fichaDoAgendamento('trocar_servico', $v, $tenantId),
+                colunasLista: self::COLUNAS_DA_AGENDA,
+                preparar: fn (array $argumentos, array $propostos, int $tenantId) => $this->prepararTrocaDeServico($argumentos, $propostos, $tenantId),
+                comVersao: true,
+                exigeCrmv: fn (array $v, int $tenantId) => $agenda->exigeCrmv((int) ($v['id'] ?? 0), $v['catalogo_item_id'] ?? null, $tenantId),
             ),
             // F (P-C4): agendar e encaixe de emergência. A origem é fixada pelo servidor em cada tool (a IA não escolhe):
-            // a regra (pet, serviço e profissional do tenant, setor, passado, conflito, duração) é toda do AgendaService.
+            // a regra (pet, serviço e profissional do tenant, setor, passado, vaga, conflito, duração) é toda do AgendaService.
             ...array_map(fn (array $t) => $this->definirAcao(
                 nome: $t['nome'],
-                descricao: $t['descricao'].' Pet, serviço do catálogo e profissional pelo id; início e fim no formato AAAA-MM-DD HH:MM (horário de São Paulo).',
+                descricao: $t['descricao'].' Pet, serviço do catálogo e profissional pelo id; início no formato AAAA-MM-DD HH:MM (horário de São Paulo).',
                 acao: 'agendar',
                 entidade: 'Agendamento',
                 papeis: $t['papeis'],
                 propriedades: [
                     'pet_id' => ['type' => 'integer'],
-                    'catalogo_item_id' => ['type' => 'integer', 'description' => 'Id do serviço do catálogo (não produto).'],
-                    'profissional_id' => ['type' => 'integer', 'description' => 'Id do veterinário (clínica) ou do atendente (banho e tosa).'],
+                    'pet' => ['type' => 'string', 'description' => 'Nome do pet, quando o número não é conhecido (o servidor procura).'],
+                    'catalogo_item_id' => ['type' => 'integer', 'description' => 'Id do serviço do catálogo (não produto).'.$this->numerosDosServicos()],
+                    'profissional_id' => ['type' => 'integer', 'description' => 'Id do veterinário (clínica) ou do atendente (banho e tosa). Em branco se o usuário não disse quem ("qualquer veterinário").'],
                     'inicio' => ['type' => 'string', 'description' => 'AAAA-MM-DD HH:MM'],
-                    'fim' => ['type' => 'string', 'description' => 'AAAA-MM-DD HH:MM'],
                 ],
-                obrigatorios: ['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio', 'fim'],
+                obrigatorios: ['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'],
                 formRequest: AgendarRequest::class,
-                executar: fn (array $d, int $tenantId) => $agenda->agendar([
-                    ...array_intersect_key($d, array_flip(['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio', 'fim'])),
+                // O fim não é pedido: o servidor calcula pelo modelo do setor (AgendaService / GradeDaAgenda).
+                executar: fn (array $d, int $tenantId, User $ator) => $agenda->agendar([
+                    ...array_intersect_key($d, array_flip(['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'])),
                     'origem' => $t['origem'],
-                ], $tenantId),
+                ], $tenantId, $this->autorizacaoDaAgenda($ator)),
                 mensagemErro: 'Não consegui agendar agora. Nada foi gravado.',
                 titulo: $t['titulo'],
                 sucesso: $t['sucesso'],
                 conferir: function (array $a) use ($agenda, $t): ?array {
                     $motivo = $this->motivoForaDoSetorDaAgenda(CatalogoItem::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['catalogo_item_id'] ?? 0))?->setor)
-                        ?? $agenda->motivoParaNaoAgendar([...$a, 'origem' => $t['origem']], (int) $a['tenant_id']);
+                        ?? $agenda->motivoParaNaoAgendar([...$a, 'origem' => $t['origem']], (int) $a['tenant_id'], $this->autorizacaoDaAgenda(null));
 
                     return $motivo === null ? null : ['campo' => 'inicio', 'motivo' => $motivo];
                 },
+                // Só o agendar normal usa a ficha com o calendário; o encaixe (já aconteceu) segue o card comum.
+                resumir: $t['origem'] === 'normal' ? fn (array $v, int $tenantId) => $this->fichaDoAgendamento('agendar', $v, $tenantId) : null,
+                preparar: fn (array $argumentos, array $propostos, int $tenantId) => $this->prepararPetPeloNome($argumentos, $tenantId),
+                exigeCrmv: $t['origem'] === 'normal' ? fn (array $v, int $tenantId) => $agenda->exigeCrmv(null, $v['catalogo_item_id'] ?? null, $tenantId) : null,
             ), [
                 ['nome' => 'agendar_atendimento', 'origem' => 'normal', 'papeis' => self::PAPEIS_DA_AGENDA,
                     'titulo' => 'Agendar', 'sucesso' => 'Atendimento agendado',
-                    'descricao' => 'Agenda um atendimento da clínica ou do banho e tosa, de agora em diante, sem conflito com outro horário do mesmo profissional.'],
+                    'descricao' => 'Agenda um NOVO atendimento da clínica ou do banho e tosa, de agora em diante. Informe só o início: o servidor calcula o fim. Para mudar o horário de um agendamento que já existe, use remarcar_agendamento; para trocar o serviço dele, alterar_servico_agendamento. Na clínica o horário é por bloco de 1 h (08:00 … 17:00): consultas dividem o bloco (até 4 por veterinário), os demais serviços ocupam o bloco inteiro e a cirurgia 2 blocos; cirurgia só o próprio veterinário com CRMV agenda, para si. No banho e tosa, 1 por vez.'],
                 ['nome' => 'registrar_encaixe_emergencia', 'origem' => 'encaixe_emergencia', 'papeis' => ['recepcao', 'veterinario', 'dono'],
                     'titulo' => 'Registrar encaixe de emergência', 'sucesso' => 'Encaixe de emergência registrado',
-                    'descricao' => 'Registra na agenda da clínica um atendimento de emergência que já começou (início agora ou antes); não confere conflito de horário. Só da clínica.'],
+                    'descricao' => 'Registra na agenda da clínica um atendimento de emergência que já começou (início agora ou antes); não confere vaga nem horário. Só da clínica.'],
             ]),
 
             // ---------------------------------------------------------------- cobrança (P-B4)
@@ -628,6 +736,165 @@ trait CatalogoDaClinica
         $pedido = 'Mensagem da caixa de entrada ('.$contexto.'): '.json_encode((string) $mensagem->texto, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
 
         return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : (string) $mensagem->texto;
+    }
+
+    /**
+     * A ficha de agendamento (15/11; agendar, remarcar e trocar o serviço): o cabeçalho (pet e tutor com link, e o
+     * serviço, o profissional e o horário atuais), só leitura, e o que o calendário precisa (serviço, setor, dia e o
+     * agendamento a ignorar na contagem). Os atalhos abrem a ficha de outra ação do mesmo agendamento, sem IA, só as
+     * que o papel pode usar. Tudo do tenant; o agendamento já veio do localizar, que filtra o setor do papel.
+     */
+    private function fichaDoAgendamento(string $acao, array $v, int $tenantId): array
+    {
+        $ag = $acao === 'agendar' ? null
+            : Agendamento::query()->where('tenant_id', $tenantId)->whereIn('setor', $this->setoresDaAgenda())->with(['pet.tutor', 'servico', 'profissional'])->find((int) ($v['id'] ?? 0));
+        $petId = (int) ($v['pet_id'] ?? 0);
+        $pet = $ag?->pet ?? ($petId >= 1 ? Pet::query()->where('tenant_id', $tenantId)->with('tutor')->find($petId) : null);
+        $servicoId = $acao === 'remarcar' ? (int) $ag?->catalogo_item_id : (int) ($v['catalogo_item_id'] ?? 0);
+        $servico = $servicoId >= 1 ? CatalogoItem::query()->where('tenant_id', $tenantId)->where('tipo', 'servico')->find($servicoId) : null;
+
+        $cabecalho = [];
+        if ($pet !== null) {
+            $cabecalho[] = ['rotulo' => 'Pet', 'valor' => $pet->nome, 'href' => '/pets/'.$pet->id];
+            $tutor = $pet->tutor !== null && (int) $pet->tutor->tenant_id === $tenantId ? $pet->tutor : null;
+            if ($tutor !== null) {
+                $cabecalho[] = ['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id];
+            }
+        }
+        if ($ag !== null) {
+            $cabecalho[] = ['rotulo' => $acao === 'trocar_servico' ? 'Serviço atual' : 'Serviço', 'valor' => $ag->servico?->nome_comercial];
+            $cabecalho[] = ['rotulo' => 'Profissional atual', 'valor' => $ag->profissional?->name];
+            $cabecalho[] = ['rotulo' => 'Horário atual', 'valor' => $ag->inicio->format('d/m/Y H:i').'–'.$ag->fim->format('H:i')];
+            $cabecalho[] = ['rotulo' => 'Situação', 'valor' => $ag->status];
+        }
+
+        $atalhos = [];
+        if ($ag !== null) {
+            $dela = $acao === 'remarcar' ? 'remarcar_agendamento' : 'alterar_servico_agendamento';
+            foreach (['remarcar_agendamento' => 'Remarcar', 'alterar_servico_agendamento' => 'Trocar serviço', 'alterar_status_agendamento' => 'Mudar status'] as $tool => $rotulo) {
+                if ($tool !== $dela && $this->podeExecutar($tool)) {
+                    $atalhos[] = ['tool' => $tool, 'rotulo' => $rotulo];
+                }
+            }
+        }
+
+        $inicio = is_string($v['inicio'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}/', $v['inicio']) === 1 ? substr($v['inicio'], 0, 10) : null;
+        $avisos = [];
+        // 15/11: cirurgia e internação só por quem tem CRMV no perfil; os demais papéis veem logo que só consultam.
+        if ($servico !== null && blank($this->contexto->usuario()->crmv) && app(AgendaService::class)->exigeCrmv($ag?->id, $servico->id, $tenantId)) {
+            $avisos[] = AgendaService::RECUSA_SEM_CRMV;
+        }
+        // Troca no mesmo setor: o horário atual pode não servir para o serviço novo (ex.: cirurgia de 2 blocos).
+        if ($acao === 'trocar_servico' && $ag !== null && $servico !== null && ! blank($v['profissional_id'] ?? null)) {
+            $motivo = app(AgendaService::class)->motivoParaNaoTrocarServico((int) $ag->id, $servico->id, $v['profissional_id'], $v['inicio'] ?? null, $tenantId,
+                null, $this->autorizacaoDaAgenda(null));
+            if ($motivo !== null) {
+                $avisos[] = $motivo.' Escolha outro horário no calendário.';
+            }
+        }
+
+        return [
+            'resumo' => $cabecalho,
+            'avisos' => $avisos,
+            'ficha' => [
+                'acao' => $acao,
+                'agendamento_id' => $ag?->id,
+                'servico_id' => $servico?->id,
+                'setor' => $servico?->setor,
+                'dia' => $inicio ?? ($ag !== null ? $ag->inicio->format('Y-m-d') : now()->format('Y-m-d')),
+                'atalhos' => $atalhos,
+            ],
+        ];
+    }
+
+    /**
+     * Trocar o serviço: o serviço novo é o que a IA indicou (do tenant, serviço; senão fica em branco e a ficha marca o
+     * campo). Setor diferente do atual: o profissional fica em branco (a ficha mostra os do setor novo e o calendário).
+     */
+    private function prepararTrocaDeServico(array $argumentos, array $propostos, int $tenantId): array
+    {
+        $ag = Agendamento::query()->where('tenant_id', $tenantId)->find((int) ($argumentos['id'] ?? 0));
+        $novoId = filter_var($propostos['catalogo_item_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $novo = $novoId === false ? null : CatalogoItem::query()->where('tenant_id', $tenantId)->where('tipo', 'servico')->find($novoId);
+
+        if ($ag === null || $novo === null || (int) $novo->id === (int) $ag->catalogo_item_id) {
+            return [...$argumentos, 'catalogo_item_id' => null];
+        }
+
+        return [...$argumentos, 'catalogo_item_id' => (int) $novo->id, ...($novo->setor !== $ag->setor ? ['profissional_id' => null] : [])];
+    }
+
+    /** Agendar: o nome do pet dito pelo usuário vira o pet_id quando só um pet do tenant bate (nome igual primeiro). */
+    private function prepararPetPeloNome(array $argumentos, int $tenantId): array
+    {
+        $nome = is_string($argumentos['pet'] ?? null) ? trim($argumentos['pet']) : '';
+        unset($argumentos['pet']);
+
+        // pet_id 0 (ou outro número inválido) que a IA manda no lugar de "não sei" conta como em branco.
+        if ($nome !== '' && filter_var($argumentos['pet_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+            $pets = app(PetService::class)->buscarPorFiltro($nome, null, $tenantId);
+            $iguais = $pets->filter(fn (Pet $p) => mb_strtolower((string) $p->nome) === mb_strtolower($nome));
+            $um = $iguais->count() === 1 ? $iguais->first() : ($pets->count() === 1 ? $pets->first() : null);
+            if ($um !== null) {
+                $argumentos['pet_id'] = (int) $um->id;
+            }
+        }
+
+        return $argumentos;
+    }
+
+    /** Card de alterar tutor (15/11): os pets dele, só leitura, cada um com link para a ficha (nome e espécie). */
+    private function petsDoTutorNoCard(int $tutorId, int $tenantId): array
+    {
+        if ($tutorId < 1 || ! $this->podeExecutar('consultar_pets')) {
+            return [];
+        }
+        $pets = Pet::query()->where('tenant_id', $tenantId)->where('tutor_id', $tutorId)->orderBy('nome')->orderBy('id')->get(['id', 'nome', 'especie']);
+
+        return $pets->isEmpty() ? [['rotulo' => 'Pets', 'valor' => 'Nenhum pet cadastrado']]
+            : $pets->map(fn (Pet $p) => ['rotulo' => 'Pet', 'valor' => $p->nome.' ('.$p->especie.')', 'href' => '/pets/'.$p->id])->all();
+    }
+
+    /** Card de alterar pet (15/11): o tutor dele, só leitura (nome e telefone), com link para a ficha do tutor. */
+    private function tutorDoPetNoCard(int $petId, int $tenantId): array
+    {
+        $pet = $petId >= 1 && $this->podeExecutar('consultar_tutores') ? Pet::query()->where('tenant_id', $tenantId)->find($petId) : null;
+        $tutor = $pet === null ? null : Tutor::query()->where('tenant_id', $tenantId)->find($pet->tutor_id);
+
+        return $tutor === null ? [] : [['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id]];
+    }
+
+    /**
+     * Quem grava na agenda, para a regra de cirurgia e internação (AgendaService::conferirRestrito): o usuário logado (do
+     * servidor) e se ele confirmou com CRMV + senha NESTA requisição (o /agente/confirmar põe o autorizado_por depois de
+     * conferir). Sem $ator é o Revisar: reautenticado = null (a senha só vem no Confirmar).
+     *
+     * @return array{ator: User, reautenticado: ?bool}
+     */
+    private function autorizacaoDaAgenda(?User $ator): array
+    {
+        $usuario = $ator ?? $this->contexto->usuario();
+
+        return ['ator' => $usuario, 'reautenticado' => $ator === null ? null : $this->autorizadoPor() === (int) $usuario->id];
+    }
+
+    /** A versão da ficha que veio do rascunho (o servidor a pôs ao localizar). Sem ela, '' nunca bate: recusa. */
+    private function versaoDaFicha(array $a): string
+    {
+        return is_string($a['versao'] ?? null) ? $a['versao'] : '';
+    }
+
+    /** Como numerosDoCatalogo(), só os SERVIÇOS dos setores da agenda do papel (agendar e trocar o serviço). */
+    private function numerosDosServicos(): string
+    {
+        $setores = $this->setoresDaAgenda();
+        $itens = app(CatalogoService::class)->buscarPorFiltro(null, null, null, $this->contexto->tenantId())
+            ->filter(fn (CatalogoItem $i) => $i->tipo === 'servico' && in_array($i->setor, $setores, true));
+        if ($itens->isEmpty() || $itens->count() > self::LIMITE_CATALOGO_NA_DESCRICAO) {
+            return '';
+        }
+
+        return ' Serviços (número = serviço): '.$itens->sortBy('id')->map(fn (CatalogoItem $i) => $i->id.' = '.$this->nomeNaDescricao((string) $i->nome_comercial))->implode('; ').'.';
     }
 
     /**

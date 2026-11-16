@@ -185,20 +185,20 @@ class ClinicaSeeder extends Seeder
         // [dias atrás, hora, pet, veterinário, tipo, itens do prontuário, pagamento: forma | 'a_receber' | 'aberta']
         $atendimentos = [
             [28, '09:00', 'thor', 'dono', 'vacinacao', [['v10', 1]], 'pix'],
-            [26, '10:30', 'bidu', 'veterinario', 'consulta', [['hemograma', 1]], 'cartao'],
+            [26, '10:00', 'bidu', 'veterinario', 'consulta', [['hemograma', 1]], 'cartao'],
             [24, '14:00', 'nina', 'veterinario', 'consulta', [], 'dinheiro'],
-            [21, '09:30', 'rex', 'dono', 'exame', [['hemograma', 1]], 'pix'],
+            [21, '09:00', 'rex', 'dono', 'exame', [['hemograma', 1]], 'pix'],
             [19, '11:00', 'luna', 'veterinario', 'cirurgia', [['castracao', 1]], 'cartao'],
-            [16, '15:30', 'zeca', 'dono', 'vacinacao', [['antirrabica', 1], ['v10', 1]], 'pix'],
+            [16, '15:00', 'zeca', 'dono', 'vacinacao', [['antirrabica', 1], ['v10', 1]], 'pix'],
             [14, '10:00', 'amora', 'veterinario', 'consulta', [['microchip', 1]], 'a_receber'],
             [9, '16:00', 'tom', 'veterinario', 'retorno', [], 'cartao'],
             [6, '09:00', 'mel', 'dono', 'consulta', [['vermifugo', 1]], 'a_receber'],
-            [3, '13:30', 'bolt', 'veterinario', 'vacinacao', [['v10', 1]], 'pix'],
-            [2, '10:30', 'thor', 'veterinario', 'consulta', [['hemograma', 1]], 'aberta'],
+            [3, '13:00', 'bolt', 'veterinario', 'vacinacao', [['v10', 1]], 'pix'],
+            [2, '10:00', 'thor', 'veterinario', 'consulta', [['hemograma', 1]], 'aberta'],
         ];
 
         foreach ($atendimentos as [$dias, $hora, $pet, $vet, $tipo, $itens, $pagamento]) {
-            $inicio = $this->dia($dias, $hora);
+            $inicio = $this->diaDaAgenda($dias, $hora);
             $this->atenderNaClinica($inicio, $pet, $vet, $tipo === 'retorno' ? 'retorno' : 'consulta', $tipo, $itens, $pagamento, [
                 'anamnese' => 'Tutor relata o motivo da visita; sem queixas adicionais.',
                 'exame_fisico' => 'Mucosas normocoradas, hidratado, temperatura dentro do normal.',
@@ -207,11 +207,11 @@ class ClinicaSeeder extends Seeder
             ]);
         }
 
-        // Internação de 3 diárias (entrada há 12 dias à noite, alta há 9 dias de manhã).
-        $this->atenderNaClinica($this->dia(12, '18:00'), 'zeca', 'dono', 'consulta', 'internacao', [['internacao', 1]], 'pix', [
+        // Internação de 3 diárias (entrada há 12 dias no fim da tarde, alta há 9 dias de manhã).
+        $this->atenderNaClinica($this->diaDaAgenda(12, '17:00'), 'zeca', 'dono', 'consulta', 'internacao', [['internacao', 1]], 'pix', [
             'anamnese' => 'Vômitos recorrentes (dado fictício de demonstração).',
             'conduta' => 'Internação para fluidoterapia e observação.',
-            'entrada_em' => $this->dia(12, '18:30'),
+            'entrada_em' => $this->diaDaAgenda(12, '18:30'),
             'alta_em' => $this->dia(9, '10:00'),
         ], $this->dia(9, '10:30'));
     }
@@ -269,7 +269,7 @@ class ClinicaSeeder extends Seeder
             [5, '10:00', 'zeca', 'banho_g', null, 'a_receber'],
             [1, '16:00', 'amora', 'banho_p', null, 'dinheiro'],
         ] as [$dias, $hora, $pet, $banho, $tosa, $pagamento]) {
-            $inicio = $this->dia($dias, $hora);
+            $inicio = $this->diaDaAgenda($dias, $hora);
             $agendamento = $this->em($inicio->copy()->subDays(2), fn () => app(AgendaService::class)->agendar([
                 'pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios['atendente']->id,
                 'catalogo_item_id' => $this->itens[$banho]->id, 'inicio' => $inicio, 'fim' => $inicio->copy()->addHour(),
@@ -331,13 +331,13 @@ class ClinicaSeeder extends Seeder
         $agenda = app(AgendaService::class);
         $semana = [
             [0, '17:00', 'luna', 'veterinario', 'retorno', 'confirmado'],
-            [0, '17:30', 'bidu', 'atendente', 'banho_p', 'confirmado'],
+            [0, '17:00', 'bidu', 'atendente', 'banho_p', 'confirmado'],
             [1, '09:00', 'mel', 'dono', 'consulta', 'confirmado'],
             [1, '09:00', 'thor', 'atendente', 'banho_g', 'agendado'],
             [1, '10:00', 'pipoca', 'veterinario', 'consulta', 'agendado'],
             [2, '14:00', 'nina', 'dono', 'consulta', 'agendado'],
             [2, '15:00', 'amora', 'atendente', 'tosa_c', 'agendado'],
-            [3, '09:30', 'fred', 'veterinario', 'consulta', 'agendado'],
+            [3, '09:00', 'fred', 'veterinario', 'consulta', 'agendado'],
             [3, '11:00', 'rex', 'dono', 'retorno', 'agendado'],
             [4, '10:00', 'tom', 'veterinario', 'consulta', 'agendado'],
             [4, '13:00', 'zeca', 'atendente', 'banho_g', 'agendado'],
@@ -349,7 +349,7 @@ class ClinicaSeeder extends Seeder
         // Relógio na meia-noite de hoje: agendar no passado é recusado, e o horário de hoje pode já ter passado.
         $this->em($this->dia(0, '00:00'), function () use ($semana, $agenda) {
             foreach ($semana as [$dias, $hora, $pet, $quem, $servico, $status]) {
-                $inicio = $this->dia(-$dias, $hora);
+                $inicio = $this->diaDaAgenda(-$dias, $hora);
                 $agendamento = $agenda->agendar(['pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios[$quem]->id,
                     'catalogo_item_id' => $this->itens[$servico]->id, 'inicio' => $inicio,
                     'fim' => $inicio->copy()->addMinutes($quem === 'atendente' ? 60 : 30)], self::TENANT);
@@ -393,7 +393,10 @@ class ClinicaSeeder extends Seeder
             ['Material de higiene do banho e tosa', '85.00', 10, 'manutencao', 'pendente', null],       // dia: R$ 120,00
             ['Conta de água', '42.15', 1, 'agua', 'pendente', null],                                    // dia: R$ 50,00
         ] as [$descricao, $valor, $dias, $cat, $status, $fornecedorId]) {
-            Lancamento::create(['descricao' => $descricao, 'valor' => $valor, 'data' => $this->dia($dias, '08:00')->toDateString(), 'status' => $status,
+            // 15/11: a despesa cai no mesmo dia da receita que a cobre. A receita da agenda pula o domingo (diaDaAgenda); a das
+            // vendas avulsas (dias 18, 29, 10 e 1) e a do fechamento da internação (dia 9), não.
+            $data = in_array($dias, [18, 29, 10, 1, 9], true) ? $this->dia($dias, '08:00') : $this->diaDaAgenda($dias, '08:00');
+            Lancamento::create(['descricao' => $descricao, 'valor' => $valor, 'data' => $data->toDateString(), 'status' => $status,
                 'categoria_lancamento_id' => $c[$cat]->id, 'fornecedor_id' => $fornecedorId, 'tenant_id' => self::TENANT]);
         }
     }
@@ -419,6 +422,22 @@ class ClinicaSeeder extends Seeder
         [$h, $m] = array_map('intval', explode(':', $hora));
 
         return Carbon::now()->startOfDay()->subDays($diasAtras)->setTime($h, $m);
+    }
+
+    /**
+     * Como dia(), para a agenda (15/11): a grade só abre no expediente (config sentinel.agenda: segunda a sábado). Um
+     * horário que cai no domingo vai para o dia útil vizinho: o sábado, se já passou; a segunda, se é futuro. As horas
+     * da clínica são hora cheia (blocos de 1 h).
+     */
+    private function diaDaAgenda(int $diasAtras, string $hora): Carbon
+    {
+        $dia = $this->dia($diasAtras, $hora);
+        $abre = array_map('intval', (array) config('sentinel.agenda.expediente.dias', []));
+        for ($i = 0; $i < 7 && ! in_array($dia->dayOfWeekIso, $abre, true); $i++) {
+            $dia = $dia->lt(Carbon::now()) ? $dia->subDay() : $dia->addDay();
+        }
+
+        return $dia;
     }
 
     /** Roda $acao com o relógio parado em $momento (created_at, pago_em, assinado_em... no passado). */

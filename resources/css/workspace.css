@@ -498,5 +498,27 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
     #tabela-supervisores td:nth-child(5) {padding-top:12px}
     #tabela-supervisores .campo {min-width:0}
 }
+/* FICHA DE AGENDAMENTO (15/11): calendário do molde (partials/ficha-agendamento) */
+.ficha-agenda {display:flex;flex-direction:column;gap:16px;width:100%;min-width:0}
+.ficha-atalhos {display:flex;flex-wrap:wrap;gap:8px}
+.ficha-passo {margin:0;padding:16px;border:1px solid var(--sentinel-border);border-radius:var(--radius);background:var(--sentinel-paper);min-width:0;display:flex;flex-direction:column;gap:8px}
+.ficha-passo legend {padding:0 4px;font-weight:500}
+.ficha-rotulo {color:var(--sentinel-ink-muted);font-size:15px}
+.ficha-busca,.ficha-profissional {min-height:44px;max-width:360px;width:100%;border:1px solid var(--color-borda-campo);border-radius:6px;padding:8px 12px;background:var(--sentinel-paper);color:var(--sentinel-ink)}
+.ficha-dias-rapidos {display:flex;gap:8px}
+.ficha-mes {max-width:360px}
+.ficha-mes-topo {display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ficha-mes-titulo {font-weight:500;text-transform:capitalize}
+.ficha-semana,.ficha-mes-grade {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.ficha-semana span {text-align:center;font:12px var(--fonte-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--sentinel-ink-muted)}
+.ficha-dia {min-height:44px;padding:0;font-family:var(--fonte-mono);font-variant-numeric:tabular-nums}
+.ficha-dia[aria-pressed="true"] {border:2px solid var(--sentinel-blue);color:var(--sentinel-blue);font-weight:500}
+.ficha-dia:disabled,.ficha-horario:disabled {color:var(--sentinel-ink-muted);border-color:var(--sentinel-border);background:var(--sentinel-cream-alt);cursor:not-allowed}
+.ficha-horarios,.ficha-quem-lista {display:flex;flex-wrap:wrap;gap:8px}
+.ficha-horario {font-variant-numeric:tabular-nums}
+.ficha-horario[aria-current="true"] {border:2px solid var(--sentinel-blue)}
+.ficha-estado {margin:0;color:var(--sentinel-ink)}
+.ficha-quem-titulo {margin:8px 0 0;font-weight:500}
+@media (max-width:599px) {.ficha-passo {padding:12px}.ficha-mes,.ficha-busca,.ficha-profissional {max-width:none}}
 /* REDUCED MOTION */
 @media (prefers-reduced-motion:reduce) {*,*::before,*::after {scroll-behavior:auto!important;transition:none!important;animation:none!important}}

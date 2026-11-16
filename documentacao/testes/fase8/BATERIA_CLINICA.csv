@@ -34,7 +34,7 @@ n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao;papel
 33;cadastro;cadastra o tutor Marcos Pereira, telefone 19 99333-1212;;criar_tutor;confirmacao_pendente;confirmar base da continuacao 34;recepcao
 34;continuacao;agora cadastra a gata Mimi pra esse mesmo tutor;33;criar_pet;confirmacao_pendente;id_gravado:tutor_id esse mesmo depois de gravar;recepcao
 35;caixa;tem mensagem nova na caixa de entrada?;;consultar_mensagens;resultado_leitura;caixa de entrada;recepcao
-36;caixa;"Mensagem da caixa de entrada (tutor #1; pets: Thor = pet #1, Mel = pet #2): ""Oi! Queria remarcar o banho do Thor para sábado, pode ser?""";;agendar_atendimento;confirmacao_pendente;arg:pet_id=1 texto do botao Pedir ao agente;recepcao
+36;caixa;"Mensagem da caixa de entrada (tutor #1; pets: Thor = pet #1, Mel = pet #2): ""Oi! Queria remarcar o banho do Thor para sábado, pode ser?""";;remarcar_agendamento;confirmacao_pendente|resultado_leitura;texto do botao Pedir ao agente (15/11: o tutor pede para remarcar, entao a tool certa e remarcar_agendamento, pois agendar de novo seria criar um horario duplicado);recepcao
 37;permissao;agenda um banho pro Thor sexta às 14h;;agendar_atendimento;negado;vendedor nao agenda;vendedor
 38;permissao;recebe a cobrança da Mel, pagou em dinheiro;;receber_cobranca;negado;veterinario nao recebe;veterinario
 39;permissao;estorna a venda da Gabriela;;estornar_venda;negado;vendedor nao pede estorno;vendedor

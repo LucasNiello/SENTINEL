@@ -137,7 +137,7 @@ class FormularioAgenteTest extends TestCase
         $this->assertSame([['valor' => 'entrada', 'rotulo' => 'Entrada'], ['valor' => 'saida', 'rotulo' => 'Saída']], $campos['tipo']['opcoes']);
 
         $this->assertSame('referencia', $campos['cliente_id']['tipo']);
-        $this->assertSame([['valor' => $mercado->id, 'rotulo' => "#{$mercado->id} — Mercado Central"]], $campos['cliente_id']['opcoes']);
+        $this->assertSame([['valor' => $mercado->id, 'rotulo' => "Mercado Central · #{$mercado->id}"]], $campos['cliente_id']['opcoes']);
         $this->assertContains(['campo' => 'tipo', 'valor' => 'saida', 'efeito' => 'obrigatorio'], $campos['cliente_id']['condicoes']);
         $this->assertContains(['campo' => 'tipo', 'valor' => 'entrada', 'efeito' => 'proibido'], $campos['cliente_id']['condicoes']);
         $this->assertTrue($campos['cliente_id']['faltando'], 'nota de saída sem cliente');

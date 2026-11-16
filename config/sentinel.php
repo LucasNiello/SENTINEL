@@ -44,6 +44,32 @@ return [
     */
     'agenda_duracao_maxima_minutos' => (int) env('SENTINEL_AGENDA_DURACAO_MAXIMA_MIN', 480),
 
+    /*
+    | Agenda (decisão do Lucas, 15/11): o único ponto de configuração, lido pelo AgendaService e pelo calendário da
+    | ficha (App\Services\GradeDaAgenda). Sem tabela nem campo no banco; pendência: o dono vai configurar isto numa
+    | futura aba "Clínica".
+    | - expediente: dias da semana ISO (1 = segunda … 7 = domingo) e horário, no fuso da aplicação.
+    | - clínica (adendo final do Lucas, 15/11): blocos de "bloco_minutos" a partir do início do expediente. "por_categoria"
+    |   diz como cada categoria do catálogo ocupa o bloco do veterinário: 'vaga' = 1 das "vagas" do bloco (consulta);
+    |   número N = N blocos inteiros, sozinha (só entra em bloco vazio e o fecha: vacina, exame, microchipagem = 1,
+    |   cirurgia = 2); 'fora' = não ocupa a agenda do veterinário (internação: só registrada com a data de entrada).
+    |   Categoria fora da lista = falha fechada (recusa). O fim do agendamento é o fim do(s) bloco(s).
+    | - petshop: um atendimento por vez por profissional, grade de "grade_minutos" contada da meia-noite, fim = início +
+    |   duração da categoria ("_" vale para as outras).
+    */
+    'agenda' => [
+        'expediente' => ['dias' => [1, 2, 3, 4, 5, 6], 'inicio' => '08:00', 'fim' => '18:00'],
+        // restritas_crmv (adendo final do Lucas, 15/11): agendar (só para si), assumir, remarcar e cancelar estas categorias
+        // (fora o encaixe de emergência) só por usuário com CRMV no perfil, confirmando com CRMV + senha no card.
+        'clinica' => [
+            'bloco_minutos' => 60,
+            'vagas' => 4,
+            'por_categoria' => ['consulta' => 'vaga', 'vacina' => 1, 'exame' => 1, 'microchipagem' => 1, 'cirurgia' => 2, 'internacao' => 'fora'],
+            'restritas_crmv' => ['cirurgia'],
+        ],
+        'petshop' => ['grade_minutos' => 15, 'duracoes' => ['banho' => 60, 'tosa' => 90, '_' => 60]],
+    ],
+
     /* Como cada papel aparece na interface. */
     'rotulos_papeis' => [
         'leitura' => 'Leitura', 'operador' => 'Operador', 'admin' => 'Administrador',
