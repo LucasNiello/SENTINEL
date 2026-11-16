@@ -230,6 +230,13 @@ No calendário, "N vagas" aparece só na consulta; nos demais serviços, "livre"
      - Nos arquivos tocados e nos que usam "faltou": 199/199.
      - **Suíte completa depois da trava (16/11, pelo `test-runner`): 1085/1085.** Eram 1084; o teste novo entrou e nada quebrou. É a última suíte completa.
 
+## Ajuste de prompt (16/11): marcar ou remarcar sem horário também abre a ficha
+- **Achado:** depois do seed novo do `bateria.sqlite`, a bateria da ficha deu 6/7. "Marca uma consulta para a Luna amanhã com qualquer veterinário" voltou em texto pedindo o horário. É o ponto fraco já conhecido do modelo (o pedido não traz hora).
+- **Mudança (`AiAgentService`, prompt da clínica):** junto da regra "nunca discutir opções em texto", marcar ou remarcar sem dizer o horário chama `agendar_atendimento` ou `remarcar_agendamento` com o início em branco. A ficha resolve no calendário, no passo de escolher o horário.
+- **Reconferência:** só o pedido 5, no `bateria.sqlite` novo, **passou (1/1)**. Abriu `agendar_atendimento` com `confirmacao_pendente`. Saída em `BATERIA_CLINICA_FICHA_HAIKU_2026-11-16_pedido5.csv`.
+- **Chamadas reais acumuladas: 336** (328 + 7 do seed novo + 1 desta reconferência).
+- **Testes:** suíte completa não rodada, como combinado. A última continua a de 16/11 (1085/1085), antes desta frase. Nenhum teste trava essa frase do prompt.
+
 ## Pendências (fora deste bloco)
 - **Painel do dono:** abas Clínica (para configurar a seção `agenda`), Funcionários, Clientes e Petshop, e o dashboard.
 - **Fichas dos outros domínios:** padronizá-las no mesmo molde.
