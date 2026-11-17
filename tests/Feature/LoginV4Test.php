@@ -16,7 +16,7 @@ class LoginV4Test extends TestCase
             ->assertSee('action="'.route('login').'"', false)
             ->assertSee('name="_token"', false)
             ->assertSee('autocomplete="current-password"', false)
-            ->assertSee('Clareza para', false)
+            ->assertSee('Uma nova perspectiva', false)
             ->assertSee('id="art-stage"', false)
             ->assertDontSee('sem autenticação')
             ->assertDontSee('novalidate', false);

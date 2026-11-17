@@ -1,4 +1,6 @@
 import { mountLoginLighthouse } from './lighthouse/login-scene';
+import { montarCeuMeteoros } from './meteoros';
+import { revelarPagina } from './revelacao';
 
 document.addEventListener("DOMContentLoaded", () => {
 /* Validação complementar; o envio e a autenticação pertencem ao Laravel. */
@@ -95,4 +97,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 });
   
+montarCeuMeteoros(document.querySelector('#ceu-meteoros'));
 mountLoginLighthouse();
+revelarPagina(document.querySelector('[data-revelacao]'));

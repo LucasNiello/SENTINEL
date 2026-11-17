@@ -60,7 +60,7 @@ class ClinicaSeederTest extends TestCase
     {
         $usuarios = User::where('tenant_id', self::T)->get();
 
-        $this->assertCount(5, $usuarios);
+        $this->assertCount(10, $usuarios);
         foreach ($usuarios as $usuario) {
             $this->assertNotSame(self::SENHA, $usuario->getRawOriginal('password'));
             $this->assertTrue(Hash::check(self::SENHA, $usuario->password), $usuario->email);
@@ -84,12 +84,12 @@ class ClinicaSeederTest extends TestCase
 
     public function test_rodar_de_novo_com_outra_demo_senha_nao_troca_a_senha_de_quem_ja_existe(): void
     {
-        $hash = User::where('email', 'dono@clinica.sentinel.local')->value('password');
+        $hash = User::where('email', 'vet1@clinica.sentinel.br')->value('password');
 
         $this->definirSenha('Outra-Senha-Forte-99');
         $this->seed(ClinicaSeeder::class);
 
-        $this->assertSame($hash, User::where('email', 'dono@clinica.sentinel.local')->value('password'));
+        $this->assertSame($hash, User::where('email', 'vet1@clinica.sentinel.br')->value('password'));
     }
 
     public function test_fica_fora_do_database_seeder(): void
@@ -97,18 +97,23 @@ class ClinicaSeederTest extends TestCase
         $this->assertStringNotContainsString('ClinicaSeeder', file_get_contents(database_path('seeders/DatabaseSeeder.php')));
     }
 
-    public function test_um_usuario_por_papel_e_dono_e_veterinario_com_crmv(): void
+    public function test_contas_por_setor_e_veterinarios_com_crmv(): void
     {
         $usuarios = User::where('tenant_id', self::T)->orderBy('papel')->get();
 
-        $this->assertSame(['atendente', 'dono', 'recepcao', 'vendedor', 'veterinario'], $usuarios->pluck('papel')->all());
-        $this->assertSame(['dono', 'veterinario'], $usuarios->whereNotNull('crmv')->pluck('papel')->values()->all());
+        $this->assertSame(['atendente' => 2, 'dono' => 1, 'recepcao' => 3, 'vendedor' => 2, 'veterinario' => 2], $usuarios->countBy('papel')->all());
+        $this->assertEqualsCanonicalizing(['vet1', 'vet2', 'vet3', 'recepcao1', 'recepcao2', 'recepcao3', 'estetica1', 'estetica2', 'vendas1', 'vendas2'],
+            $usuarios->map(fn ($u) => $u->name)->all());
+        $this->assertTrue($usuarios->every(fn ($u) => $u->email === $u->name.'@clinica.sentinel.br'));
+        $this->assertSame('dono', $usuarios->firstWhere('name', 'vet1')->papel);
+        $this->assertEqualsCanonicalizing(['vet1', 'vet2', 'vet3'], $usuarios->whereNotNull('crmv')->pluck('name')->all());
     }
 
     public function test_cadastros_e_catalogo_dos_dois_setores_com_farmacia(): void
     {
         $this->assertSame(8, Tutor::where('tenant_id', self::T)->count());
-        $this->assertSame(12, Pet::where('tenant_id', self::T)->count());
+        $this->assertSame(5, Pet::where('tenant_id', self::T)->count());
+        $this->assertSame(3, Tutor::where('tenant_id', self::T)->doesntHave('pets')->whereHas('vendas')->count(), 'clientes só da loja');
         $this->assertTrue(CatalogoItem::where('tenant_id', self::T)->where('setor', 'petshop')->exists());
         $this->assertTrue(CatalogoItem::where('tenant_id', self::T)->where('categoria', 'farmacia')->where('exige_receita', true)->exists());
         $this->assertTrue(CatalogoItem::where('tenant_id', self::T)->where('cobranca_por', 'diaria')->exists());

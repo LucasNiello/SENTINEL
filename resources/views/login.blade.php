@@ -13,6 +13,11 @@
   @vite(['resources/css/login.css', 'resources/js/login.js'])
 </head>
 <body>
+<div class="revelacao" data-revelacao aria-hidden="true">
+  <div class="revelacao-metade revelacao-cima"></div>
+  <div class="revelacao-metade revelacao-baixo"></div>
+  <div class="revelacao-progresso"><div class="revelacao-trilho"><span></span></div><span class="revelacao-contagem" data-revelacao-contagem>00 / 02</span></div>
+</div>
 <a class="skip-link" href="#email">Ir para o login</a>
 <main class="layout">
   <section class="visual" aria-labelledby="visual-title">
@@ -22,18 +27,17 @@
       <span>SENTINEL</span>
     </a>
     <div class="visual-copy">
-      <h1 id="visual-title">Clareza para<br><span>decidir melhor.</span></h1>
-      <p>Inteligência sob o seu controle.</p>
+      <h1 id="visual-title">Uma nova perspectiva <span>para cada decisão.</span></h1>
     </div>
     <div id="art-stage" class="art-stage" role="img" aria-label="Farol decorativo com luz girando automaticamente quando o 3D está disponível.">
       <div class="stage-halo" aria-hidden="true"></div>
+      <div id="ceu-meteoros" class="ceu-meteoros" aria-hidden="true"></div>
       <div class="stage-fallback" aria-hidden="true">
         <x-lighthouse />
       </div>
       <div id="stage-canvas" class="stage-canvas" aria-hidden="true"></div>
     </div>
     <span class="visually-hidden" id="model-status" role="status" aria-live="polite">Carregando visual 3D</span>
-    <footer class="visual-footer">Uma nova perspectiva para cada decisão.</footer>
   </section>
 
   <section class="access" aria-labelledby="login-heading">

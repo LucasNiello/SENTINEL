@@ -24,8 +24,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Clínica veterinária + petshop de demonstração (tenant 3): um usuário por papel (dono com CRMV, mais
- * um veterinário), tutores, pets, catálogo dos dois setores (com farmácia), agenda da semana, um
+ * Clínica veterinária + petshop de demonstração (tenant 3): 10 contas @clinica.sentinel.br (vet1 = dono,
+ * vet2 e vet3 com CRMV; recepcao1-3; estetica1-2 no banho e tosa; vendas1-2 na loja), 5 pets com seus
+ * tutores e 3 clientes só da loja (sem pet), catálogo dos dois setores (com farmácia), agenda da semana, um
  * atendimento de emergência sem agendamento, cobranças e vendas pagas e em aberto espalhadas no último
  * mês (para os Resultados terem dados), despesas gerais e 5 mensagens na caixa de entrada simulada.
  *
@@ -83,15 +84,22 @@ class ClinicaSeeder extends Seeder
 
     private function criarUsuarios(string $senha): void
     {
+        // [chave usada no histórico, login, papel, CRMV]. vet1 é o dono (veterinário com CRMV).
         $contas = [
-            'dono' => ['name' => 'Dra. Helena Prado (dono)', 'email' => 'dono@clinica.sentinel.local', 'papel' => 'dono', 'crmv' => 'CRMV-SP 21458'],
-            'veterinario' => ['name' => 'Dr. Rafael Lima', 'email' => 'veterinario@clinica.sentinel.local', 'papel' => 'veterinario', 'crmv' => 'CRMV-SP 33871'],
-            'recepcao' => ['name' => 'Juliana Reis (recepção)', 'email' => 'recepcao@clinica.sentinel.local', 'papel' => 'recepcao', 'crmv' => null],
-            'atendente' => ['name' => 'Carlos Mendes (banho e tosa)', 'email' => 'atendente@clinica.sentinel.local', 'papel' => 'atendente', 'crmv' => null],
-            'vendedor' => ['name' => 'Patrícia Gomes (loja)', 'email' => 'vendedor@clinica.sentinel.local', 'papel' => 'vendedor', 'crmv' => null],
+            ['dono', 'vet1', 'dono', 'CRMV-SP 21458'],
+            ['veterinario', 'vet2', 'veterinario', 'CRMV-SP 33871'],
+            ['vet3', 'vet3', 'veterinario', 'CRMV-SP 40215'],
+            ['recepcao', 'recepcao1', 'recepcao', null],
+            ['recepcao2', 'recepcao2', 'recepcao', null],
+            ['recepcao3', 'recepcao3', 'recepcao', null],
+            ['atendente', 'estetica1', 'atendente', null],
+            ['estetica2', 'estetica2', 'atendente', null],
+            ['vendedor', 'vendas1', 'vendedor', null],
+            ['vendas2', 'vendas2', 'vendedor', null],
         ];
 
-        foreach ($contas as $chave => $atributos) {
+        foreach ($contas as [$chave, $login, $papel, $crmv]) {
+            $atributos = ['name' => $login, 'email' => "{$login}@clinica.sentinel.br", 'papel' => $papel, 'crmv' => $crmv];
             // Cast "hashed" do User: só o hash é gravado. A senha nunca vai para o console nem para o log.
             $usuario = User::query()->firstOrCreate(['email' => $atributos['email']], [...$atributos, 'tenant_id' => self::TENANT, 'password' => $senha]);
 
@@ -157,19 +165,13 @@ class ClinicaSeeder extends Seeder
                 'email' => Str::slug(Str::before($nome, ' ')).'@exemplo.com'], self::TENANT);
         }
 
+        // 5 pets, um por tutor. Elisa, Fábio e Henrique são só clientes da loja (sem pet).
         foreach ([
             'thor' => ['ana', 'Thor', 'cao', 'Labrador', 'macho', '2019-03-10', 32000, '985112003456781', 'Puxa forte na guia'],
-            'mel' => ['ana', 'Mel', 'gato', 'SRD', 'femea', '2021-07-22', 4100, null, 'Medo de secador'],
             'bidu' => ['bruno', 'Bidu', 'cao', 'Shih-tzu', 'macho', '2020-01-05', 6200, '985112003456782', null],
-            'luna' => ['carla', 'Luna', 'cao', 'Border collie', 'femea', '2022-02-14', 18500, null, null],
             'nina' => ['carla', 'Nina', 'gato', 'Siamês', 'femea', '2018-11-30', 3800, '985112003456783', 'Morde ao ser contida'],
             'rex' => ['diego', 'Rex', 'cao', 'Pastor alemão', 'macho', '2017-06-18', 38000, '985112003456784', 'Morde'],
-            'pipoca' => ['elisa', 'Pipoca', 'roedor', 'Hamster sírio', 'femea', '2025-04-01', 150, null, null],
-            'fred' => ['elisa', 'Fred', 'ave', 'Calopsita', 'macho', '2023-09-09', 90, null, 'Assusta com barulho'],
-            'zeca' => ['fabio', 'Zeca', 'cao', 'Vira-lata', 'macho', '2016-12-25', 14000, null, null],
-            'amora' => ['gabriela', 'Amora', 'cao', 'Poodle', 'femea', '2021-05-03', 5200, '985112003456785', 'Medo de secador'],
-            'tom' => ['henrique', 'Tom', 'gato', 'Persa', 'macho', '2020-08-08', 4600, null, null],
-            'bolt' => ['henrique', 'Bolt', 'cao', 'Beagle', 'macho', '2024-01-20', 11000, null, 'Foge pela porta'],
+            'amora' => ['gabriela', 'Amora', 'cao', 'Poodle', 'femea', '2021-05-03', 5200, null, 'Medo de secador'],
         ] as $chave => [$tutor, $nome, $especie, $raca, $sexo, $nascimento, $peso, $microchip, $alertas]) {
             $this->pets[$chave] = $pets->criar(['tutor_id' => $this->tutores[$tutor]->id, 'nome' => $nome, 'especie' => $especie, 'raca' => $raca,
                 'sexo' => $sexo, 'data_nascimento' => $nascimento, 'peso_gramas' => $peso, 'microchip' => $microchip, 'alertas' => $alertas], self::TENANT);
@@ -185,12 +187,12 @@ class ClinicaSeeder extends Seeder
             [26, '10:30', 'bidu', 'veterinario', 'consulta', [['hemograma', 1]], 'cartao'],
             [24, '14:00', 'nina', 'veterinario', 'consulta', [], 'dinheiro'],
             [21, '09:30', 'rex', 'dono', 'exame', [['hemograma', 1]], 'pix'],
-            [19, '11:00', 'luna', 'veterinario', 'cirurgia', [['castracao', 1]], 'cartao'],
-            [16, '15:30', 'zeca', 'dono', 'vacinacao', [['antirrabica', 1], ['v10', 1]], 'pix'],
+            [19, '11:00', 'amora', 'veterinario', 'cirurgia', [['castracao', 1]], 'cartao'],
+            [16, '15:30', 'rex', 'dono', 'vacinacao', [['antirrabica', 1], ['v10', 1]], 'pix'],
             [14, '10:00', 'amora', 'veterinario', 'consulta', [['microchip', 1]], 'a_receber'],
-            [9, '16:00', 'tom', 'veterinario', 'retorno', [], 'cartao'],
-            [6, '09:00', 'mel', 'dono', 'consulta', [['vermifugo', 1]], 'a_receber'],
-            [3, '13:30', 'bolt', 'veterinario', 'vacinacao', [['v10', 1]], 'pix'],
+            [9, '16:00', 'nina', 'veterinario', 'retorno', [], 'cartao'],
+            [6, '09:00', 'nina', 'dono', 'consulta', [['vermifugo', 1]], 'a_receber'],
+            [3, '13:30', 'bidu', 'veterinario', 'vacinacao', [['v10', 1]], 'pix'],
             [2, '10:30', 'thor', 'veterinario', 'consulta', [['hemograma', 1]], 'aberta'],
         ];
 
@@ -205,7 +207,7 @@ class ClinicaSeeder extends Seeder
         }
 
         // Internação de 3 diárias (entrada há 12 dias à noite, alta há 9 dias de manhã).
-        $this->atenderNaClinica($this->dia(12, '18:00'), 'zeca', 'dono', 'consulta', 'internacao', [['internacao', 1]], 'pix', [
+        $this->atenderNaClinica($this->dia(12, '18:00'), 'rex', 'dono', 'consulta', 'internacao', [['internacao', 1]], 'pix', [
             'anamnese' => 'Vômitos recorrentes (dado fictício de demonstração).',
             'conduta' => 'Internação para fluidoterapia e observação.',
             'entrada_em' => $this->dia(12, '18:30'),
@@ -260,10 +262,10 @@ class ClinicaSeeder extends Seeder
             [27, '09:00', 'bidu', 'banho_p', 'tosa_h', 'pix'],
             [22, '10:00', 'amora', 'banho_p', 'tosa_c', 'cartao'],
             [20, '14:00', 'thor', 'banho_g', null, 'dinheiro'],
-            [15, '09:30', 'luna', 'banho_g', 'tosa_h', 'pix'],
-            [13, '11:00', 'bolt', 'banho_p', null, 'cartao'],
+            [15, '09:30', 'thor', 'banho_g', 'tosa_h', 'pix'],
+            [13, '11:00', 'bidu', 'banho_p', null, 'cartao'],
             [8, '15:00', 'bidu', 'banho_p', 'tosa_c', 'pix'],
-            [5, '10:00', 'zeca', 'banho_g', null, 'a_receber'],
+            [5, '10:00', 'rex', 'banho_g', null, 'a_receber'],
             [1, '16:00', 'amora', 'banho_p', null, 'dinheiro'],
         ] as [$dias, $hora, $pet, $banho, $tosa, $pagamento]) {
             $inicio = $this->dia($dias, $hora);
@@ -292,15 +294,15 @@ class ClinicaSeeder extends Seeder
     {
         foreach ([
             [29, '11:00', 'vendedor', 'ana', [['racao', 1], ['petisco', 2]], 'pix'],
-            [25, '17:00', 'vendedor', null, [['bolinha', 2]], 'dinheiro'],
+            [25, '17:00', 'vendedor', 'elisa', [['bolinha', 2]], 'dinheiro'],
             [23, '10:15', 'recepcao', 'carla', [['antipulgas', 2]], 'cartao'],
             [18, '16:30', 'vendedor', 'diego', [['racao', 2]], 'cartao'],
-            [17, '09:45', 'vendedor', null, [['coleira', 1], ['petisco', 3]], 'pix'],
-            [11, '14:20', 'recepcao', 'fabio', [['vermifugo', 2]], 'dinheiro'],
+            [17, '09:45', 'vendedor', 'fabio', [['coleira', 1], ['petisco', 3]], 'pix'],
+            [11, '14:20', 'recepcao', 'bruno', [['vermifugo', 2]], 'dinheiro'],
             [10, '18:00', 'vendedor', 'gabriela', [['cama', 1]], 'cartao'],
             [7, '12:10', 'vendedor', null, [['shampoo', 1], ['petisco', 1]], 'pix'],
             [4, '15:40', 'vendedor', 'henrique', [['racao', 1]], null],
-            [1, '11:30', 'recepcao', 'elisa', [['antipulgas', 1]], null],
+            [1, '11:30', 'recepcao', 'ana', [['antipulgas', 1]], null],
         ] as [$dias, $hora, $quem, $tutor, $itens, $forma]) {
             $this->em($this->dia($dias, $hora), fn () => app(VendaService::class)->registrar(
                 array_map(fn (array $i) => ['catalogo_item_id' => $this->itens[$i[0]]->id, 'quantidade' => $i[1]], $itens),
@@ -327,19 +329,19 @@ class ClinicaSeeder extends Seeder
     {
         $agenda = app(AgendaService::class);
         $semana = [
-            [0, '17:00', 'luna', 'veterinario', 'retorno', 'confirmado'],
+            [0, '17:00', 'amora', 'veterinario', 'retorno', 'confirmado'],
             [0, '17:30', 'bidu', 'atendente', 'banho_p', 'confirmado'],
-            [1, '09:00', 'mel', 'dono', 'consulta', 'confirmado'],
+            [1, '09:00', 'nina', 'dono', 'consulta', 'confirmado'],
             [1, '09:00', 'thor', 'atendente', 'banho_g', 'agendado'],
-            [1, '10:00', 'pipoca', 'veterinario', 'consulta', 'agendado'],
+            [1, '10:00', 'bidu', 'veterinario', 'consulta', 'agendado'],
             [2, '14:00', 'nina', 'dono', 'consulta', 'agendado'],
             [2, '15:00', 'amora', 'atendente', 'tosa_c', 'agendado'],
-            [3, '09:30', 'fred', 'veterinario', 'consulta', 'agendado'],
+            [3, '09:30', 'rex', 'veterinario', 'consulta', 'agendado'],
             [3, '11:00', 'rex', 'dono', 'retorno', 'agendado'],
-            [4, '10:00', 'tom', 'veterinario', 'consulta', 'agendado'],
-            [4, '13:00', 'zeca', 'atendente', 'banho_g', 'agendado'],
-            [5, '09:00', 'bolt', 'dono', 'consulta', 'agendado'],
-            [5, '10:00', 'luna', 'atendente', 'banho_g', 'agendado'],
+            [4, '10:00', 'thor', 'veterinario', 'consulta', 'agendado'],
+            [4, '13:00', 'rex', 'atendente', 'banho_g', 'agendado'],
+            [5, '09:00', 'bidu', 'dono', 'consulta', 'agendado'],
+            [5, '10:00', 'thor', 'atendente', 'banho_g', 'agendado'],
             [6, '11:00', 'thor', 'veterinario', 'consulta', 'agendado'],
         ];
 
@@ -384,7 +386,7 @@ class ClinicaSeeder extends Seeder
             ['ana', null, 'Oi! Queria remarcar o banho do Thor para sábado, pode ser?', 'nova'],
             ['carla', null, 'A Nina está sem comer desde ontem, consigo uma consulta hoje?', 'nova'],
             [null, 'Marcos (19) 99333-1212', 'Vocês vendem ração para filhote de gato?', 'nova'],
-            ['henrique', null, 'Obrigado pelo atendimento do Tom!', 'tratada'],
+            ['henrique', null, 'Obrigado pela ajuda na escolha da ração!', 'tratada'],
             [null, 'Luciana', 'Qual o horário de funcionamento no feriado?', 'nova'],
         ] as $i => [$tutor, $remetente, $texto, $status]) {
             $this->em($this->dia(2 - min($i, 2), (8 + $i).':15'), fn () => Mensagem::create([
