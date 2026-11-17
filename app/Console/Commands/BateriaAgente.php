@@ -40,8 +40,8 @@ class BateriaAgente extends Command
         {--saida= : CSV de saída, relativo à raiz do projeto}
         {--somente= : números dos pedidos, separados por vírgula (as dependências entram juntas)}
         {--limite=50 : teto de chamadas reais nesta rodada}
-        {--csv=documentacao/testes/fase6/BATERIA_PEDIDOS.csv : CSV dos pedidos, relativo à raiz do projeto}
-        {--tenant=1 : tenant dos usuários da bateria}';
+        {--csv=documentacao/testes/fase8/BATERIA_CLINICA.csv : CSV dos pedidos, relativo à raiz do projeto}
+        {--tenant=3 : tenant dos usuários da bateria (o da clínica, único do seed)}';
 
     protected $description = 'Roda a bateria de pedidos do agente contra o provedor real e grava o CSV';
 

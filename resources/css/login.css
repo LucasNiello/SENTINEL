@@ -13,21 +13,22 @@
 :focus-visible{outline:2px solid var(--blue);outline-offset:3px}::selection{background:var(--ice);color:var(--night)}
 .skip-link{position:fixed;left:12px;top:12px;z-index:100;background:var(--cream);color:var(--ink);padding:10px 14px;transform:translateY(-160%)}.skip-link:focus{transform:none}
 .visually-hidden{position:absolute!important;height:1px!important;width:1px!important;overflow:hidden!important;clip-path:inset(50%)!important;white-space:nowrap!important}
-.layout{display:grid;grid-template-columns:minmax(0,1.04fr) minmax(0,.96fr);min-height:100svh}
+.layout{display:grid;grid-template-columns:minmax(0,.7fr) minmax(0,1fr);min-height:100svh}
 /* Left: atmospheric but intentionally restrained */
 .visual{position:relative;min-width:0;min-height:100svh;isolation:isolate;overflow:hidden;background:var(--night);color:var(--cloud);padding:clamp(25px,3.1vw,46px) clamp(28px,3.5vw,56px);display:flex;flex-direction:column}
-.visual:before{content:"";position:absolute;inset:0;z-index:-2;background:radial-gradient(ellipse 46% 42% at 78% 50%,rgba(89,133,178,.105),transparent 83%)}
+.visual:before{content:"";position:absolute;inset:0;z-index:-2;background:radial-gradient(ellipse 46% 42% at 73% 50%,rgba(89,133,178,.105),transparent 83%)}
 .visual-shading{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(90deg,rgba(11,17,25,.18),transparent 82%)}
-.brand,.visual-copy,.visual-footer{position:relative;z-index:3;pointer-events:none}
+.brand,.visual-copy{position:relative;z-index:3;pointer-events:none}
 .brand,.mobile-brand{display:flex;align-items:center;gap:10px;font:500 13px/1 var(--display);letter-spacing:.30em;white-space:nowrap}.brand svg,.mobile-brand svg{height:36px;width:28px;color:var(--ice);flex:none}
 .brand,.mobile-brand{width:fit-content;text-decoration:none;pointer-events:auto;transition:opacity .18s}.brand{color:inherit}.brand:hover,.mobile-brand:hover{opacity:.8}.brand:focus-visible{outline-color:var(--ice)}
-.visual-copy{margin-top:clamp(98px,14vh,170px)}.visual-copy h1{font:300 clamp(35px,3.05vw,56px)/1.22 var(--display);letter-spacing:-.055em;margin:0;max-width:510px}.visual-copy h1 span{color:var(--ice)}
-.visual-copy p{margin:20px 0 0;color:var(--muted-dark);font-size:clamp(13px,1.05vw,15px)}
+.visual-copy{margin-block:auto;max-width:44%}.visual-copy:before{content:"";display:block;width:36px;height:1px;margin-bottom:26px;background:var(--ice);opacity:.7}.visual-copy h1{font:300 clamp(28px,2.25vw,42px)/1.2 var(--display);letter-spacing:-.045em;margin:0;text-wrap:balance}.visual-copy h1 span{display:block;color:var(--ice)}
 .art-stage{position:absolute;inset:0;z-index:2;pointer-events:none}
-.stage-halo{position:absolute;left:75%;top:54%;width:min(75%,650px);aspect-ratio:1;border:1px solid rgba(178,208,235,.055);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
+.stage-halo{position:absolute;left:70%;top:54%;width:min(75%,650px);aspect-ratio:1;border:1px solid rgba(178,208,235,.055);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
 .stage-halo:before{content:"";position:absolute;inset:17%;border:1px solid rgba(178,208,235,.045);border-radius:50%}
-.stage-canvas,.stage-fallback{position:absolute;inset:0;pointer-events:none}.stage-canvas canvas{display:block;width:100%;height:100%}.stage-fallback{display:grid;place-items:center;left:34%;opacity:.29}.stage-fallback svg{height:335px;max-width:52%;color:var(--ice)}.visual.is-3d-ready .stage-fallback{display:none}
-.visual-footer{margin-top:auto;color:var(--muted-dark);font-size:12px;letter-spacing:.015em}
+.ceu-meteoros{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.meteoro{position:absolute;height:2px;border-radius:9999px;opacity:0;background:linear-gradient(to left,var(--cream),color-mix(in srgb,var(--ice) 50%,transparent) 35%,transparent);will-change:transform,opacity}
+.meteoro span{position:absolute;right:0;top:50%;width:3px;height:3px;border-radius:9999px;background:var(--cream);box-shadow:0 0 8px 2px color-mix(in srgb,var(--ice) 90%,transparent);transform:translate(50%,-50%)}
+.stage-canvas,.stage-fallback{position:absolute;inset:0;pointer-events:none}.stage-canvas canvas{display:block;width:100%;height:100%}.stage-fallback{display:grid;place-items:center;left:40%;opacity:.29}.stage-fallback svg{height:335px;max-width:52%;color:var(--ice)}.visual.is-3d-ready .stage-fallback{display:none}
 /* Right: fit completely at 100% zoom on everyday laptop screens */
 .access{min-width:0;min-height:100svh;display:flex;flex-direction:column;background:var(--cream);padding:clamp(25px,3.1vw,46px) clamp(28px,4.3vw,76px) 26px}
 .access-header{display:flex;align-items:center;justify-content:flex-end;min-height:36px}.access-tag{font:500 10px/1.4 var(--body);letter-spacing:.13em;color:var(--blue)}.mobile-brand{display:none;color:var(--blue)}.mobile-brand svg{color:var(--blue)}
@@ -48,11 +49,11 @@
 .modal-backdrop{position:fixed;inset:0;z-index:100;background:rgba(7,13,21,.64);display:grid;place-items:center;padding:20px}
 .support-dialog{position:relative;width:min(100%,420px);background:var(--cream);border-radius:9px;padding:35px 32px 30px;box-shadow:0 30px 100px rgba(0,0,0,.2)}
 .dialog-close{position:absolute;right:17px;top:12px;min-width:40px;min-height:40px;background:none;border:0;color:var(--ink);font-size:26px}.support-dialog h2{font:400 26px/1.3 var(--display);letter-spacing:-.04em;margin:0 0 14px}.support-dialog p{font-size:14px;line-height:1.7;color:var(--muted);margin:0 0 25px}.dialog-confirm{border:0;border-radius:5px;background:var(--ink);color:var(--cream);min-height:46px;padding:0 22px}
-@media(max-width:1199px){.layout{grid-template-columns:1fr 1fr}.visual{padding-inline:32px}.access{padding-inline:clamp(28px,3.5vw,42px)}.visual-copy h1{font-size:clamp(35px,3.2vw,46px)}.visual-copy{margin-top:clamp(105px,14vh,152px)}}
+@media(max-width:1199px){.layout{grid-template-columns:minmax(0,.8fr) minmax(0,1fr)}.visual{padding-inline:32px}.access{padding-inline:clamp(28px,3.5vw,42px)}.visual-copy h1{font-size:clamp(24px,2.6vw,30px)}}
 /* Compact login: no second screen or excessive vertical scroll on mobile/tablet. */
 @media(max-width:900px){.layout{display:block}.visual{display:none}.access{min-height:100svh;padding:26px clamp(24px,7vw,72px)}.access-header{justify-content:space-between}.mobile-brand{display:flex}.access-main{padding:40px 0}.form-card{width:min(100%,405px)}.form-card h2{font-size:clamp(38px,5vw,48px)}}
 @media(max-width:520px){.access{padding:21px 23px 20px}.mobile-brand{font-size:12px;letter-spacing:.22em}.mobile-brand svg{height:30px;width:25px}.access-tag{font-size:9px}.access-main{padding:37px 0 48px}.form-card h2{font-size:40px}.form-subtitle{margin-bottom:28px}.access-footer{font-size:10px}.support-dialog{padding:34px 22px 24px}}
-@media(max-height:690px) and (min-width:901px){.visual,.access{padding-top:23px;padding-bottom:18px}.visual-copy{margin-top:clamp(45px,9vh,90px)}.visual-copy h1{font-size:clamp(34px,2.75vw,49px)}.visual-copy p{margin-top:12px}.access-main{padding:13px 0}.form-subtitle{margin-bottom:22px}#login-form{gap:13px}.help-link{margin-top:10px}}
+@media(max-height:690px) and (min-width:901px){.visual,.access{padding-top:23px;padding-bottom:18px}.access-main{padding:13px 0}.form-subtitle{margin-bottom:22px}#login-form{gap:13px}.help-link{margin-top:10px}}
 /* Celular (T3, 14/11): corpo >= 15 px, toque >= 44 px; rótulos em caixa alta podem ficar em 12 px. Veio de public/css/sentinel-login-extra.css. */
 /* F3 do front (14/11): os mesmos tamanhos valem em qualquer largura (skill §3: nada abaixo de 15 px, rótulo em caixa alta 12 px). */
 @media all {
@@ -64,9 +65,20 @@
 @media (max-width:900px) {
     .mobile-brand {min-height:44px;display:inline-flex;align-items:center}
 }
-@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+@media(prefers-reduced-motion:reduce){.ceu-meteoros{display:none}*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
   
 /* Shared symbol: preserve the approved login window and beam colors. */
 .lighthouse-window{fill:var(--cream)}
 .lighthouse-beam{fill:currentColor}
+
+/* Cortina de carregamento (resources/js/revelacao.js). Sem JS, some sozinha em 4 s. */
+.revelacao{position:fixed;inset:0;z-index:200;pointer-events:none;animation:revelacao-seguranca 0s linear 4s forwards}
+.revelacao-metade{position:absolute;left:0;right:0;height:50.5%;background:var(--night)}.revelacao-cima{top:0}.revelacao-baixo{bottom:0}
+.revelacao-progresso{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;justify-items:center;gap:14px;width:min(240px,60vw);transition:opacity 280ms ease}
+.revelacao-trilho{width:100%;height:1px;background:color-mix(in srgb,var(--ice) 18%,transparent);overflow:hidden}.revelacao-trilho span{display:block;height:100%;background:var(--ice);transform:scaleX(var(--progresso,0));transform-origin:left;transition:transform 300ms ease}
+.revelacao-contagem{color:var(--muted-dark);font:12px/1 "IBM Plex Mono",Consolas,monospace;letter-spacing:.14em;font-variant-numeric:tabular-nums}
+.revelacao[data-fase] .revelacao-progresso{opacity:0}
+.revelacao[data-fase=abrir] .revelacao-cima{animation:revelacao-cima 400ms cubic-bezier(.76,0,.24,1) forwards}.revelacao[data-fase=abrir] .revelacao-baixo{animation:revelacao-baixo 400ms cubic-bezier(.76,0,.24,1) forwards}
+@keyframes revelacao-cima{to{transform:translate3d(0,-100%,0)}}@keyframes revelacao-baixo{to{transform:translate3d(0,100%,0)}}@keyframes revelacao-seguranca{to{visibility:hidden}}
+@media(prefers-reduced-motion:reduce){.revelacao{display:none}}

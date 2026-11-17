@@ -76,7 +76,7 @@ export function mountLoginLighthouse() {
             camera.aspect = width / height;
             camera.position.set(8.1, 7.3, 15.5);
             camera.lookAt(0, 2.82, 0);
-            camera.setViewOffset(width, height, -width * .245, 0, width, height);
+            camera.setViewOffset(width, height, -width * .2, 0, width, height);
             camera.updateProjectionMatrix();
             try { renderer.render(scene, camera); } catch { fallback(); }
         }

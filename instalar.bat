@@ -526,14 +526,13 @@ try {
     Ok 'Health check /up: HTTP 200'; Write-Host "`nServidor: $url"
     if ($env:SENTINEL_NO_BROWSER -ne '1') { Write-Host 'Abrindo navegador...'; Start-Process $url }; Ok 'SENTINEL pronto'; $exitCode=0
     # Demonstracao: nunca roda sozinha; a senha e digitada oculta e nao vai para o historico do PowerShell.
-    Write-Host "`nDados de demonstracao (opcional): no PowerShell, na pasta $root, rode:"
+    Write-Host "`nDados da clinica (cadastros de teste; contas novas com a senha digitada, contas existentes preservadas): no PowerShell, na pasta $root, rode:"
     Write-Host (@'
 $s = Read-Host "Senha da demo" -AsSecureString
 $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
 try {
     $env:DEMO_SENHA = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
-    & "{php}" artisan db:seed --class=DemonstracaoSeeder
-    & "{php}" artisan db:seed --class=ClinicaSeeder
+    & "{php}" artisan db:seed
 } finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b)
     Remove-Item Env:DEMO_SENHA -ErrorAction SilentlyContinue

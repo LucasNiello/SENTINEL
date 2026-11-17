@@ -1,4 +1,5 @@
 import { smooth, storyPose } from './lighthouse/motion';
+import { montarCeuMeteoros } from './meteoros';
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const stage = document.querySelector('[data-stage]');
@@ -36,6 +37,9 @@ async function startScene() {
 }
 reducedMotion.addEventListener('change', startScene);
 startScene();
+
+// Céu de meteoros atrás do farol.
+montarCeuMeteoros(document.querySelector('#ceu-meteoros'));
 
 const chapters = [...document.querySelectorAll('[data-chapter]')];
 const header = document.querySelector('.site-header');

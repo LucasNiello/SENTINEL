@@ -31,7 +31,7 @@ class ClinicaSeederTest extends TestCase
         parent::setUp();
         $this->travelTo(Carbon::parse('2026-11-10 08:00', 'America/Sao_Paulo'));
         $this->definirSenha(self::SENHA);
-        if ($this->name() !== 'test_sem_demo_senha_ou_com_senha_fraca_nada_e_gravado') {
+        if (! in_array($this->name(), ['test_sem_demo_senha_ou_com_senha_fraca_nada_e_gravado', 'test_saida_do_seed_nao_mostra_a_demo_senha', 'test_tenant_fora_da_config_da_clinica_nada_e_gravado'], true)) {
             $this->seed(ClinicaSeeder::class);
         }
     }
@@ -60,7 +60,7 @@ class ClinicaSeederTest extends TestCase
     {
         $usuarios = User::where('tenant_id', self::T)->get();
 
-        $this->assertCount(6, $usuarios); // T1: mais a conta Administrador
+        $this->assertCount(11, $usuarios);
         foreach ($usuarios as $usuario) {
             $this->assertNotSame(self::SENHA, $usuario->getRawOriginal('password'));
             $this->assertTrue(Hash::check(self::SENHA, $usuario->password), $usuario->email);
@@ -82,35 +82,68 @@ class ClinicaSeederTest extends TestCase
         $this->assertSame(0, User::count() + Tutor::count() + CatalogoItem::count());
     }
 
+    public function test_tenant_fora_da_config_da_clinica_nada_e_gravado(): void
+    {
+        config(['sentinel.tenants_clinica' => [4]]);
+
+        try {
+            (new ClinicaSeeder)->run();
+            $this->fail('Deveria recusar o tenant fora de SENTINEL_TENANTS_CLINICA.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('SENTINEL_TENANTS_CLINICA', $e->getMessage());
+        }
+
+        $this->assertSame(0, User::count() + Tutor::count() + CatalogoItem::count());
+    }
+
+    public function test_saida_do_seed_nao_mostra_a_demo_senha(): void
+    {
+        $this->artisan('db:seed', ['--class' => ClinicaSeeder::class])
+            ->doesntExpectOutputToContain(self::SENHA)
+            ->expectsOutputToContain('Senha: a de DEMO_SENHA')
+            ->assertSuccessful();
+    }
+
     public function test_rodar_de_novo_com_outra_demo_senha_nao_troca_a_senha_de_quem_ja_existe(): void
     {
-        $hash = User::where('email', 'dono@clinica.sentinel.local')->value('password');
+        $hash = User::where('email', 'vet1@clinica.sentinel.br')->value('password');
 
         $this->definirSenha('Outra-Senha-Forte-99');
         $this->seed(ClinicaSeeder::class);
 
-        $this->assertSame($hash, User::where('email', 'dono@clinica.sentinel.local')->value('password'));
+        $this->assertSame($hash, User::where('email', 'vet1@clinica.sentinel.br')->value('password'));
     }
 
-    public function test_fica_fora_do_database_seeder(): void
+    public function test_database_seeder_planta_so_a_clinica_num_tenant(): void
     {
-        $this->assertStringNotContainsString('ClinicaSeeder', file_get_contents(database_path('seeders/DatabaseSeeder.php')));
+        // 17/11: um único tenant. O DatabaseSeeder chama só o ClinicaSeeder e é o único outro seeder da pasta.
+        $this->assertStringContainsString('ClinicaSeeder::class', file_get_contents(database_path('seeders/DatabaseSeeder.php')));
+        $this->assertEqualsCanonicalizing(['ClinicaSeeder.php', 'DatabaseSeeder.php'], array_map('basename', glob(database_path('seeders/*.php'))));
+        $this->assertSame([self::T], User::query()->distinct()->pluck('tenant_id')->map(fn ($t) => (int) $t)->all());
     }
 
-    public function test_um_usuario_por_papel_e_dono_e_veterinario_com_crmv(): void
+    public function test_contas_por_setor_e_veterinarios_com_crmv(): void
     {
         $usuarios = User::where('tenant_id', self::T)->orderBy('papel')->get();
+        $login = fn (User $u) => \Illuminate\Support\Str::before($u->email, '@');
 
-        $this->assertSame(['admin', 'atendente', 'dono', 'recepcao', 'vendedor', 'veterinario'], $usuarios->pluck('papel')->all());
-        // T1: a conta Administrador nasce sem PIN e sem setor (ela só gera e revoga os PINs dos outros).
-        $this->assertSame([null, null], [$usuarios->firstWhere('papel', 'admin')->supervisor_setor, $usuarios->firstWhere('papel', 'admin')->pin_autorizacao]);
-        $this->assertSame(['dono', 'veterinario'], $usuarios->whereNotNull('crmv')->pluck('papel')->values()->all());
+        $this->assertSame(['admin' => 1, 'atendente' => 2, 'dono' => 1, 'recepcao' => 3, 'vendedor' => 2, 'veterinario' => 2], $usuarios->countBy('papel')->all());
+        $this->assertEqualsCanonicalizing(['vet1', 'vet2', 'vet3', 'recepcao1', 'recepcao2', 'recepcao3', 'estetica1', 'estetica2', 'vendas1', 'vendas2', 'administracao'],
+            $usuarios->map($login)->all());
+        $this->assertTrue($usuarios->every(fn ($u) => str_ends_with($u->email, '@clinica.sentinel.br')));
+        $this->assertSame('dono', $usuarios->first(fn ($u) => $login($u) === 'vet1')->papel);
+        $this->assertEqualsCanonicalizing(['vet1', 'vet2', 'vet3'], $usuarios->whereNotNull('crmv')->map($login)->values()->all());
+
+        // A Administração nasce sem PIN e sem setor (por enquanto só gera e revoga os PINs dos outros).
+        $administracao = $usuarios->firstWhere('papel', 'admin');
+        $this->assertSame(['administracao@clinica.sentinel.br', null, null], [$administracao->email, $administracao->supervisor_setor, $administracao->pin_autorizacao]);
     }
 
     public function test_cadastros_e_catalogo_dos_dois_setores_com_farmacia(): void
     {
         $this->assertSame(8, Tutor::where('tenant_id', self::T)->count());
-        $this->assertSame(12, Pet::where('tenant_id', self::T)->count());
+        $this->assertSame(5, Pet::where('tenant_id', self::T)->count());
+        $this->assertSame(3, Tutor::where('tenant_id', self::T)->doesntHave('pets')->whereHas('vendas')->count(), 'clientes só da loja');
         $this->assertTrue(CatalogoItem::where('tenant_id', self::T)->where('setor', 'petshop')->exists());
         $this->assertTrue(CatalogoItem::where('tenant_id', self::T)->where('categoria', 'farmacia')->where('exige_receita', true)->exists());
         $this->assertTrue(CatalogoItem::where('tenant_id', self::T)->where('cobranca_por', 'diaria')->exists());

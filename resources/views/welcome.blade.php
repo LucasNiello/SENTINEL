@@ -29,6 +29,7 @@
         <div class="story" data-story>
             <div class="lighthouse-stage" data-stage aria-hidden="true">
                 <div class="stage-halo"></div>
+                <div id="ceu-meteoros" class="ceu-meteoros" aria-hidden="true"></div>
                 <div class="lighthouse-fallback"><x-lighthouse class="hero-symbol" /></div>
                 <div class="lighthouse-canvas" data-canvas></div>
                 <div class="scene-light-wash"></div>
