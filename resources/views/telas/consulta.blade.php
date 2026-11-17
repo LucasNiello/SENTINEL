@@ -141,6 +141,15 @@
             formConsulta.requestSubmit();
         });
 
+        // Cadastros › Pets e tutores (15/11): cada linha leva à ficha (tela de leitura; a rota confere papel e tenant).
+        window.linkDaLinha = (linha) => {
+            if (!Number.isInteger(linha.id)) return null;
+            const consulta = entidadeAtual().consultar;
+            if (consulta === 'consultar_pets') return { href: '/pets/' + linha.id, rotulo: 'Ver ficha' };
+            if (consulta === 'consultar_tutores') return { href: '/tutores/' + linha.id, rotulo: 'Ver ficha' };
+            return null;
+        };
+
         botaoNovo.addEventListener('click', () => abrirFormulario(entidadeAtual().criar, null, botaoNovo));
 
         if (seletorEntidade) {

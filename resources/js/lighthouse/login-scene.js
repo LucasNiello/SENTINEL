@@ -5,9 +5,10 @@ import { sceneQuality } from './quality';
 export const LANTERN_SECONDS_PER_TURN = 15;
 const TAU = Math.PI * 2;
 
-// Same rule as the vitrine: only the lamp group turns; tower and dome stay still.
-export function loginLanternAngle(seconds) {
-    return .9 + TAU * (seconds % LANTERN_SECONDS_PER_TURN) / LANTERN_SECONDS_PER_TURN;
+// Só a lanterna gira; torre, grade, janelas e teto ficam parados (igual à vitrine).
+export function loginAngles(seconds) {
+    const lantern = .9 + TAU * (seconds % LANTERN_SECONDS_PER_TURN) / LANTERN_SECONDS_PER_TURN;
+    return { lantern };
 }
 
 export function mountLoginLighthouse() {
@@ -88,7 +89,8 @@ export function mountLoginLighthouse() {
             previous = now;
             if (now - lastRender < 1000 / sceneQuality().fps) return;
             lastRender = now;
-            model.rotating.rotation.y = loginLanternAngle(elapsed);
+            const angles = loginAngles(elapsed);
+            model.rotating.rotation.y = angles.lantern;
             try { renderer.render(scene, camera); } catch { fallback(); }
         }
         function sync() {
@@ -130,7 +132,7 @@ export function mountLoginLighthouse() {
             resize();
             if (disposed) return;
             panel.classList.add('is-3d-ready');
-            status.textContent = 'Farol 3D com rotação automática da luz.';
+            status.textContent = 'Farol 3D com a luz girando.';
             sync();
         } catch { fallback(); }
     }

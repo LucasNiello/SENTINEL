@@ -59,6 +59,7 @@ trait ConstrutoresDeTool
         string $buscaPor = 'nome',
         ?string $requestAtualizar = null,
         array $mensagens = [],
+        ?Closure $resumirAtualizar = null, // 15/11: leitura extra no card de alterar (ex.: os pets do tutor)
     ): array {
         $regrasCriar = (new $requestCriar)->rules();
         $regrasAtualizar = (new ($requestAtualizar ?? $requestCriar))->rules();
@@ -110,6 +111,7 @@ trait ConstrutoresDeTool
                 titulo: $tituloAtualizar,
                 sucesso: $sucessoAtualizar,
                 mensagens: $mensagens,
+                resumir: $resumirAtualizar,
             ),
         ];
     }
@@ -156,6 +158,11 @@ trait ConstrutoresDeTool
         string $rotuloAcao = '',
         ?array $campos = null,
         ?Closure $resumir = null,
+        bool|string $reautenticar = false, // H: 'estorno' = o card confere o PIN do supervisor ou do dono (T1)
+        ?array $colunasLista = null, // 15/11: colunas da lista de escolha (vários candidatos); null = ['id', colunaRotulo]
+        ?Closure $preparar = null, // 15/11: ajusta os argumentos da proposta no servidor, depois do localizar (ver definirTool)
+        bool $comVersao = false, // 15/11: a execução recebe a "versao" da ficha (o updated_at de quando abriu) em $dados
+        ?Closure $exigeCrmv = null, // 15/11: o Confirmar pede CRMV + senha do próprio usuário quando a closure diz (cirurgia)
     ): array {
         $regras = (new $formRequest)->rules();
         $regrasDoFormulario = $campos === null ? $regras : array_intersect_key($regras, array_flip($campos));
@@ -164,6 +171,7 @@ trait ConstrutoresDeTool
             $propriedades = [
                 'id' => ['type' => 'integer', 'description' => 'Número (id) do registro, se o usuário informou.'],
                 'busca' => ['type' => 'string', 'description' => Str::ucfirst($buscaPor).', quando o número não foi informado.'],
+                ...\App\Services\AiAgentService::PROPRIEDADE_POSICAO, // P-C1
                 ...$propriedades,
             ];
         }
@@ -178,8 +186,13 @@ trait ConstrutoresDeTool
             papeis: $papeis,
             propriedades: $propriedades,
             obrigatorios: $obrigatorios,
-            executar: function (array $a) use ($regras, $mensagens, $executar) {
+            executar: function (array $a) use ($regras, $mensagens, $executar, $comVersao) {
                 $dados = $this->inteiros($this->validar($a, $regras, $mensagens), $regras);
+                // A versão vem do rascunho (o servidor a pôs ao localizar; o navegador não a altera). Sem ela, '' nunca
+                // bate com o updated_at: a gravação é recusada (falha fechada).
+                if ($comVersao) {
+                    $dados['versao'] = is_string($a['versao'] ?? null) ? $a['versao'] : '';
+                }
 
                 return $executar($dados, (int) $a['tenant_id'], $this->contexto->usuario());
             },
@@ -197,6 +210,10 @@ trait ConstrutoresDeTool
             rotuloAcao: $rotuloAcao,
             resumir: $resumir,
             regrasRevisar: $regras,
+            reautenticar: $reautenticar,
+            colunasLista: $colunasLista,
+            preparar: $preparar,
+            exigeCrmv: $exigeCrmv,
         );
     }
 

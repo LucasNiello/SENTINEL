@@ -15,7 +15,7 @@ use Tests\TestCase;
 /**
  * B2 (RF05/RNF05) — modo manual sem IA: listar e buscar cada entidade pelo
  * /agente/consultar e abrir os formulários pelo /agente/formulario, com o mesmo
- * RBAC, tenant, máscara, Revisar → segurar e auditoria. A Azure simulada fica
+ * RBAC, tenant, máscara, Revisar → segurar e auditoria. A Anthropic simulada fica
  * FORA DO AR em todos os testes: nenhum passo do modo manual depende dela.
  */
 class ModoManualTest extends TestCase
@@ -28,7 +28,6 @@ class ModoManualTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         Http::fake(fn () => throw new ConnectionException('fora do ar'));
         $this->usuario = $this->logarComo('operador', 1);
     }
@@ -38,7 +37,7 @@ class ModoManualTest extends TestCase
         return $this->postJson('/agente/consultar', ['tool' => $tool, 'filtros' => $filtros]);
     }
 
-    public function test_com_a_azure_fora_do_ar_lista_busca_cadastra_e_exporta(): void
+    public function test_com_a_ia_fora_do_ar_lista_busca_cadastra_e_exporta(): void
     {
         // A IA está mesmo fora: o agente responde com erro.
         $this->postJson('/agente/comando', ['mensagem' => 'liste os clientes'])->assertStatus(503)->assertJsonPath('tipo', 'erro');

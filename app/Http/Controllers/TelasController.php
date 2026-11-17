@@ -62,6 +62,11 @@ class TelasController extends Controller
 
     public function cadastros()
     {
+        // T1: o Administrador da clínica só gerencia PINs.
+        if ($this->contexto->ehAdminDaClinica()) {
+            return redirect('/supervisao');
+        }
+
         // "Novo" só aparece para quem pode cadastrar aquela entidade (o /agente/formulario confere de novo).
         $cadastros = $this->contexto->dominio() === 'clinica' ? self::CADASTROS_CLINICA : self::CADASTROS;
         $entidades = array_map(fn (array $e) => [...$e, 'criar' => $this->agente->podeExecutar($e['criar']) ? $e['criar'] : null], $cadastros);
@@ -87,6 +92,27 @@ class TelasController extends Controller
         ]);
     }
 
+    /**
+     * Item I (clínica vet), T1 (14/11): o dono marca e desmarca os supervisores de setor; o Administrador e o dono geram e revogam
+     * o PIN do dono e dos supervisores. Só monta a página: as rotas JSON /supervisao/* conferem dono, Administrador,
+     * tenant e a senha de login de novo. Fora da clínica não existe (404, como as rotas JSON); os outros papéis não
+     * têm o que fazer aqui (403), nem o supervisor (o PIN dele vem do dono ou do Administrador).
+     */
+    public function supervisao()
+    {
+        abort_unless($this->contexto->dominio() === 'clinica', 404);
+
+        $ehDono = $this->contexto->ehDono();
+        $ehAdmin = $this->contexto->ehAdminDaClinica();
+        abort_unless($ehDono || $ehAdmin, 403);
+
+        return view('telas.supervisao', [
+            'ehDono' => $ehDono,
+            'ehAdmin' => $ehAdmin,
+            'rotulosPapeis' => (array) config('sentinel.rotulos_papeis', []),
+        ]);
+    }
+
     public function auditoria(ConsultaAuditoria $consulta)
     {
         try {
@@ -99,7 +125,8 @@ class TelasController extends Controller
         return view('telas.auditoria', [
             'usuarios' => User::query()->where('tenant_id', $this->contexto->tenantId())->orderBy('name')->pluck('name', 'id')->all(),
             'resultados' => ConsultaAuditoria::resultados(),
-            'tools' => [...array_column(array_column($this->agente->tools(), 'function'), 'name'), ConsultaAuditoria::TOOL],
+            'tools' => [...array_column(array_column($this->agente->tools(), 'function'), 'name'), ConsultaAuditoria::TOOL,
+                ...($this->contexto->dominio() === 'clinica' ? [ClinicaTelasController::TOOL_FICHA, ClinicaTelasController::TOOL_FICHA_TUTOR, ClinicaTelasController::TOOL_RESULTADOS] : [])],
         ]);
     }
 }

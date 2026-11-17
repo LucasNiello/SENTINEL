@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use Database\Seeders\ClinicaSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
@@ -12,19 +13,18 @@ class PrepararAcessoLocalTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_cria_admin_com_senha_aleatoria_valida_e_preserva_na_segunda_execucao(): void
+    public function test_cria_a_administracao_da_clinica_com_senha_aleatoria_e_preserva_na_segunda_execucao(): void
     {
         $this->app->detectEnvironment(fn () => 'local');
 
         $this->assertSame(0, Artisan::call('sentinel:preparar-acesso'));
-        $output = Artisan::output();
-        preg_match('/Senha temporária: (.+)/u', $output, $matches);
+        preg_match('/Senha temporária: (.+)/u', Artisan::output(), $matches);
         $senha = trim($matches[1]);
         $usuario = User::query()->sole();
 
-        $this->assertSame('admin@sentinel.local', $usuario->email);
+        $this->assertSame('administracao@clinica.sentinel.br', $usuario->email);
         $this->assertSame('admin', $usuario->papel);
-        $this->assertSame(1, $usuario->tenant_id);
+        $this->assertSame(ClinicaSeeder::TENANT, $usuario->tenant_id);
         $this->assertSame(24, strlen($senha));
         $this->assertNotSame($senha, $usuario->password);
         $this->assertTrue(Hash::check($senha, $usuario->password));
@@ -40,10 +40,10 @@ class PrepararAcessoLocalTest extends TestCase
         $this->assertSame($original, $usuario->fresh()->getAttributes());
     }
 
-    public function test_admin_apropriado_existente_e_preservado_sem_criar_outro(): void
+    public function test_admin_da_clinica_existente_e_preservado_sem_criar_outro(): void
     {
         $this->app->detectEnvironment(fn () => 'local');
-        $usuario = User::factory()->papel('admin')->doTenant(7)->create();
+        $usuario = User::factory()->papel('admin')->doTenant(ClinicaSeeder::TENANT)->create();
         $original = $usuario->fresh()->getAttributes();
 
         $this->artisan('sentinel:preparar-acesso')->assertSuccessful();
@@ -52,10 +52,20 @@ class PrepararAcessoLocalTest extends TestCase
         $this->assertSame($original, $usuario->fresh()->getAttributes());
     }
 
-    public function test_email_local_ocupado_nao_e_promovido_ou_redefinido(): void
+    public function test_admin_de_outro_tenant_nao_conta(): void
     {
         $this->app->detectEnvironment(fn () => 'local');
-        $usuario = User::factory()->papel('leitura')->doTenant(2)->create(['email' => 'admin@sentinel.local']);
+        User::factory()->papel('admin')->doTenant(7)->create();
+
+        $this->artisan('sentinel:preparar-acesso')->assertSuccessful();
+
+        $this->assertDatabaseHas('users', ['email' => 'administracao@clinica.sentinel.br', 'papel' => 'admin', 'tenant_id' => ClinicaSeeder::TENANT]);
+    }
+
+    public function test_email_ocupado_nao_e_promovido_ou_redefinido(): void
+    {
+        $this->app->detectEnvironment(fn () => 'local');
+        $usuario = User::factory()->papel('leitura')->doTenant(2)->create(['email' => 'administracao@clinica.sentinel.br']);
         $original = $usuario->fresh()->getAttributes();
 
         $this->artisan('sentinel:preparar-acesso')->assertFailed();
@@ -64,29 +74,21 @@ class PrepararAcessoLocalTest extends TestCase
         $this->assertSame($original, $usuario->fresh()->getAttributes());
     }
 
-    public function test_exemplos_tem_senhas_distintas_e_preserva_todos_ao_repetir(): void
+    public function test_tenant_fora_da_config_da_clinica_falha_fechado(): void
     {
         $this->app->detectEnvironment(fn () => 'local');
-        $this->assertSame(0, Artisan::call('sentinel:preparar-acesso', ['--exemplos' => true]));
-        preg_match_all('/Senha temporária: (.+)/u', Artisan::output(), $matches);
-        $senhas = array_map('trim', $matches[1]);
-        $this->assertCount(4, array_unique($senhas));
-        $usuarios = User::query()->orderBy('id')->get();
-        foreach ($usuarios as $index => $usuario) {
-            $this->assertTrue(Hash::check($senhas[$index], $usuario->password));
-        }
-        $original = $usuarios->map->getAttributes()->all();
+        config(['sentinel.tenants_clinica' => [4]]);
 
-        $this->assertSame(0, Artisan::call('sentinel:preparar-acesso', ['--exemplos' => true]));
-        $this->assertStringNotContainsString('Senha temporária:', Artisan::output());
-        $this->assertSame($original, User::query()->orderBy('id')->get()->map->getAttributes()->all());
+        $this->artisan('sentinel:preparar-acesso')->assertFailed();
+
+        $this->assertDatabaseEmpty('users');
     }
 
     public function test_ambientes_nao_locais_nao_criam_usuarios(): void
     {
         foreach (['production', 'staging', 'testing'] as $ambiente) {
             $this->app->detectEnvironment(fn () => $ambiente);
-            $this->artisan('sentinel:preparar-acesso', ['--exemplos' => true])->assertFailed();
+            $this->artisan('sentinel:preparar-acesso')->assertFailed();
         }
 
         $this->assertDatabaseEmpty('users');

@@ -1,0 +1,4 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria;papel;argumentos
+33;cadastro;"cadastra o tutor Marcos Pereira, telefone 19 99333-1212";"criar_tutor / confirmacao_pendente";criar_tutor;S;confirmacao_pendente;;1069;1;;recepcao;"{""nome"":""Marcos Pereira"",""telefone"":""19 99333-1212""}"
+34;continuacao;"agora cadastra a gata Mimi pra esse mesmo tutor";"criar_pet / confirmacao_pendente";criar_pet;S;confirmacao_pendente;;2079;1;;recepcao;"{""tutor_id"":11,""nome"":""Mimi"",""especie"":""gato"",""sexo"":""femea""}"
+36;caixa;"Mensagem da caixa de entrada (tutor #1; pets: Thor = pet #1, Mel = pet #2): ""Oi! Queria remarcar o banho do Thor para sábado, pode ser?""";"agendar_atendimento / confirmacao_pendente";agendar_atendimento;S;confirmacao_pendente;;4897;1;;recepcao;"{""pet_id"":1}"

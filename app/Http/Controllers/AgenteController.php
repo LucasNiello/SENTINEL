@@ -85,14 +85,27 @@ class AgenteController extends Controller
         }
 
         $mensagem = $validador->validated()['mensagem'];
+
+        // T1 (resposta F): o Administrador da clínica só gerencia PINs; nenhum pedido dele vai à IA (nem gasta chamada).
+        if (app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica()) {
+            return response()->json(['tipo' => 'negado', 'categoria' => 'authorization_error', 'codigo' => 'AI_FORBIDDEN', 'http_status' => 403,
+                'mensagem' => 'O Administrador só gera e revoga os PINs, na tela Supervisão.'], 403);
+        }
+
         try {
-            $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()));
+            $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()), $this->conversa->lerLista($request->session()));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
             $resposta = $this->aiAgentService->erroTecnicoTool($e);
         }
         $this->conversa->guardar($request->session(), $mensagem, $resposta);
+
+        // P-C1: a tabela mostrada fica congelada na sessão (ids em ordem); o front não recebe esta chave.
+        if (isset($resposta['lista'])) {
+            $this->conversa->guardarLista($request->session(), $resposta['lista']);
+            unset($resposta['lista']);
+        }
 
         // A3: a consulta (tool + argumentos) fica na sessão; o front só recebe o id para o Exportar.
         if (isset($resposta['consulta'])) {
@@ -119,8 +132,9 @@ class AgenteController extends Controller
      * Bloco 2b: o humano revisa o formulário e o servidor valida sem gravar (RBAC,
      * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
      * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
-     * revisados ficam na sessão e sai o token de segurar — daí correm os prazos de
-     * sempre (2 a 12 s), e o /confirmar só usa estes valores.
+     * revisados ficam na sessão e sai o token de confirmação (uso único, até o fim
+     * dos 5 min da proposta), e o /confirmar só usa estes valores. "segurar" diz à
+     * tela se o Confirmar pede o gesto de 2 s (ações destrutivas; decisão B, 13/11).
      *
      * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.
      */
@@ -149,12 +163,24 @@ class AgenteController extends Controller
         }
 
         $tool = $rascunho['tool'];
-        $revisados = $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores);
+        // T2: as linhas do estorno só com item_id e quantidade (nada a mais do navegador vai para a sessão ou a auditoria).
+        $revisados = $this->aiAgentService->limparLinhasDoEstorno($tool, $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores));
 
         try {
             $recusa = $this->aiAgentService->revisar($tool, $revisados, ConfirmacoesPendentes::propostos($rascunho), ConfirmacoesPendentes::origem($rascunho),
                 ConfirmacoesPendentes::tempoIa($rascunho), ConfirmacoesPendentes::loteIds($rascunho));
             $formulario = $recusa === null ? null : $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'] ?? [], ConfirmacoesPendentes::loteIds($rascunho));
+            // T2: o plano do estorno que o card vai mostrar fica congelado em linhas explícitas (o Confirmar não recalcula "tudo").
+            if ($recusa === null) {
+                try {
+                    $revisados = $this->aiAgentService->congelarEstorno($tool, $revisados);
+                } catch (\App\Exceptions\RegraDeNegocioException $e) {
+                    // Corrida entre o conferir e o congelar (ex.: outro estorno esgotou o registro): a frase de negócio, não um 500.
+                    $recusa = ['tipo' => 'erro', 'categoria' => 'business_rule', 'codigo' => 'AI_BUSINESS_RULE', 'http_status' => 422,
+                        'mensagem' => $e->getMessage(), 'erros' => ['_acao' => $e->getMessage()]];
+                    $formulario = $this->aiAgentService->formulario($tool, $revisados, $recusa['erros'], ConfirmacoesPendentes::loteIds($rascunho));
+                }
+            }
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -180,11 +206,20 @@ class AgenteController extends Controller
                 'formulario' => $formulario], $recusa['http_status'] ?? 422);
         }
 
+        // T2: no estorno por itens, o card mostra de novo o que vai ser estornado, com os valores REVISADOS (o humano pode
+        // ter mudado o modo ou as quantidades), antes do segurar.
+        // Só nas tools do estorno: nas outras, o resumo pode rodar uma prévia (transação desfeita) sem necessidade.
+        $refeito = $this->aiAgentService->tipoReautenticacao($tool) === 'estorno' || $this->aiAgentService->avisaNoRevisar($tool)
+            ? $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho)) : null;
+
         return response()->json([
             'tipo' => 'revisada',
             'proposta' => $proposta,
             'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
             'risco' => $this->aiAgentService->risco($tool),
+            'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados),
+            // Agendar e remarcar: o aviso "já há N agendamentos neste horário" vale para o horário REVISADO, antes do confirmar.
+            ...($refeito !== null && (isset($refeito['itens_estorno']) || isset($refeito['avisos']) || $this->aiAgentService->avisaNoRevisar($tool)) ? ['formulario' => $refeito] : []),
         ]);
     }
 
@@ -224,14 +259,12 @@ class AgenteController extends Controller
 
         // Desfecho da proposta: o rascunho dela também sai da sessão (R3).
         $this->pendentes->encerrar($request->session(), $proposta);
-        $decorrido = $this->pendentes->decorrido($pendente);
 
-        // Fora do prazo: antes da espera mínima, ou vencido (12 s do token ou os 5 min absolutos do rascunho).
-        if ($decorrido < ConfirmacoesPendentes::ESPERA_MINIMA_S || $this->pendentes->expirou($pendente)) {
-            [$desfecho, $motivo] = $this->pendentes->expirou($pendente)
-                ? ['expirado', 'Confirmação recebida fora do prazo. Nada foi gravado.']
-                : ['recusado', 'Confirmação antes da espera mínima. Nada foi gravado.'];
-            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
+        // Decisão B (13/11): não há espera mínima nem validade de 12 s; só os 5 min absolutos da proposta. O segurar
+        // de 2 s é gesto visual (ações destrutivas); o que o servidor garante é token único e valores da sessão.
+        if ($this->pendentes->expirou($pendente)) {
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'expirado',
+                'Confirmação recebida fora do prazo. Nada foi gravado.', ConfirmacoesPendentes::origem($pendente),
                 entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
@@ -243,20 +276,35 @@ class AgenteController extends Controller
         // aqui). Sem permissão, a senha nem é conferida nem gasta tentativa: a execução abaixo nega pelo
         // papel, com a mesma resposta para senha certa ou errada (o card não serve de verificador de senha).
         $autorizadoPor = null;
+        $conferencia = null;
 
         if ($this->aiAgentService->exigeReautenticacao($pendente['tool']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
-            $autorizacao = $this->reautenticar($request);
+            // H, T1: o estorno é autorizado pelo PIN do supervisor ou do dono (mesmos campos do card e mesmos limites).
+            $estorno = $this->aiAgentService->tipoReautenticacao($pendente['tool']) === 'estorno';
+            $autorizacao = $this->reautenticar($request, $estorno ? 'estorno' : 'admin');
 
             if (! isset($autorizacao['admin'])) {
-                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha']);
+                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], $estorno ? 'estorno' : 'admin');
             }
 
             $autorizadoPor = $autorizacao['admin'];
+            $conferencia = $estorno ? 'pin' : 'senha de admin';
+        } elseif ($this->aiAgentService->exigeCrmv($pendente['tool'], $pendente['argumentos']) && $this->aiAgentService->podeExecutar($pendente['tool'])) {
+            // 15/11: cirurgia e internação. O próprio usuário confirma com o CRMV do perfil e a senha (mesmos campos do
+            // card: "email_admin" leva o CRMV e "senha_admin" a senha). A regra do CRMV é conferida de novo no service.
+            $autorizacao = $this->reautenticar($request, 'crmv');
+
+            if (! isset($autorizacao['admin'])) {
+                return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], 'crmv');
+            }
+
+            $autorizadoPor = $autorizacao['admin'];
+            $conferencia = 'crmv+senha';
         }
 
         try {
             $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
-                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente), ConfirmacoesPendentes::loteIds($pendente));
+                ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente), ConfirmacoesPendentes::loteIds($pendente), $conferencia);
         } catch (InvalidArgumentException $e) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -267,7 +315,7 @@ class AgenteController extends Controller
 
         // O agente passa a saber que a escrita aconteceu: só a frase fixa do servidor, sem valores.
         if (($resultado['tipo'] ?? null) === 'resultado_escrita') {
-            $this->conversa->registrarResultado($request->session(), $resultado['mensagem']);
+            $this->conversa->registrarResultado($request->session(), $resultado['mensagem'], $this->idGravado($resultado));
         }
 
         $status = $resultado['http_status'] ?? match ($resultado['tipo'] ?? null) {
@@ -317,8 +365,8 @@ class AgenteController extends Controller
      *
      * Contrato: { "token": "<uuid de segurar>" } ou { "proposta": "<uuid do rascunho>" }.
      * Se foi "cancelado" ou "expirado", decide o servidor pelo horário, nunca pelo que
-     * o front manda, com o mesmo limite das outras rotas: até 12 s depois da revisão
-     * (token) ou até 5 min depois da proposta (rascunho), encerrar é cancelamento;
+     * o front manda, com o mesmo limite das outras rotas: até 5 min depois da proposta
+     * (rascunho ou token dela; decisão B, 13/11), encerrar é cancelamento;
      * depois, é expiração. O desfecho vai para a auditoria e a proposta sai da sessão.
      */
     public function cancelar(Request $request)
@@ -439,10 +487,16 @@ class AgenteController extends Controller
      *
      * @return array{admin: int}|array{falha: string}
      */
-    private function reautenticar(Request $request): array
+    private function reautenticar(Request $request, string $tipo = 'admin'): array
     {
         try {
-            return $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin'));
+            // H, T1: no estorno, "senha_admin" leva o PIN do supervisor ou do dono (o card é o mesmo).
+            // 15/11: no CRMV, "email_admin" leva o CRMV do próprio usuário e "senha_admin" a senha dele.
+            return match ($tipo) {
+                'estorno' => $this->reautenticacao->autorizarEstorno($request->input('email_admin'), $request->input('senha_admin')),
+                'crmv' => $this->reautenticacao->autorizarComCrmv($request->input('email_admin'), $request->input('senha_admin')),
+                default => $this->reautenticacao->autorizar($request->input('email_admin'), $request->input('senha_admin')),
+            };
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {
@@ -462,16 +516,30 @@ class AgenteController extends Controller
      * gravar — o desfecho dela é "negado", com quem estava logado e sem o e-mail digitado (ele
      * poderia ser a senha digitada no campo errado). Para tentar de novo, abre-se outro card.
      */
-    private function reautenticacaoRecusada(array $pendente, string $falha)
+    private function reautenticacaoRecusada(array $pendente, string $falha, string $tipo = 'admin')
     {
-        [$codigo, $status, $motivo, $mensagem] = match ($falha) {
+        [$codigo, $status, $motivo, $mensagem] = $tipo === 'crmv' ? match ($falha) {
+            'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de CRMV e senha atingido.',
+                'Muitas tentativas com o CRMV ou a senha errados. Aguarde um minuto. Nada foi gravado.'],
+            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem CRMV e senha para cirurgia.',
+                'Informe o seu CRMV e a sua senha. Nada foi gravado.'],
+            default => ['AI_REAUTH_FAILED', 403, 'CRMV e senha não conferiram.',
+                'CRMV ou senha inválidos. Nada foi gravado.'],
+        } : ($tipo === 'estorno' ? match ($falha) {
+            'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de autorização do estorno atingido.',
+                'Muitas tentativas com o PIN errado. Aguarde alguns minutos. Nada foi gravado.'],
+            'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e PIN de quem autoriza o estorno.',
+                'Informe o e-mail e o PIN do supervisor do setor ou do dono. Nada foi gravado.'],
+            default => ['AI_REAUTH_FAILED', 403, 'Autorização do estorno não conferiu.',
+                'E-mail ou PIN de quem autoriza inválidos. Nada foi gravado.'],
+        } : match ($falha) {
             'limite' => ['AI_REAUTH_RATE_LIMIT', 429, 'Limite de tentativas de senha de administrador atingido.',
                 'Muitas tentativas com a senha errada. Aguarde alguns minutos. Nada foi gravado.'],
             'faltando' => ['AI_REAUTH_REQUIRED', 403, 'Sem e-mail e senha de administrador.',
                 'Informe o e-mail e a senha de um administrador. Nada foi gravado.'],
             default => ['AI_REAUTH_FAILED', 403, 'Senha de administrador não conferiu.',
                 'E-mail ou senha de administrador inválidos. Nada foi gravado.'],
-        };
+        });
 
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'negado', $motivo,
             ConfirmacoesPendentes::origem($pendente), permitido: false,
@@ -486,5 +554,13 @@ class AgenteController extends Controller
     {
         return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_UNAVAILABLE',
             'http_status' => 422, 'mensagem' => 'Esta proposta não está mais disponível. Nada foi gravado. Peça de novo.'], 422);
+    }
+
+    /** O id do registro que a escrita confirmada gravou (para o histórico da clínica; ver ConversaAgente::registrarResultado). */
+    private function idGravado(array $resultado): ?int
+    {
+        $id = $resultado['resultado']['id'] ?? null;
+
+        return is_int($id) || (is_string($id) && ctype_digit($id)) ? (int) $id : null;
     }
 }

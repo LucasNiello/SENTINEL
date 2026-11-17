@@ -1,0 +1,3 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria;papel;argumentos
+6;crmv;"agende uma castração para o Thor sexta às 14h";"agendar_atendimento / confirmacao_pendente";agendar_atendimento;S;confirmacao_pendente;;2628;1;;veterinario;"{""catalogo_item_id"":8,""inicio"":""2026-11-20 14:00"",""pet_id"":1}"
+7;crmv;"agende uma castração para o Thor sexta às 14h";"agendar_atendimento / confirmacao_pendente";agendar_atendimento;S;confirmacao_pendente;;2597;1;;recepcao;"{""catalogo_item_id"":8,""inicio"":""2026-11-20 14:00"",""pet_id"":0}"

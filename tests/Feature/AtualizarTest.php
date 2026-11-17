@@ -17,7 +17,7 @@ use Tests\TestCase;
 /**
  * Bloco 3 — o "U" do CRUD: atualizar_* pelo agente (registro achado por id ou
  * nome no SERVIDOR, dentro do tenant) e o formulário aberto sem IA
- * (/agente/formulario, "Editar" numa linha de tabela). Foundry sempre simulado.
+ * (/agente/formulario, "Editar" numa linha de tabela). Anthropic sempre simulada.
  */
 class AtualizarTest extends TestCase
 {

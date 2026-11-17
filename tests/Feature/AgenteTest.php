@@ -14,8 +14,8 @@ use Tests\TestCase;
 
 /**
  * Fluxo do agente (/agente): as 2 tools existentes, confirmação humana antes
- * de qualquer escrita (RNF02) e degradação graciosa se o Foundry falhar (RNF05).
- * A API do Foundry é sempre simulada com Http::fake — nenhum teste chama a rede.
+ * de qualquer escrita (RNF02) e degradação graciosa se a Anthropic falhar (RNF05).
+ * A API da Anthropic é sempre simulada com Http::fake — nenhum teste chama a rede.
  */
 class AgenteTest extends TestCase
 {
@@ -25,7 +25,6 @@ class AgenteTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         $this->logarComo('admin', 1);
     }
 
@@ -177,16 +176,14 @@ class AgenteTest extends TestCase
         $this->assertSame(0, Lancamento::count());
     }
 
-    public function test_rnf02_confirmar_antes_de_2s_e_recusado_e_nao_grava(): void
+    public function test_rnf02_confirmar_com_um_clique_logo_depois_de_revisar_grava(): void
     {
-        $token = $this->propor(['descricao' => 'Cedo demais', 'valor' => 1, 'data' => '2026-09-21']);
-        $this->travel(1)->seconds();
+        // Decisão B (13/11): sem espera mínima no servidor; o segurar é só gesto visual nas ações destrutivas.
+        $token = $this->propor(['descricao' => 'Um clique', 'valor' => 1, 'data' => '2026-09-21']);
 
-        $this->postJson('/agente/confirmar', ['token' => $token])
-            ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->assertSame(0, Lancamento::count());
+        $this->assertSame(1, Lancamento::count());
     }
 
     public function test_rnf02_token_so_vale_uma_vez(): void
@@ -203,28 +200,32 @@ class AgenteTest extends TestCase
         $this->assertSame(1, Lancamento::count());
     }
 
-    public function test_rnf02_token_expirado_apos_12s_e_recusado_e_nao_grava(): void
+    public function test_rnf02_token_vale_alem_de_12s_e_vence_no_prazo_da_proposta(): void
     {
-        $token = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21']);
+        // Decisão B (13/11): o token não tem mais validade própria de 12 s; vale até o fim dos 5 min da proposta.
+        $token = $this->propor(['descricao' => 'Depois de 13 s', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(13)->seconds();
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->postJson('/agente/confirmar', ['token' => $token])
+        $vencido = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21']);
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
+        $this->postJson('/agente/confirmar', ['token' => $vencido])
             ->assertStatus(422)
             ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
 
-        $this->assertSame(0, Lancamento::count());
+        $this->assertSame(['Depois de 13 s'], Lancamento::query()->pluck('descricao')->all());
     }
 
-    public function test_falha_do_foundry_degrada_para_erro_amigavel(): void
+    public function test_falha_da_ia_degrada_para_erro_amigavel(): void
     {
         Http::fake(['*' => Http::response(['error' => 'boom'], 500)]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
     }
 
-    public function test_sem_credencial_do_foundry_devolve_erro_sem_chamar_a_rede(): void
+    public function test_sem_credencial_da_ia_devolve_erro_sem_chamar_a_rede(): void
     {
-        config(['services.azure_foundry.api_key' => '']);
+        config(['services.anthropic.api_key' => '']);
         Http::fake();
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertStatus(503)->assertJsonPath('tipo', 'erro');
@@ -240,7 +241,7 @@ class AgenteTest extends TestCase
 
         $this->postJson('/agente/comando', ['mensagem' => 'que dia é hoje?'])->assertOk();
 
-        Http::assertSent(fn ($req) => str_contains($req['messages'][0]['content'], 'A data de hoje é 2026-09-28'));
+        Http::assertSent(fn ($req) => str_contains($req['system'], 'A data de hoje é 2026-09-28'));
     }
 
     /** @param  array<int, array{string, array}>  $chamadas  [tool, argumentos] na ordem em que o modelo pediu */
@@ -331,7 +332,7 @@ class AgenteTest extends TestCase
         $this->assertSame(0, Lancamento::count());
     }
 
-    public function test_mensagem_em_array_da_422_e_nao_chama_o_foundry(): void
+    public function test_mensagem_em_array_da_422_e_nao_chama_a_ia(): void
     {
         Http::fake();
 
@@ -343,7 +344,7 @@ class AgenteTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_mensagem_acima_de_1000_caracteres_da_422_e_nao_chama_o_foundry(): void
+    public function test_mensagem_acima_de_1000_caracteres_da_422_e_nao_chama_a_ia(): void
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
 
@@ -371,7 +372,7 @@ class AgenteTest extends TestCase
         Http::assertSentCount(10);
     }
 
-    // ---- N1: corpo da Azure fora do formato esperado ----
+    // ---- N1: corpo da Anthropic fora do formato esperado ----
 
     public static function respostasForaDoFormato(): array
     {
@@ -392,7 +393,7 @@ class AgenteTest extends TestCase
     }
 
     #[DataProvider('respostasForaDoFormato')]
-    public function test_n1_resposta_da_azure_fora_do_formato_vira_erro_amigavel_e_warning(array|string $corpo): void
+    public function test_n1_resposta_da_ia_fora_do_formato_vira_erro_amigavel_e_warning(array|string $corpo): void
     {
         Log::spy();
         Http::fake(['*' => Http::response($corpo)]);
@@ -407,17 +408,17 @@ class AgenteTest extends TestCase
         $this->assertSame(0, AuditLog::count(), 'nenhuma tool foi executada');
     }
 
-    public function test_n1_content_nulo_sem_tool_calls_continua_texto_vazio(): void
+    public function test_n1_resposta_vazia_sem_texto_e_sem_tool_vira_erro_amigavel(): void
     {
+        // Contrato da Anthropic (adaptador): fim normal sem texto e sem tool não é resposta (antes, no Azure, virava texto vazio).
         Log::spy();
-        Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => null]]]])]);
+        Http::fake(['*' => Http::response(['type' => 'message', 'content' => [], 'stop_reason' => 'end_turn'])]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])
-            ->assertOk()
-            ->assertJsonPath('tipo', 'texto')
-            ->assertJsonPath('mensagem', '');
+            ->assertStatus(502)
+            ->assertJsonPath('codigo', 'AI_PROVIDER_RESPONSE_INVALID');
 
-        Log::shouldNotHaveReceived('warning');
+        $this->assertSame(0, AuditLog::count());
     }
 
     // ---- Tarefa B: classe de risco no card (skill sentinel-visual, seção 5) ----
@@ -447,14 +448,14 @@ class AgenteTest extends TestCase
             ->assertJsonPath('risco', 'escrita');
     }
 
-    public function test_requisicao_ao_foundry_envia_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
+    public function test_requisicao_a_anthropic_envia_x_api_key_no_header_e_expoe_so_as_tools_do_catalogo(): void
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'oi']]]])]);
 
         $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk()->assertJsonPath('tipo', 'texto');
 
-        Http::assertSent(fn ($req) => $req->hasHeader('api-key', 'k')
-            && $req->url() === 'https://foundry.test/openai/v1/chat/completions'
-            && collect($req['tools'])->pluck('function.name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'conciliar_lancamentos_em_lote', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento', 'atualizar_cliente', 'atualizar_fornecedor', 'atualizar_funcionario', 'atualizar_nota_fiscal', 'atualizar_categoria_lancamento', 'consultar_lixeira', 'excluir_lancamento', 'restaurar_lancamento', 'excluir_definitivo_lancamento', 'excluir_cliente', 'restaurar_cliente', 'excluir_definitivo_cliente', 'excluir_fornecedor', 'restaurar_fornecedor', 'excluir_definitivo_fornecedor', 'excluir_funcionario', 'restaurar_funcionario', 'excluir_definitivo_funcionario', 'excluir_nota_fiscal', 'restaurar_nota_fiscal', 'excluir_definitivo_nota_fiscal', 'excluir_categoria_lancamento', 'restaurar_categoria_lancamento', 'excluir_definitivo_categoria_lancamento']);
+        Http::assertSent(fn ($req) => $req->hasHeader('x-api-key', 'k')
+            && $req->url() === 'https://api.anthropic.com/v1/messages'
+            && collect($req['tools'])->pluck('name')->all() === ['consultar_lancamentos', 'criar_lancamento', 'atualizar_status_lancamento', 'conciliar_lancamentos_em_lote', 'consultar_clientes', 'criar_cliente', 'consultar_fornecedores', 'criar_fornecedor', 'consultar_funcionarios', 'criar_funcionario', 'consultar_notas_fiscais', 'criar_nota_fiscal', 'consultar_categorias_lancamento', 'criar_categoria_lancamento', 'atualizar_cliente', 'atualizar_fornecedor', 'atualizar_funcionario', 'atualizar_nota_fiscal', 'atualizar_categoria_lancamento', 'consultar_lixeira', 'excluir_lancamento', 'restaurar_lancamento', 'excluir_definitivo_lancamento', 'excluir_cliente', 'restaurar_cliente', 'excluir_definitivo_cliente', 'excluir_fornecedor', 'restaurar_fornecedor', 'excluir_definitivo_fornecedor', 'excluir_funcionario', 'restaurar_funcionario', 'excluir_definitivo_funcionario', 'excluir_nota_fiscal', 'restaurar_nota_fiscal', 'excluir_definitivo_nota_fiscal', 'excluir_categoria_lancamento', 'restaurar_categoria_lancamento', 'excluir_definitivo_categoria_lancamento']);
     }
 }

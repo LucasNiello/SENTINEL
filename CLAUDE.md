@@ -1,10 +1,11 @@
 # SENTINEL — regras fixas do projeto
 
 - **Stack**: 100% PHP/Laravel (Blade, Tailwind, JS vanilla). Nunca introduzir outra linguagem de programação neste projeto.
-- **Provedor de IA**: Microsoft Foundry (Azure), usando a Chat Completions API (`/chat/completions` com `tools`/`tool_choice`) de um deployment Azure OpenAI — chamada HTTP REST única, stateless, sem SDK. Nunca usar o Agent Service / Assistants API (threads, runs, polling). Sempre isolado dentro de `app/Services/AiAgentService.php` — nunca chamado diretamente de outro lugar do código.
+- **Provedor de IA**: API da Anthropic (Messages API, `POST https://api.anthropic.com/v1/messages`, com `tools`/`tool_choice`), modelo `claude-haiku-5-5` (escolhido na bateria de 13/11; `claude-sonnet-5-5` como alternativa), em chamada HTTP REST única, stateless, sem SDK e sem pacote novo, pelo `Http` do Laravel. É o único provedor (decisão do Lucas, 13/11): o Azure foi removido, e `SENTINEL_IA_PROVEDOR` com qualquer valor diferente de `anthropic` falha fechado. Nunca usar Agent Service, Assistants API ou Managed Agents (threads, runs, polling). O provedor fica isolado em `app/Services/AiAgentService.php`, nunca chamado de outro lugar. A resposta da Anthropic é traduzida para o mesmo formato interno, e o motor (RBAC, tenant, Revisar → Confirmar, auditoria) não muda. Configuração: `ANTHROPIC_API_KEY` (só no .env), `ANTHROPIC_MODEL`, opcionais `ANTHROPIC_EFFORT` (padrão `low`), `ANTHROPIC_MAX_TOKENS` (8000) e `ANTHROPIC_VERSION` (`2026-10-21`). O `claude-sonnet-5-5` recusa `tool_choice` forçado: a tool solicitada vai com `tool_choice: auto`, só ela oferecida e uma instrução no system, e o servidor continua conferindo a divergência (AI_INTENT_MISMATCH).
 - **Git**: Claude Code nunca executa `git add`, `git commit`, `git push` ou qualquer comando que altere o histórico. Apenas sugere mensagem de commit como texto.
 - **Arquitetura**: já está fechada e documentada no Notion (workspace "SENTINEL", página "Arquitetura") e em `documentacao/Documentacao-Sentinel1.2.docx` (Documentação 1.2, de 04/11/2026, vigente — arquivos anteriores em `documentacao/versoes-antigas/`, ex.: `Sentinel_0.x.docx`, `Sentinel_Doc_0.5.docx`, estão desatualizados). Não decidir ou alterar decisão de arquitetura autonomamente — se um conflito aparecer entre uma instrução e o que está documentado, sinalizar e perguntar, nunca escolher sozinho.
 - **Escopo**: protótipo acadêmico de TCC, não produto em produção. Não adicionar pacotes, dependências ou infraestrutura (filas, cache distribuído, 2FA, observabilidade, etc.) além do estritamente pedido em cada tarefa. **Isso é controle de escopo, não desculpa para segurança relapsa** — dado sensível (CPF, salário, financeiro) é tratado com cuidado mesmo em protótipo, como já feito no mascaramento de PII em audit_logs (Fase 2). Ver seção "Agenda: quando deixar de ser protótipo acadêmico" para o que fica pendente por enquanto, não por já ter sido descartado.
+- **Branches**: a `main` é a clínica (fast-forward em 15/11, commit `44f4a1f`). A contabilidade ficou na tag `contabilidade-plano-b` (aponta para `03b8505`); não é mais "plano B na main" e a clínica não está mais pendente de merge.
 - Não instalar `laravel/boost` nem qualquer pacote sugerido automaticamente por templates padrão do Laravel sem autorização explícita a cada vez.
 
 ## Pendências conhecidas (não resolver sem pedido explícito)
@@ -26,12 +27,35 @@
 
 - Toda tool de escrita vira um **rascunho** na sessão, válido por 5 min
   (`ConfirmacoesPendentes::PRAZO_RASCUNHO_S`).
-- `POST /agente/revisar` valida sem gravar e emite o token de segurar; com
-  erro, o formulário volta apontando o campo.
-- O usuário segura o botão por 2 s (`DURACAO_HOLD_MS` no front).
-- `POST /agente/confirmar` aceita o token uma única vez, só entre 2 e 12 s
-  (`ESPERA_MINIMA_S`/`VALIDADE_MAXIMA_S`), e executa com os valores da
-  sessão — nunca com o que vem do navegador.
+- `POST /agente/revisar` valida sem gravar e emite o token de confirmação; com
+  erro, o formulário volta apontando o campo. A resposta traz `segurar`
+  (`AiAgentService::exigeSegurar`, calculado com os valores revisados).
+- Decisão do Lucas (13/11, opção B): o servidor não tem janela de tempo. O
+  segurar 2 s (`DURACAO_HOLD_MS` no front) é só gesto visual, nas ações
+  destrutivas: excluir para a lixeira e excluir de vez, cancelar cobrança,
+  estornar, conciliação em lote e cancelar agendamento. As demais escritas
+  confirmam com um clique.
+- `POST /agente/confirmar` aceita o token uma única vez, até o fim dos 5 min
+  da proposta (sem espera mínima), e executa com os valores da sessão — nunca
+  com o que vem do navegador.
+- **Estorno e PIN (clínica; decisões do Lucas A–F, 14/11)**:
+  - O PIN de autorização é gerado e revogado pelo Administrador da clínica
+    (papel `admin` num tenant de `sentinel.tenants_clinica`, conta do
+    `ClinicaSeeder`) ou pelo dono (decisão do Lucas, 15/11), na `/supervisao`:
+    6 dígitos aleatórios, mostrados uma vez, só o hash gravado; vale até
+    alguém gerar outro; "Revogar" zera. O dono gera e revoga o próprio PIN e o
+    dos supervisores (não o de outro dono) e marca o supervisor do setor. O
+    dono sem PIN não autoriza, e a senha de login dele não serve como PIN. O
+    Admin da clínica só gerencia PINs: nenhuma tool, sem auditoria, sem
+    autorizar a lixeira nem estorno.
+  - O estorno (cobrança paga e venda paga) é por itens: `estornar_cobranca` e
+    `estornar_venda`, modo `tudo` | `tudo_menos_prontuario` | `itens` (argumento
+    `linhas`). Valor = preço copiado na linha × quantidade; a IA nunca informa
+    valor. Parcial continua paga; o que esgota cancela. Item do prontuário
+    estorna só o valor (o estoque nunca volta). Tabelas `estornos` e
+    `estorno_itens`. Autoriza o PIN do supervisor do setor ou do dono (a
+    senha de login do dono não vale mais). O Revisar congela o plano mostrado
+    no card. Cancelar cobrança/venda não paga continua sem PIN.
 - **RF03 — `conciliar_lancamentos_em_lote`** (papel mínimo operador): período
   obrigatório e categoria opcional; status fixo pendente → conciliado.
   - O servidor resolve o filtro uma vez, no tenant; 0 itens responde em texto,
@@ -69,8 +93,18 @@ Notion, quando todas as fases/etapas do projeto estiverem concluídas.
 - Pare só em: (1) ação irreversível (perda de dado que os seeders não
   recriam, apagar arquivo fora da tarefa); (2) conflito com decisão de
   arquitetura documentada.
-- Testes sempre pelo subagente `test-runner`; revisão pelo `reviewer`, 1
-  passada por bloco (2 se mexer em senha, permissão ou exportação).
+- Testes, sempre pelo subagente `test-runner`, que devolve só o resumo
+  (total, falhas, arquivos):
+  - durante o trabalho, só os testes dos arquivos tocados;
+  - se o bloco mexeu em senha, PIN, permissão, tenant ou estorno, rode também
+    os arquivos de teste dessas áreas (não a suíte inteira);
+  - suíte completa: uma vez a cada renovação do limite de uso, quando o Lucas
+    avisar, e antes de enviar para a main ou entregar;
+  - mudança só de texto, doc, relatório ou CSV: nenhum teste;
+  - em cada relatório, registrar quando foi a última suíte completa e o
+    resultado.
+- Revisão pelo `reviewer`, 1 passada por bloco (2 se mexer em senha,
+  permissão ou exportação).
 - Mudança cirúrgica: tocar só o necessário para a tarefa pedida — nunca
   refatorar código que já funciona "já que estou aqui".
 - Se a solução ficou grande ou complexa, questionar antes de entregar: dava

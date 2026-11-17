@@ -15,7 +15,9 @@ use Illuminate\Support\Str;
  *   formulário em edição, sem token de segurar, com prazo de PRAZO_RASCUNHO_S
  *   contado desde a proposta (não reinicia no "Editar").
  * - "revisada": criada pelo /agente/revisar depois de validar os valores. Guarda
- *   os valores revisados e o token de segurar, com a janela de sempre (2 a 12 s).
+ *   os valores revisados e o token de confirmação (uso único). Decisão B do Lucas
+ *   (13/11): não há mais janela de 2 a 12 s; o token vale até o fim dos 5 min da
+ *   proposta. O segurar de 2 s virou só gesto visual, nas ações destrutivas.
  *   "Editar" mata esse token sem desfecho; o rascunho continua.
  *
  * Toda proposta tem um desfecho só (confirmada, cancelada ou expirada) e, quando
@@ -33,16 +35,10 @@ class ConfirmacoesPendentes
 {
     private const CHAVE = 'confirmacoes';
 
-    /** Espera mínima entre revisar e confirmar — igual ao hold físico do front (DURACAO_HOLD_MS). */
-    public const ESPERA_MINIMA_S = 2;
-
     /**
-     * Validade máxima do token de segurar — janela da interface (DURACAO_IDLE_MS, 10 s) + folga para a
-     * requisição chegar. É também o limite único entre "cancelado" e "expirado" de uma proposta revisada.
+     * Prazo da proposta, contado desde a proposta da IA e absoluto: vale para o rascunho (não reinicia no "Editar")
+     * e para o token de confirmação dele. É o limite único entre "cancelado" e "expirado" (decisão B, 13/11).
      */
-    public const VALIDADE_MAXIMA_S = 12;
-
-    /** Prazo do rascunho (formulário em edição), contado desde a proposta da IA; não reinicia no "Editar". */
     public const PRAZO_RASCUNHO_S = 300;
 
     /** Guarda o que a IA propôs como rascunho e devolve o id da proposta. */
@@ -98,7 +94,7 @@ class ConfirmacoesPendentes
             'origem' => self::origem($rascunho),
             // Os 5 min do rascunho são absolutos: o token também vence quando eles acabam (expirou()).
             'proposta_criada_em' => $rascunho['criado_em'],
-            // Em segundos, com milissegundos: com segundos inteiros, a fronteira dos 12 s errava em até 1 s.
+            // Em segundos, com milissegundos (o prazo é o da proposta; ver expirou()).
             'emitido_em' => self::agora(),
         ]);
 
@@ -240,17 +236,16 @@ class ConfirmacoesPendentes
         return Cache::add("agente:token_usado:{$proposta}", true, now()->addMinutes(max(1, (int) config('session.lifetime'))));
     }
 
-    /** Segundos (com fração) desde a revisão (token) ou desde a proposta (rascunho), pelo relógio do servidor. */
+    /** Segundos (com fração) desde a emissão (token) ou desde a proposta (rascunho), pelo relógio do servidor. */
     public function decorrido(array $pendente): float
     {
         return self::agora() - (float) ($pendente['emitido_em'] ?? $pendente['criado_em'] ?? 0);
     }
 
     /**
-     * Passou do prazo: 5 min desde a proposta (absoluto, vale também para o token
-     * dela) ou, no token de segurar, 12 s desde a revisão — o que vencer primeiro.
-     * É o limite único entre "cancelado" e "expirado" em todas as rotas
-     * (confirmar, cancelar, sair e varredura).
+     * Passou do prazo: 5 min desde a proposta, absoluto, para o rascunho e para o token dele. Decisão B (13/11):
+     * o token não tem mais validade própria (eram 12 s). É o limite único entre "cancelado" e "expirado" em todas
+     * as rotas (confirmar, cancelar, sair e varredura).
      */
     public function expirou(array $pendente): bool
     {
@@ -258,10 +253,10 @@ class ConfirmacoesPendentes
             return $this->decorrido($pendente) > self::PRAZO_RASCUNHO_S;
         }
 
-        $propostaCriadaEm = $pendente['proposta_criada_em'] ?? null;
+        // Token sem a hora da proposta (entrada antiga ou malformada): conta desde a emissão, com o mesmo prazo.
+        $inicio = (float) ($pendente['proposta_criada_em'] ?? $pendente['emitido_em'] ?? 0);
 
-        return $this->decorrido($pendente) > self::VALIDADE_MAXIMA_S
-            || ($propostaCriadaEm !== null && self::agora() - (float) $propostaCriadaEm > self::PRAZO_RASCUNHO_S);
+        return self::agora() - $inicio > self::PRAZO_RASCUNHO_S;
     }
 
     /**
@@ -289,7 +284,7 @@ class ConfirmacoesPendentes
     /**
      * Uma pendência por proposta volta (a primeira que sair), e todas as da proposta
      * saem da sessão. Tokens de segurar vêm antes dos rascunhos: o token já carrega
-     * os dois prazos (o dele e o do rascunho). Entrada malformada sai sem auditoria; a
+     * o prazo da proposta (decisão B, 13/11: o token não tem prazo próprio). Entrada malformada sai sem auditoria; a
      * proposta já concluída por outra requisição (ver concluir()) sai sem voltar.
      */
     private function retirarOnde(Session $sessao, Closure $sai): array

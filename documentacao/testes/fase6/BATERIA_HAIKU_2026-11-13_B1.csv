@@ -1,0 +1,41 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria
+1;consulta;"liste meus clientes";"consultar_clientes / resultado_leitura";consultar_clientes;S;resultado_leitura;;1514;1;1593
+2;consulta;"quais fornecedores eu tenho?";"consultar_fornecedores / resultado_leitura";consultar_fornecedores;S;resultado_leitura;;1711;1;1713
+3;consulta;"mostre os lançamentos pendentes";"consultar_lancamentos / resultado_leitura";consultar_lancamentos;S;resultado_leitura;;3097;1;3098
+4;consulta;"quais foram os lançamentos de outubro de 2026?";"consultar_lancamentos / resultado_leitura";consultar_lancamentos;S;resultado_leitura;;1635;1;1636
+5;consulta;"quais são as categorias de lançamento?";"consultar_categorias_lancamento / resultado_leitura";consultar_categorias_lancamento;S;resultado_leitura;;3726;1;3728
+6;consulta;"liste as notas fiscais";"consultar_notas_fiscais / resultado_leitura";consultar_notas_fiscais;S;resultado_leitura;;1412;1;1414
+7;consulta;"procure o cliente Padaria Pão Dourado";"consultar_clientes / resultado_leitura";consultar_clientes;S;resultado_leitura;;1469;1;1472
+8;consulta;"o que tem na lixeira?";"consultar_lixeira / resultado_leitura";consultar_lixeira;S;resultado_leitura;;1268;1;1270
+9;consulta;"mostre os lançamentos de honorários";"consultar_lancamentos / resultado_leitura";consultar_lancamentos;S;resultado_leitura;;2322;1;2324
+10;consulta;"tem algum fornecedor com Papelaria no nome?";"consultar_fornecedores / resultado_leitura";consultar_fornecedores;S;resultado_leitura;;1330;1;1331
+11;cadastro;"cadastre o cliente Mercado Bom Preço, telefone 19 99876-5432";"criar_cliente / confirmacao_pendente";criar_cliente;S;confirmacao_pendente;;2885;1;
+12;cadastro;"cadastre um cliente";"criar_cliente / confirmacao_pendente";criar_cliente;S;confirmacao_pendente;;1491;1;
+13;cadastro;"crie o fornecedor Gráfica Rápida Limeira";"criar_fornecedor / confirmacao_pendente";criar_fornecedor;S;confirmacao_pendente;;1089;1;
+14;cadastro;"preciso adicionar um fornecedor novo";"criar_fornecedor / confirmacao_pendente";criar_fornecedor;S;confirmacao_pendente;;1206;1;
+15;cadastro;"registre um lançamento de 350 reais de conta de luz com data de hoje";"criar_lancamento / confirmacao_pendente";criar_lancamento;S;confirmacao_pendente;;1393;1;
+16;cadastro;"registre um lançamento";"criar_lancamento / confirmacao_pendente";criar_lancamento;S;confirmacao_pendente;;1589;1;
+17;cadastro;"crie a categoria Marketing";"criar_categoria_lancamento / confirmacao_pendente";criar_categoria_lancamento;S;confirmacao_pendente;;1766;1;
+18;cadastro;"cadastre uma nota fiscal de 1200 reais para o cliente ABC Comércio";"criar_nota_fiscal / confirmacao_pendente";criar_nota_fiscal;S;confirmacao_pendente;;2098;1;
+19;cadastro;"quero cadastrar o cliente Oficina do Zé com email ze@oficina.com.br";"criar_cliente / confirmacao_pendente";criar_cliente;S;confirmacao_pendente;;1418;1;
+20;cadastro;"cadastre a funcionária Ana Souza, cargo auxiliar administrativa";"criar_funcionario / negado";criar_funcionario;S;negado;"AI_FORBIDDEN Você não tem permissão para executar esta ação.";4374;1;4375
+21;atualizacao;"altera o telefone da Padaria Pão Dourado para 19 3441-2200";"atualizar_cliente / confirmacao_pendente";"atualizar_cliente id=2";S;confirmacao_pendente;;1665;1;
+22;atualizacao;"atualize o email do fornecedor Papelaria Central para contato@papelariacentral.com.br";"atualizar_fornecedor / confirmacao_pendente";"atualizar_fornecedor id=1";S;confirmacao_pendente;;1653;1;
+23;atualizacao;"muda o nome da categoria Impostos e taxas para Impostos";"atualizar_categoria_lancamento / confirmacao_pendente";"atualizar_categoria_lancamento id=4";S;confirmacao_pendente;;1351;1;
+24;atualizacao;"marque como conciliado o lançamento da tarifa bancária";"atualizar_status_lancamento / confirmacao_pendente";consultar_lancamentos;N;resultado_leitura;;1710;1;1712
+25;atualizacao;"troque o documento do cliente João da Silva Consultoria";"atualizar_cliente / confirmacao_pendente";"atualizar_cliente id=3";S;confirmacao_pendente;;3609;1;
+26;atualizacao;"edite o fornecedor Distribuidora Limeira";"atualizar_fornecedor / confirmacao_pendente";"atualizar_fornecedor id=2";S;confirmacao_pendente;;1148;1;
+27;continuacao;"edita o segundo";"atualizar_cliente / confirmacao_pendente";"atualizar_cliente id=2";S;confirmacao_pendente;;9542;1;
+28;continuacao;"altera o telefone do primeiro para 19 3451-0000";"atualizar_fornecedor / confirmacao_pendente";"atualizar_fornecedor id=1";S;confirmacao_pendente;;3946;1;
+29;continuacao;"marca o terceiro como conciliado";"atualizar_status_lancamento / confirmacao_pendente";"atualizar_status_lancamento id=5";S;confirmacao_pendente;;2851;1;
+30;continuacao;"renomeia a última para Taxas bancárias";"atualizar_categoria_lancamento / confirmacao_pendente";"atualizar_categoria_lancamento id=4";S;confirmacao_pendente;;1707;1;
+31;exclusao;"exclua o cliente Jonas";"excluir_cliente / negado";excluir_cliente;S;negado;"AI_FORBIDDEN Você não tem permissão para executar esta ação.";;0;
+32;exclusao;"apague o fornecedor Cartório do 2º Ofício";"excluir_fornecedor / negado";excluir_fornecedor;S;negado;"AI_FORBIDDEN Você não tem permissão para executar esta ação.";;0;
+33;exclusao;"restaure o cliente Teste";"restaurar_cliente / erro";restaurar_cliente;S;erro;"AI_TOOL_REFUSED Não encontrei o cliente com esse nome na lixeira.";1149;1;
+34;exclusao;"restaure o lançamento venda";"restaurar_lancamento / erro";restaurar_lancamento;S;erro;"AI_TOOL_REFUSED Não encontrei o lançamento com essa descrição na lixeira.";1263;1;
+35;lote;"concilie todos os lançamentos pendentes de outubro de 2026";"conciliar_lancamentos_em_lote / confirmacao_pendente|texto";conciliar_lancamentos_em_lote;S;texto;"texto: Não há lançamentos pendentes nesse período. Nada a conciliar.";3892;1;
+36;lote;"concilia os pendentes deste mês";"conciliar_lancamentos_em_lote / confirmacao_pendente|texto";conciliar_lancamentos_em_lote;S;texto;"texto: Não há lançamentos pendentes nesse período. Nada a conciliar.";1828;1;
+37;ambiguo;"altera o telefone";"- / texto";(nenhuma);S;texto;"texto: Para alterar o telefone, preciso saber:  1. **De qual registro?** Cliente ou fornecedor (funcionários não têm campo de telefone no sistema). 2. **Nome ou";4086;1;
+38;ambiguo;"apaga aquele";"- / texto";(nenhuma);S;texto;"texto: Não sei a que ""aquele"" se refere. Pode me dizer o que apagar? Por exemplo:  - o tipo de registro (lançamento, cliente, fornecedor, funcionário, nota fisc";3935;1;
+39;ambiguo;"cadastra o Silva";"- / texto";(nenhuma);S;texto;"texto: Você quer cadastrar o Silva como **cliente**, **fornecedor** ou **funcionário**? Cada um tem um cadastro próprio. Se for funcionário, me diga também o CP";3750;1;
+40;ambiguo;"mostra o relatório";"- / texto";(nenhuma);N;texto;"texto: Não há uma ferramenta de relatório no Sentinel, então não consigo gerar ou mostrar um relatório.  Posso consultar os dados que existem no sistema:  - **L";2890;1;

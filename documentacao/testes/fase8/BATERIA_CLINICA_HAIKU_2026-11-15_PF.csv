@@ -1,0 +1,3 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria;papel;argumentos
+16;cadastro;"cadastra no catalogo o servico hidratação de pelos, banho e tosa, 45 reais";"criar_item_catalogo / confirmacao_pendente";criar_item_catalogo;S;confirmacao_pendente;;3014;1;;dono;"{""tipo"":""servico"",""setor"":""petshop"",""nome_comercial"":""Hidratação de pelos"",""preco_centavos"":4500}"
+24;estorno;"o Diego devolveu 1 das 2 rações premium, estorna só uma";"estornar_venda / confirmacao_pendente";"estornar_venda id=4";S;confirmacao_pendente;;2748;1;;atendente;"{""modo"":""itens"",""motivo"":""Devolução de 1 unidade de Ração premium 10 kg (2 compradas)"",""linhas"":null,""id"":4,""versao"":""2026-10-28 16:30:00""}"

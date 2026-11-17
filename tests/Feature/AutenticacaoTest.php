@@ -90,6 +90,52 @@ class AutenticacaoTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_tentativa_de_login_conta_antes_de_conferir_a_senha(): void
+    {
+        $usuario = $this->usuario();
+        $chave = \App\Http\Controllers\AutenticacaoController::chaveDoLimite($usuario->email, '127.0.0.1');
+        // Variações que a collation do MySQL junta (maiúsculas, acento, espaço) caem na mesma chave; o texto não aparece;
+        // e a chave não depende de a conta existir (não há consulta ao banco: o 429 não revela conta).
+        $variacao = ' '.mb_strtoupper(str_replace('a', 'á', (string) $usuario->email)).' ';
+        $this->assertSame($chave, \App\Http\Controllers\AutenticacaoController::chaveDoLimite($variacao, '127.0.0.1'));
+        $this->assertStringNotContainsString((string) $usuario->email, $chave);
+        $this->assertNotSame($chave, \App\Http\Controllers\AutenticacaoController::chaveDoLimite($usuario->email, '10.0.0.9'), 'outro IP, outro contador');
+        \Illuminate\Support\Facades\DB::enableQueryLog();
+        \App\Http\Controllers\AutenticacaoController::chaveDoLimite('ninguem@sentinel.local', '127.0.0.1');
+        $this->assertSame([], \Illuminate\Support\Facades\DB::getQueryLog(), 'a chave não consulta o banco');
+        \Illuminate\Support\Facades\DB::disableQueryLog();
+
+        // No instante em que a senha é conferida, a tentativa JÁ está contada (uma versão que confere o contador e só
+        // conta depois do erro registraria 0 aqui).
+        $contadoNaConferencia = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Auth\Events\Attempting::class,
+            function () use (&$contadoNaConferencia, $chave) { $contadoNaConferencia[] = \Illuminate\Support\Facades\RateLimiter::attempts($chave); });
+
+        $this->post('/login', ['email' => $usuario->email, 'password' => 'errada'])->assertRedirect();
+        $this->assertSame([1], $contadoNaConferencia);
+        $this->assertSame(1, \Illuminate\Support\Facades\RateLimiter::attempts($chave));
+
+        // Rajada em paralelo: o middleware deixou passar, mas o contador já está no teto. Nem a senha certa é conferida.
+        for ($i = 2; $i <= 5; $i++) {
+            \Illuminate\Support\Facades\RateLimiter::hit($chave, 60);
+        }
+        $this->post('/login', ['email' => $usuario->email, 'password' => self::SENHA])->assertStatus(429)->assertHeader('Retry-After');
+        $this->assertSame([1], $contadoNaConferencia, 'barrada no teto: a senha nem foi conferida');
+        $this->assertGuest();
+    }
+
+    public function test_a_quinta_tentativa_com_a_senha_certa_ainda_entra(): void
+    {
+        $usuario = $this->usuario();
+        $chave = \App\Http\Controllers\AutenticacaoController::chaveDoLimite($usuario->email, '127.0.0.1');
+        for ($i = 1; $i <= 4; $i++) {
+            \Illuminate\Support\Facades\RateLimiter::hit($chave, 60);
+        }
+
+        $this->post('/login', ['email' => $usuario->email, 'password' => self::SENHA])->assertRedirect('/agente');
+        $this->assertAuthenticatedAs($usuario);
+    }
+
     public function test_email_em_array_no_login_nao_gera_500(): void
     {
         $this->post('/login', ['email' => ['a@sentinel.local'], 'password' => 'x'])

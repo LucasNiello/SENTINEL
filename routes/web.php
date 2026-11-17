@@ -3,6 +3,8 @@
 use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
+use App\Http\Controllers\ClinicaTelasController;
+use App\Http\Controllers\SupervisaoController;
 use App\Http\Controllers\TelasController;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
@@ -28,14 +30,32 @@ Route::middleware('auth')->group(function () {
         Route::get('/auditoria/exportar', [AuditoriaController::class, 'exportar'])->middleware('throttle:exportar');
         Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
 
+        // T1: o Administrador da clínica só gerencia PINs; a bancada do agente e os cadastros o levam à /supervisao.
         Route::get('/agente', function () {
-            return view('agente');
+            return app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica() ? redirect('/supervisao') : view('agente');
         });
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
         Route::get('/cadastros', [TelasController::class, 'cadastros']);
         Route::get('/lixeira', [TelasController::class, 'lixeira']);
         Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
+        // Item I (clínica vet): a tela usa as rotas JSON /supervisao/* abaixo, que conferem tudo de novo.
+        Route::get('/supervisao', [TelasController::class, 'supervisao']);
+
+        // Front de 14/11 (F2): telas de LEITURA da clínica + petshop. Cada uma confere domínio, papel (o da tool de leitura) e tenant.
+        // Teto próprio (60/min por usuário, 429 em HTML): as cinco telas gravam uma linha de auditoria por acesso,
+        // e sem teto um F5 em laço encheria a audit_logs. Balde separado do 'agente-sem-ia', para navegar não gastar o Revisar.
+        Route::get('/agenda', [ClinicaTelasController::class, 'agenda'])->middleware('throttle:60,1,telas-clinica');
+        Route::get('/cobrancas', [ClinicaTelasController::class, 'cobrancas'])->middleware('throttle:60,1,telas-clinica');
+        Route::get('/vendas', [ClinicaTelasController::class, 'vendas'])->middleware('throttle:60,1,telas-clinica');
+        // Até 18 dígitos: número maior não cabe em inteiro e daria erro em vez de 404.
+        Route::get('/pets/{id}', [ClinicaTelasController::class, 'pet'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,telas-clinica');
+        Route::get('/resultados', [ClinicaTelasController::class, 'resultados'])->middleware('throttle:60,1,telas-clinica');
+        // 15/11: ficha do tutor (só leitura, com os pets dele) e o calendário da ficha de agendamento (JSON, só mostra:
+        // a vaga é conferida de novo na gravação). O calendário tem balde próprio (120/min por usuário): uma ficha faz várias
+        // leituras (mês, dia, troca de profissional) e não pode gastar o Revisar nem o Cancelar do balde 'agente-sem-ia'.
+        Route::get('/tutores/{id}', [ClinicaTelasController::class, 'tutor'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,telas-clinica');
+        Route::get('/agenda/disponibilidade', [ClinicaTelasController::class, 'disponibilidade'])->middleware('throttle:120,1,agenda-calendario');
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
         Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
@@ -47,5 +67,12 @@ Route::middleware('auth')->group(function () {
         Route::post('/agente/consultar', [AgenteController::class, 'consultar'])->middleware('throttle:agente-sem-ia');
         // A3 (RF02): CSV de uma tabela de consulta, reexecutada no servidor.
         Route::post('/agente/exportar', [AgenteController::class, 'exportar'])->middleware('throttle:exportar');
+
+        // Item I (clínica): supervisores de setor (o dono marca) e PIN do estorno (T1, 14/11: o Administrador gera e
+        // revoga), em JSON; a tela /supervisao usa estas rotas. Saíram o "meu PIN" do supervisor e o "zerar PIN" do dono.
+        Route::get('/supervisao/supervisores', [SupervisaoController::class, 'listar'])->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/pins/{id}/gerar', [SupervisaoController::class, 'gerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        Route::post('/supervisao/pins/{id}/revogar', [SupervisaoController::class, 'revogarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
     });
 });

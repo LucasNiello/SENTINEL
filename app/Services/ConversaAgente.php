@@ -11,6 +11,8 @@ class ConversaAgente
     private const MAX_MENSAGENS = 16; // contexto limitado, sem marcadores internos enviados à IA
     private const MAX_CARACTERES = 8000;
     private const AVISO_PROPOSTA = 'Proposta pendente de confirmação humana. Nenhuma escrita foi executada.';
+    private const CHAVE_LISTA = 'agente_ultima_lista'; // P-C1
+    private const PRAZO_LISTA_S = 1800;
 
     public function __construct(private ContextoUsuario $contexto) {}
 
@@ -42,23 +44,61 @@ class ConversaAgente
 
     public function guardar(Session $sessao, string $mensagem, array $resposta): void
     {
+        // P-C1: a tabela vira uma frase do servidor (quantas linhas e como se referir a uma), sem dados; ela entra no
+        // histórico (não é interna) para a IA entender "o segundo". A tabela em si fica só na sessão (guardarLista).
+        $frase = is_string($resposta['lista']['frase'] ?? null) && ($resposta['tipo'] ?? null) === 'resultado_leitura' ? $resposta['lista']['frase'] : null;
         $texto = match ($resposta['tipo'] ?? null) {
             'texto' => $resposta['mensagem'] ?? '',
             'confirmacao_pendente' => self::AVISO_PROPOSTA,
-            'resultado_leitura' => 'A consulta foi concluída. Os dados não são guardados no histórico.',
+            'resultado_leitura' => $frase ?? 'A consulta foi concluída. Os dados não são guardados no histórico.',
             default => null,
         };
         if ($texto === null) return;
-        $interno = isset($resposta['tool']) || in_array($resposta['tipo'] ?? null, ['confirmacao_pendente', 'resultado_leitura'], true);
+        $interno = $frase === null && (isset($resposta['tool']) || in_array($resposta['tipo'] ?? null, ['confirmacao_pendente', 'resultado_leitura'], true));
         $this->acrescentar($sessao, $mensagem, $texto, $interno);
+    }
+
+    /**
+     * P-C1: congela na sessão a última tabela mostrada (entidade e ids em ordem), com a identidade (usuário:tenant) e
+     * a hora. Uma nova consulta substitui a anterior, inclusive uma vazia.
+     *
+     * @param  array{entidade: ?string, linhas: array<int, ?int>}  $lista
+     */
+    public function guardarLista(Session $sessao, array $lista): void
+    {
+        $sessao->put(self::CHAVE_LISTA, [
+            'identidade' => $this->identidade(),
+            'em' => now()->getTimestamp(),
+            'entidade' => $lista['entidade'] ?? null,
+            'linhas' => array_values($lista['linhas'] ?? []),
+        ]);
+    }
+
+    /** P-C1: a última tabela, se for deste usuário neste tenant e de até PRAZO_LISTA_S atrás; senão, some. */
+    public function lerLista(Session $sessao): ?array
+    {
+        $lista = $sessao->get(self::CHAVE_LISTA);
+        if (! is_array($lista) || ($lista['identidade'] ?? null) !== $this->identidade() || now()->getTimestamp() - (int) ($lista['em'] ?? 0) > self::PRAZO_LISTA_S) {
+            $sessao->forget(self::CHAVE_LISTA);
+
+            return null;
+        }
+
+        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? []];
     }
 
     /**
      * Escrita confirmada no card: o agente passa a saber que ela aconteceu. Entra como
      * a confirmação do humano e a frase fixa do servidor, sem valores do registro.
+     *
+     * Bateria da clínica (15/11): na clínica, a frase leva também o NÚMERO do registro gravado (só o id interno, nenhum
+     * valor), para "esse mesmo" depois de gravar ter a que se referir. Na contabilidade, nada muda.
      */
-    public function registrarResultado(Session $sessao, string $frase): void
+    public function registrarResultado(Session $sessao, string $frase, ?int $idGravado = null): void
     {
+        if ($idGravado !== null && $idGravado > 0 && $this->contexto->dominio() === 'clinica') {
+            $frase = rtrim($frase).' Número do registro gravado: '.$idGravado.'.';
+        }
         $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase);
     }
 
@@ -81,7 +121,7 @@ class ConversaAgente
         if (preg_match('/senha|password|api.?key|app.?key|csrf|cookie|session.?id|bearer/i', $texto)) {
             return '[Mensagem com credenciais omitida do histórico]';
         }
-        foreach ([config('services.azure_foundry.api_key'), config('app.key')] as $segredo) {
+        foreach ([config('services.anthropic.api_key'), config('app.key')] as $segredo) {
             if (is_string($segredo) && $segredo !== '') $texto = str_replace($segredo, '[credencial omitida]', $texto);
         }
         $texto = preg_replace('/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/', '[documento omitido]', $texto);

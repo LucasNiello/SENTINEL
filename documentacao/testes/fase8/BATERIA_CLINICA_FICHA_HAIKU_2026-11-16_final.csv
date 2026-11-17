@@ -1,0 +1,8 @@
+n;grupo;pedido;esperado;obtido;acertou;tipo_resposta;erro;tempo_ia_ms;chamadas_ia;tempo_ia_ms_auditoria;papel;argumentos
+1;ficha;"do bidu foi marcado errado. é uma consulta";"alterar_servico_agendamento / confirmacao_pendente|resultado_leitura";"alterar_servico_agendamento id=22";S;confirmacao_pendente;;2119;1;;recepcao;"{""catalogo_item_id"":1,""profissional_id"":null,""inicio"":""2026-11-15 17:30"",""id"":22,""versao"":""2026-11-15 00:00:00""}"
+2;ficha;"troca o banho do Thor por tosa";"alterar_servico_agendamento / confirmacao_pendente|resultado_leitura";alterar_servico_agendamento;S;resultado_leitura;;1068;1;;recepcao;"null"
+3;ficha;"abre a ficha do agendamento 21";"remarcar_agendamento / confirmacao_pendente";"remarcar_agendamento id=21";S;confirmacao_pendente;;1386;1;;recepcao;"{""profissional_id"":10,""inicio"":""2026-11-15 17:00"",""id"":21,""versao"":""2026-11-15 00:00:00""}"
+4;ficha;"remarcar a Luna";"remarcar_agendamento / confirmacao_pendente|resultado_leitura";remarcar_agendamento;S;resultado_leitura;;1188;1;;recepcao;"null"
+5;ficha;"marca uma consulta para a Luna amanhã com qualquer veterinário";"agendar_atendimento / confirmacao_pendente";agendar_atendimento;S;confirmacao_pendente;;2736;1;;recepcao;"{""pet_id"":4,""catalogo_item_id"":1,""inicio"":""2026-11-17""}"
+6;crmv;"agende uma castração para o Thor sexta às 14h";"agendar_atendimento / confirmacao_pendente";agendar_atendimento;S;confirmacao_pendente;;2892;1;;veterinario;"{""catalogo_item_id"":8,""inicio"":""2026-11-20 14:00"",""pet_id"":1}"
+7;crmv;"agende uma castração para o Thor sexta às 14h";"agendar_atendimento / confirmacao_pendente";agendar_atendimento;S;confirmacao_pendente;;3098;1;;recepcao;"{""catalogo_item_id"":8,""inicio"":""2026-11-20 14:00"",""pet_id"":1}"

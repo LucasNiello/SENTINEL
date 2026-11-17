@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\AgendaService;
 use App\Services\CatalogoService;
 use App\Services\CobrancaService;
+use App\Services\ContextoUsuario;
 use App\Services\PetService;
 use App\Services\ProntuarioService;
 use App\Services\TutorService;
@@ -24,9 +25,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Clínica veterinária + petshop de demonstração (tenant 3): 10 contas @clinica.sentinel.br (vet1 = dono,
- * vet2 e vet3 com CRMV; recepcao1-3; estetica1-2 no banho e tosa; vendas1-2 na loja), 5 pets com seus
- * tutores e 3 clientes só da loja (sem pet), catálogo dos dois setores (com farmácia), agenda da semana, um
+ * A clínica veterinária + petshop (tenant 3), o único tenant que o seed cria (17/11). Tem 11 contas
+ * @clinica.sentinel.br: vet1 (dono, com CRMV), vet2 e vet3 (veterinários, com CRMV), recepcao1-3,
+ * estetica1-2 (banho e tosa), vendas1-2 (loja) e administracao (gera e revoga os PINs). Também cria 5 pets
+ * com seus tutores, 3 clientes só da loja (sem pet), o catálogo dos dois setores (com farmácia), a agenda
+ * da semana e um
  * atendimento de emergência sem agendamento, cobranças e vendas pagas e em aberto espalhadas no último
  * mês (para os Resultados terem dados), despesas gerais e 5 mensagens na caixa de entrada simulada.
  *
@@ -34,14 +37,20 @@ use Illuminate\Support\Str;
  * relógio simulado (Carbon::setTestNow) no dia de cada atendimento, para pago_em, created_at e afins
  * caírem no passado. Datas relativas a hoje, no fuso da aplicação.
  *
- * Só roda sob comando explícito (php artisan db:seed --class=ClinicaSeeder, que o instalar.bat mostra junto
- * do DemonstracaoSeeder); fora do DatabaseSeeder. Senha de todas as contas: a DEMO_SENHA, com a mesma
- * validação do DemonstracaoSeeder; sem ela, nada é gravado. Usuário que já existe é preservado (a senha
- * não é trocada). Se o tenant já tem tutores, os dados não são gravados de novo.
+ * Chamado pelo DatabaseSeeder (php artisan migrate:fresh --seed). Senha de todas as contas: a DEMO_SENHA
+ * do .env; sem ela (ou fraca), nada é gravado. Usuário que já existe é preservado (a senha não é trocada).
+ * Se o tenant já tem tutores, os dados não são gravados de novo.
  */
 class ClinicaSeeder extends Seeder
 {
     public const TENANT = 3;
+
+    /** Domínio dos e-mails de todas as contas da clínica. */
+    public const DOMINIO_EMAIL = 'clinica.sentinel.br';
+
+    private const SENHA_MINIMO = 12;
+
+    private const SENHAS_CONHECIDAS = ['sentinel123', 'password', '12345678', '123456789', 'admin123', 'senha123'];
 
     private array $usuarios = [];
 
@@ -53,7 +62,12 @@ class ClinicaSeeder extends Seeder
 
     public function run(): void
     {
-        $this->criarUsuarios(DemonstracaoSeeder::lerDemoSenha('ClinicaSeeder'));
+        // Falha fechado: fora de sentinel.tenants_clinica, a conta admin viraria admin da contabilidade (com lixeira).
+        if (! ContextoUsuario::tenantDaClinica(self::TENANT)) {
+            throw new \RuntimeException('O tenant '.self::TENANT.' não está em SENTINEL_TENANTS_CLINICA. Nada foi gravado.');
+        }
+
+        $this->criarUsuarios(self::lerDemoSenha());
 
         if (Tutor::where('tenant_id', self::TENANT)->exists()) {
             $this->command?->info('Clínica de demonstração (tenant '.self::TENANT.') já tem dados: nada foi gravado de novo.');
@@ -82,24 +96,44 @@ class ClinicaSeeder extends Seeder
         $this->command?->info('Clínica de demonstração pronta no tenant '.self::TENANT.'.');
     }
 
+    /** A DEMO_SENHA do .env, validada. As mensagens nunca repetem a senha recebida. Espaços nas pontas não contam. */
+    public static function lerDemoSenha(): string
+    {
+        $senha = (string) env('DEMO_SENHA', '');
+
+        if ($senha === '') {
+            throw new \RuntimeException('Defina a variável de ambiente DEMO_SENHA (senha das contas da clínica) antes de rodar o seed. Nada foi gravado.');
+        }
+        if (in_array(mb_strtolower(trim($senha)), self::SENHAS_CONHECIDAS, true)) {
+            throw new \RuntimeException('DEMO_SENHA está na lista de senhas conhecidas; escolha outra. Nada foi gravado.');
+        }
+        if (mb_strlen(trim($senha)) < self::SENHA_MINIMO) {
+            throw new \RuntimeException('DEMO_SENHA é curta demais: use pelo menos '.self::SENHA_MINIMO.' caracteres. Nada foi gravado.');
+        }
+
+        return $senha;
+    }
+
     private function criarUsuarios(string $senha): void
     {
-        // [chave usada no histórico, login, papel, CRMV]. vet1 é o dono (veterinário com CRMV).
+        // [chave usada no histórico, login, nome, papel, CRMV]. vet1 é o dono (veterinário com CRMV).
         $contas = [
-            ['dono', 'vet1', 'dono', 'CRMV-SP 21458'],
-            ['veterinario', 'vet2', 'veterinario', 'CRMV-SP 33871'],
-            ['vet3', 'vet3', 'veterinario', 'CRMV-SP 40215'],
-            ['recepcao', 'recepcao1', 'recepcao', null],
-            ['recepcao2', 'recepcao2', 'recepcao', null],
-            ['recepcao3', 'recepcao3', 'recepcao', null],
-            ['atendente', 'estetica1', 'atendente', null],
-            ['estetica2', 'estetica2', 'atendente', null],
-            ['vendedor', 'vendas1', 'vendedor', null],
-            ['vendas2', 'vendas2', 'vendedor', null],
+            ['dono', 'vet1', 'vet1', 'dono', 'CRMV-SP 21458'],
+            ['veterinario', 'vet2', 'vet2', 'veterinario', 'CRMV-SP 33871'],
+            ['vet3', 'vet3', 'vet3', 'veterinario', 'CRMV-SP 40215'],
+            ['recepcao', 'recepcao1', 'recepcao1', 'recepcao', null],
+            ['recepcao2', 'recepcao2', 'recepcao2', 'recepcao', null],
+            ['recepcao3', 'recepcao3', 'recepcao3', 'recepcao', null],
+            ['atendente', 'estetica1', 'estetica1', 'atendente', null],
+            ['estetica2', 'estetica2', 'estetica2', 'atendente', null],
+            ['vendedor', 'vendas1', 'vendas1', 'vendedor', null],
+            ['vendas2', 'vendas2', 'vendas2', 'vendedor', null],
+            // Administração (17/11): cuida dos funcionários; por enquanto só gera e revoga os PINs (tela Supervisão).
+            ['admin', 'administracao', 'Administração', 'admin', null],
         ];
 
-        foreach ($contas as [$chave, $login, $papel, $crmv]) {
-            $atributos = ['name' => $login, 'email' => "{$login}@clinica.sentinel.br", 'papel' => $papel, 'crmv' => $crmv];
+        foreach ($contas as [$chave, $login, $nome, $papel, $crmv]) {
+            $atributos = ['name' => $nome, 'email' => $login.'@'.self::DOMINIO_EMAIL, 'papel' => $papel, 'crmv' => $crmv];
             // Cast "hashed" do User: só o hash é gravado. A senha nunca vai para o console nem para o log.
             $usuario = User::query()->firstOrCreate(['email' => $atributos['email']], [...$atributos, 'tenant_id' => self::TENANT, 'password' => $senha]);
 
@@ -115,9 +149,10 @@ class ClinicaSeeder extends Seeder
     {
         $catalogo = app(CatalogoService::class);
         $servico = fn (string $setor, string $categoria, string $nome, int $preco, string $por = 'unidade') => $catalogo->criar(
-            ['tipo' => 'servico', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco, 'cobranca_por' => $por], self::TENANT);
+            ['tipo' => 'servico', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco, 'cobranca_por' => $por,
+                'controla_estoque' => false, 'exige_receita' => false], self::TENANT);
         $produto = fn (string $setor, string $categoria, string $nome, int $preco, int $estoque, bool $receita = false) => $catalogo->criar(
-            ['tipo' => 'produto', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco,
+            ['tipo' => 'produto', 'setor' => $setor, 'categoria' => $categoria, 'nome_comercial' => $nome, 'preco_centavos' => $preco, 'cobranca_por' => 'unidade',
                 'controla_estoque' => true, 'estoque' => $estoque, 'exige_receita' => $receita], self::TENANT);
 
         $this->itens = [
@@ -184,20 +219,20 @@ class ClinicaSeeder extends Seeder
         // [dias atrás, hora, pet, veterinário, tipo, itens do prontuário, pagamento: forma | 'a_receber' | 'aberta']
         $atendimentos = [
             [28, '09:00', 'thor', 'dono', 'vacinacao', [['v10', 1]], 'pix'],
-            [26, '10:30', 'bidu', 'veterinario', 'consulta', [['hemograma', 1]], 'cartao'],
+            [26, '10:00', 'bidu', 'veterinario', 'consulta', [['hemograma', 1]], 'cartao'],
             [24, '14:00', 'nina', 'veterinario', 'consulta', [], 'dinheiro'],
-            [21, '09:30', 'rex', 'dono', 'exame', [['hemograma', 1]], 'pix'],
+            [21, '09:00', 'rex', 'dono', 'exame', [['hemograma', 1]], 'pix'],
             [19, '11:00', 'amora', 'veterinario', 'cirurgia', [['castracao', 1]], 'cartao'],
-            [16, '15:30', 'rex', 'dono', 'vacinacao', [['antirrabica', 1], ['v10', 1]], 'pix'],
+            [16, '15:00', 'rex', 'dono', 'vacinacao', [['antirrabica', 1], ['v10', 1]], 'pix'],
             [14, '10:00', 'amora', 'veterinario', 'consulta', [['microchip', 1]], 'a_receber'],
             [9, '16:00', 'nina', 'veterinario', 'retorno', [], 'cartao'],
             [6, '09:00', 'nina', 'dono', 'consulta', [['vermifugo', 1]], 'a_receber'],
-            [3, '13:30', 'bidu', 'veterinario', 'vacinacao', [['v10', 1]], 'pix'],
-            [2, '10:30', 'thor', 'veterinario', 'consulta', [['hemograma', 1]], 'aberta'],
+            [3, '13:00', 'bidu', 'veterinario', 'vacinacao', [['v10', 1]], 'pix'],
+            [2, '10:00', 'thor', 'veterinario', 'consulta', [['hemograma', 1]], 'aberta'],
         ];
 
         foreach ($atendimentos as [$dias, $hora, $pet, $vet, $tipo, $itens, $pagamento]) {
-            $inicio = $this->dia($dias, $hora);
+            $inicio = $this->diaDaAgenda($dias, $hora);
             $this->atenderNaClinica($inicio, $pet, $vet, $tipo === 'retorno' ? 'retorno' : 'consulta', $tipo, $itens, $pagamento, [
                 'anamnese' => 'Tutor relata o motivo da visita; sem queixas adicionais.',
                 'exame_fisico' => 'Mucosas normocoradas, hidratado, temperatura dentro do normal.',
@@ -206,11 +241,11 @@ class ClinicaSeeder extends Seeder
             ]);
         }
 
-        // Internação de 3 diárias (entrada há 12 dias à noite, alta há 9 dias de manhã).
-        $this->atenderNaClinica($this->dia(12, '18:00'), 'rex', 'dono', 'consulta', 'internacao', [['internacao', 1]], 'pix', [
+        // Internação de 3 diárias (entrada há 12 dias no fim da tarde, alta há 9 dias de manhã).
+        $this->atenderNaClinica($this->diaDaAgenda(12, '17:00'), 'rex', 'dono', 'consulta', 'internacao', [['internacao', 1]], 'pix', [
             'anamnese' => 'Vômitos recorrentes (dado fictício de demonstração).',
             'conduta' => 'Internação para fluidoterapia e observação.',
-            'entrada_em' => $this->dia(12, '18:30'),
+            'entrada_em' => $this->diaDaAgenda(12, '18:30'),
             'alta_em' => $this->dia(9, '10:00'),
         ], $this->dia(9, '10:30'));
     }
@@ -268,7 +303,7 @@ class ClinicaSeeder extends Seeder
             [5, '10:00', 'rex', 'banho_g', null, 'a_receber'],
             [1, '16:00', 'amora', 'banho_p', null, 'dinheiro'],
         ] as [$dias, $hora, $pet, $banho, $tosa, $pagamento]) {
-            $inicio = $this->dia($dias, $hora);
+            $inicio = $this->diaDaAgenda($dias, $hora);
             $agendamento = $this->em($inicio->copy()->subDays(2), fn () => app(AgendaService::class)->agendar([
                 'pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios['atendente']->id,
                 'catalogo_item_id' => $this->itens[$banho]->id, 'inicio' => $inicio, 'fim' => $inicio->copy()->addHour(),
@@ -330,13 +365,13 @@ class ClinicaSeeder extends Seeder
         $agenda = app(AgendaService::class);
         $semana = [
             [0, '17:00', 'amora', 'veterinario', 'retorno', 'confirmado'],
-            [0, '17:30', 'bidu', 'atendente', 'banho_p', 'confirmado'],
+            [0, '17:00', 'bidu', 'atendente', 'banho_p', 'confirmado'],
             [1, '09:00', 'nina', 'dono', 'consulta', 'confirmado'],
             [1, '09:00', 'thor', 'atendente', 'banho_g', 'agendado'],
             [1, '10:00', 'bidu', 'veterinario', 'consulta', 'agendado'],
             [2, '14:00', 'nina', 'dono', 'consulta', 'agendado'],
             [2, '15:00', 'amora', 'atendente', 'tosa_c', 'agendado'],
-            [3, '09:30', 'rex', 'veterinario', 'consulta', 'agendado'],
+            [3, '09:00', 'rex', 'veterinario', 'consulta', 'agendado'],
             [3, '11:00', 'rex', 'dono', 'retorno', 'agendado'],
             [4, '10:00', 'thor', 'veterinario', 'consulta', 'agendado'],
             [4, '13:00', 'rex', 'atendente', 'banho_g', 'agendado'],
@@ -348,7 +383,7 @@ class ClinicaSeeder extends Seeder
         // Relógio na meia-noite de hoje: agendar no passado é recusado, e o horário de hoje pode já ter passado.
         $this->em($this->dia(0, '00:00'), function () use ($semana, $agenda) {
             foreach ($semana as [$dias, $hora, $pet, $quem, $servico, $status]) {
-                $inicio = $this->dia(-$dias, $hora);
+                $inicio = $this->diaDaAgenda(-$dias, $hora);
                 $agendamento = $agenda->agendar(['pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios[$quem]->id,
                     'catalogo_item_id' => $this->itens[$servico]->id, 'inicio' => $inicio,
                     'fim' => $inicio->copy()->addMinutes($quem === 'atendente' ? 60 : 30)], self::TENANT);
@@ -359,23 +394,43 @@ class ClinicaSeeder extends Seeder
         });
     }
 
-    /** Despesas gerais do mês (lançamentos de categoria "despesa"), para o lucro dos Resultados. */
+    /**
+     * Despesas gerais (lançamentos de categoria "despesa"), para o lucro dos Resultados.
+     *
+     * Decisão do Lucas (15/11): a demo não mostra prejuízo. O seed recebe ~R$ 3.014 entre 15 e 29 dias atrás e ~R$ 1.463
+     * nos últimos 14; as despesas ficam em ~50% e ~70% disso, e CADA uma cai num dia em que o seed recebe mais do que
+     * ela (o "dias atrás" ao lado do valor). Assim nenhum dia, semana ou mês fica negativo, qualquer que seja a data em
+     * que o seed rodar (as datas são relativas a hoje). ClinicaSeederTest prova isso. Os valores são simulados, na
+     * escala da receita do seed, não de uma clínica real.
+     */
     private function despesas(): void
     {
         $categoria = fn (string $nome) => CategoriaLancamento::create(['nome' => $nome, 'tipo' => 'despesa', 'tenant_id' => self::TENANT]);
         $fornecedor = Fornecedor::create(['nome' => 'Distribuidora PetMais Ltda', 'documento' => '11.222.333/0001-81', 'tenant_id' => self::TENANT]);
         $c = ['aluguel' => $categoria('Aluguel'), 'energia' => $categoria('Energia elétrica'), 'agua' => $categoria('Água'),
-            'compras' => $categoria('Compras de estoque'), 'salarios' => $categoria('Salários')];
+            'compras' => $categoria('Compras de estoque'), 'manutencao' => $categoria('Manutenção e higiene')];
 
         foreach ([
-            ['Aluguel do imóvel', '4500.00', 25, 'aluguel', 'conciliado', null],
-            ['Conta de energia', '850.40', 18, 'energia', 'conciliado', null],
-            ['Conta de água', '220.15', 18, 'agua', 'pendente', null],
-            ['Compra de ração e petiscos', '3200.00', 20, 'compras', 'conciliado', $fornecedor->id],
-            ['Compra de medicamentos da farmácia', '1480.90', 12, 'compras', 'pendente', $fornecedor->id],
-            ['Folha de pagamento', '6800.00', 5, 'salarios', 'pendente', null],
+            // 15 a 29 dias atrás (receita ~R$ 3.014): R$ 1.551,60
+            ['Aluguel (parcela quinzenal)', '450.00', 19, 'aluguel', 'conciliado', null],              // dia: R$ 600,00
+            ['Compra de ração e petiscos', '320.00', 18, 'compras', 'conciliado', $fornecedor->id],      // dia: R$ 420,00
+            ['Conta de energia', '210.80', 16, 'energia', 'conciliado', null],                          // dia: R$ 310,00
+            ['Compra de medicamentos da farmácia', '175.50', 28, 'compras', 'conciliado', $fornecedor->id], // dia: R$ 240,00
+            ['Manutenção do secador do banho e tosa', '160.00', 29, 'manutencao', 'conciliado', null], // dia: R$ 240,00
+            ['Material de higiene do banho e tosa', '140.00', 21, 'manutencao', 'conciliado', null],    // dia: R$ 215,00
+            ['Conta de água', '95.30', 26, 'agua', 'conciliado', null],                                 // dia: R$ 215,00
+            // últimos 14 dias (receita ~R$ 1.463): R$ 1.021,45
+            ['Aluguel (parcela quinzenal)', '450.00', 9, 'aluguel', 'pendente', null],                  // dia: R$ 770,00
+            ['Compra de medicamentos da farmácia', '180.90', 9, 'compras', 'pendente', $fornecedor->id],
+            ['Conta de energia', '165.40', 3, 'energia', 'pendente', null],                             // dia: R$ 240,00
+            ['Compra de ração e petiscos', '98.00', 8, 'compras', 'pendente', $fornecedor->id],         // dia: R$ 120,00
+            ['Material de higiene do banho e tosa', '85.00', 10, 'manutencao', 'pendente', null],       // dia: R$ 120,00
+            ['Conta de água', '42.15', 1, 'agua', 'pendente', null],                                    // dia: R$ 50,00
         ] as [$descricao, $valor, $dias, $cat, $status, $fornecedorId]) {
-            Lancamento::create(['descricao' => $descricao, 'valor' => $valor, 'data' => $this->dia($dias, '08:00')->toDateString(), 'status' => $status,
+            // 15/11: a despesa cai no mesmo dia da receita que a cobre. A receita da agenda pula o domingo (diaDaAgenda); a das
+            // vendas avulsas (dias 18, 29, 10 e 1) e a do fechamento da internação (dia 9), não.
+            $data = in_array($dias, [18, 29, 10, 1, 9], true) ? $this->dia($dias, '08:00') : $this->diaDaAgenda($dias, '08:00');
+            Lancamento::create(['descricao' => $descricao, 'valor' => $valor, 'data' => $data->toDateString(), 'status' => $status,
                 'categoria_lancamento_id' => $c[$cat]->id, 'fornecedor_id' => $fornecedorId, 'tenant_id' => self::TENANT]);
         }
     }
@@ -401,6 +456,22 @@ class ClinicaSeeder extends Seeder
         [$h, $m] = array_map('intval', explode(':', $hora));
 
         return Carbon::now()->startOfDay()->subDays($diasAtras)->setTime($h, $m);
+    }
+
+    /**
+     * Como dia(), para a agenda (15/11): a grade só abre no expediente (config sentinel.agenda: segunda a sábado). Um
+     * horário que cai no domingo vai para o dia útil vizinho: o sábado, se já passou; a segunda, se é futuro. As horas
+     * da clínica são hora cheia (blocos de 1 h).
+     */
+    private function diaDaAgenda(int $diasAtras, string $hora): Carbon
+    {
+        $dia = $this->dia($diasAtras, $hora);
+        $abre = array_map('intval', (array) config('sentinel.agenda.expediente.dias', []));
+        for ($i = 0; $i < 7 && ! in_array($dia->dayOfWeekIso, $abre, true); $i++) {
+            $dia = $dia->lt(Carbon::now()) ? $dia->subDay() : $dia->addDay();
+        }
+
+        return $dia;
     }
 
     /** Roda $acao com o relógio parado em $momento (created_at, pago_em, assinado_em... no passado). */

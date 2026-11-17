@@ -84,15 +84,20 @@ class AtualizarStatusLancamentoTest extends TestCase
         $this->assertSame('pendente', $lancamento->fresh()->status);
     }
 
-    public function test_confirmar_cedo_demais_nao_altera_nada(): void
+    public function test_confirmar_fora_do_prazo_nao_altera_nada_e_sem_espera_altera(): void
     {
+        // Decisão B (13/11): não há mais espera mínima; o limite é o prazo da proposta (5 min).
         $lancamento = $this->lancamento('pendente');
         $token = $this->proporAtualizacao($lancamento->id, 'conciliado');
-        $this->travel(1)->seconds();
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
-
         $this->assertSame('pendente', $lancamento->fresh()->status);
+
+        // Um clique, no mesmo instante do Revisar: altera.
+        $token = $this->proporAtualizacao($lancamento->id, 'conciliado');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
+        $this->assertSame('conciliado', $lancamento->fresh()->status);
     }
 
     // ---- Recusas de regra de negócio: frase amigável, sem termo técnico ----
@@ -218,7 +223,10 @@ class AtualizarStatusLancamentoTest extends TestCase
         $this->assertNotNull($tool, 'a tool deve estar no catálogo');
         $parametros = $tool['function']['parameters'];
         $this->assertSame(['pendente', 'conciliado'], $parametros['properties']['novo_status']['enum']);
-        $this->assertSame(['id', 'novo_status'], $parametros['required']);
+        // P-C1 (13/11): o id pode vir da posição na última tabela ("marca o terceiro"), então não é obrigatório para a
+        // IA; o servidor continua exigindo o id (REGRAS_STATUS_LANCAMENTO) depois de resolver a posição.
+        $this->assertSame(['novo_status'], $parametros['required']);
+        $this->assertSame('integer', $parametros['properties']['posicao']['type']);
         $this->assertArrayNotHasKey('tenant_id', $parametros['properties']);
     }
 }

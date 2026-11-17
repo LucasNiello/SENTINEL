@@ -14,39 +14,34 @@ O TestCase interrompe a execução antes de RefreshDatabase se detectar outro ba
 
 ## Usuários de desenvolvimento
 
-No ambiente `APP_ENV=local`, execute `php artisan sentinel:preparar-acesso`
-para preparar o primeiro acesso após as migrations. Se já houver um administrador
-com tenant, ele será preservado. Caso contrário, o comando cria
-`admin@sentinel.local`, com papel `admin` e tenant 1, desde que o e-mail esteja livre.
-Uma conta existente nesse e-mail nunca será sobrescrita ou promovida automaticamente.
+O seed cria um único tenant: o da clínica veterinária + petshop (tenant 3, que precisa estar
+em `SENTINEL_TENANTS_CLINICA`). Defina `DEMO_SENHA` no `.env` (no mínimo 12 caracteres, fora da lista
+de senhas conhecidas) e rode `php artisan migrate:fresh --seed` no ambiente `APP_ENV=local`. Todas as
+contas abaixo usam essa senha, guardada só como hash. Sem `DEMO_SENHA`, o seed só avisa e não grava nada.
+Não execute `migrate:fresh` em um banco que contenha dados que deseja preservar.
 
-Cada conta nova recebe uma senha aleatória de 24 caracteres, armazenada com
-`Hash::make` e mostrada somente no console da criação. Guarde-a naquele momento:
-executar novamente não duplica usuários, não redefine e não reexibe senhas.
-Não redirecione essa saída para logs ou arquivos versionados.
+| E-mail | Papel |
+|---|---|
+| `vet1@clinica.sentinel.br` | dono (veterinário, CRMV) |
+| `vet2@clinica.sentinel.br`, `vet3@clinica.sentinel.br` | veterinário (CRMV) |
+| `recepcao1@` a `recepcao3@clinica.sentinel.br` | recepção |
+| `estetica1@`, `estetica2@clinica.sentinel.br` | banho e tosa |
+| `vendas1@`, `vendas2@clinica.sentinel.br` | vendedor (loja) |
+| `administracao@clinica.sentinel.br` | admin (gera e revoga os PINs de autorização) |
 
-O `instalar.bat` executa essa preparação após as migrations e o seed inicial,
-inclusive em bancos já instalados. A saída com credenciais não passa pelo logger
-do instalador e não é gravada no estado local. Se o seed falhar, a transação é
-revertida e nenhuma credencial dessa tentativa é exibida.
+O seed também cria 5 pets com seus tutores, 3 clientes só da loja, o catálogo, a agenda da semana e o
+histórico do último mês. O isolamento entre tenants continua garantido pelo código e provado nos testes,
+que criam os próprios tenants.
+
+Sem o seed, `php artisan sentinel:preparar-acesso` garante o primeiro acesso: se o tenant da clínica
+não tiver administrador, cria `administracao@clinica.sentinel.br` com uma senha aleatória de 24
+caracteres, mostrada somente no console da criação (guarde-a naquele momento; executar de novo não
+duplica, não redefine e não reexibe senhas). Uma conta existente nesse e-mail nunca é sobrescrita nem
+promovida. Se a Administração foi criada assim (pelo comando ou pelo `instalar.bat`), ela mantém essa
+senha aleatória: o seed rodado depois preserva a conta e não a troca pela `DEMO_SENHA`. O `instalar.bat` executa essa preparação após as migrations e o seed inicial; a saída com
+credenciais não passa pelo logger do instalador e não é gravada no estado local.
 
 Acesse http://127.0.0.1:8000/login. Após autenticar, o destino é `/agente`;
 o ambiente local usa `SESSION_DRIVER=database`. Não há recuperação de senha
 pela interface: se perder a senha, será necessária uma redefinição explícita
 via Laravel, somente para a conta desejada, sem tentar recuperar o hash.
-
-O `php artisan db:seed` também prepara os quatro perfis abaixo, preservando
-usuários existentes e gerando senhas diferentes para novos usuários. O seeder
-é exclusivo do ambiente local. Os seeders de dados de demonstração continuam
-destinados ao banco inicial vazio; não execute `migrate:fresh` em um banco que
-contenha dados que deseja preservar.
-
-| E-mail | Papel | Tenant |
-|---|---|---|
-| `admin@sentinel.local` | admin | 1 |
-| `operador@sentinel.local` | operador | 1 |
-| `leitura@sentinel.local` | leitura | 1 |
-| `admin.t2@sentinel.local` | admin | 2 |
-
-O tenant 2 existe para mostrar o isolamento: quem entra nele não vê os dados
-do tenant 1.

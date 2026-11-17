@@ -1,8 +1,12 @@
+/* Fontes locais (OFL), as mesmas da bancada: o login não busca nada em CDN (F3 do front, 14/11). */
+@font-face{font-family:'IBM Plex Sans';font-style:normal;font-weight:400 600;font-stretch:100%;font-display:swap;src:url(../fonts/ibm-plex-sans-400-600.woff2) format('woff2')}
+@font-face{font-family:'Sora';font-style:normal;font-weight:300 600;font-display:swap;src:url(../fonts/sora-300-600.woff2) format('woff2')}
 
 :root{
   --night:#0B1119;--night-soft:#101B27;--ice:#B2D0EB;--cloud:#EAF0F6;--muted-dark:#96A6B6;
-  --cream:#FFFCEF;--ink:#20252C;--blue:#2D5D87;--muted:#6E7882;--border:#DEDCCF;
-  --display:'Sora',system-ui,sans-serif;--body:'IBM Plex Sans',system-ui,sans-serif;
+  --cream:#FFFCEF;--ink:#20252C;--blue:#2D5D87;--muted:#5B6570;--border:#DEDCCF;--paper:#FFFEFA;--cream-alt:#F4F0DE;
+  --erro:#A3412E;--erro-faixa:#F5E0D9;--sucesso:#2F6B4F;--sucesso-faixa:#E4EFE6;
+  --display:'Sora','Segoe UI',system-ui,sans-serif;--body:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
 }
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;}html{background:var(--cream)}body{font:16px/1.5 var(--body);color:var(--ink);-webkit-font-smoothing:antialiased}
 [hidden]{display:none!important}button,input{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.65}
@@ -32,16 +36,16 @@
 .form-card h2{font:300 clamp(37px,3.5vw,54px)/1.16 var(--display);letter-spacing:-.055em;margin:0 0 8px}.form-card h2 span{color:var(--blue)}
 .form-subtitle{font-size:14px;color:var(--muted);margin:0 0 35px}
 #login-form{display:grid;gap:19px}.field{min-width:0}.field label{display:block;font-weight:600;font-size:13px;margin-bottom:8px}
-.input-wrap{display:flex;align-items:center;min-width:0;min-height:54px;border:1px solid #CFCBBB;border-radius:5px;background:#FFFEFA;transition:border-color .18s,box-shadow .18s}
-.input-wrap:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(45,93,135,.10)}.input-wrap.is-invalid{border-color:#B5483F}
-.input-wrap input{width:100%;min-width:0;min-height:52px;border:0;outline:0;background:transparent;padding:13px 16px;color:var(--ink);font-size:14px}.input-wrap input::placeholder{color:#899098;opacity:1}
-.password-toggle{border:0;background:transparent;align-self:stretch;color:var(--blue);padding:0 14px;margin:3px;border-radius:3px;font-size:12px;font-weight:600;min-width:72px}.password-toggle:hover{background:#F1F0E8}
-.field-error{color:#A3412E;font-size:12px;margin:6px 0 0}
+.input-wrap{display:flex;align-items:center;min-width:0;min-height:54px;border:1px solid var(--muted);border-radius:5px;background:var(--paper);transition:border-color .18s,box-shadow .18s}
+.input-wrap:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(45,93,135,.10)}.input-wrap.is-invalid{border-color:var(--erro)}
+.input-wrap input{width:100%;min-width:0;min-height:52px;border:0;outline:0;background:transparent;padding:13px 16px;color:var(--ink);font-size:14px}.input-wrap input::placeholder{color:var(--muted);opacity:1}
+.password-toggle{border:0;background:transparent;align-self:stretch;color:var(--blue);padding:0 14px;margin:3px;border-radius:3px;font-size:12px;font-weight:600;min-width:72px}.password-toggle:hover{background:var(--cream-alt)}
+.field-error{color:var(--erro);font-size:12px;margin:6px 0 0}
 .submit-button{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:54px;margin-top:4px;border:1px solid var(--ink);border-radius:5px;background:var(--ink);color:var(--cream);padding:0 18px;font-weight:600;font-size:14px;transition:background .18s,border-color .18s}
 .submit-button svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.submit-button:hover:enabled{background:var(--blue);border-color:var(--blue)}
-.form-notice{margin:0;border-radius:4px;padding:11px 13px;font-size:12px;background:#E3EFE9;color:#245B41}.form-notice.is-error{background:#F7E5E0;color:#A3412E}
+.form-notice{margin:0;border-radius:4px;padding:11px 13px;font-size:12px;background:var(--sucesso-faixa);color:var(--sucesso)}.form-notice.is-error{background:var(--erro-faixa);color:var(--erro)}
 .help-link{margin-top:24px;background:transparent;border:0;padding:7px 0;min-height:44px;color:var(--blue);font-weight:600;font-size:12px;text-align:left}.help-link:hover{text-decoration:underline}
-.access-footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:#87909A}
+.access-footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted)}
 .modal-backdrop{position:fixed;inset:0;z-index:100;background:rgba(7,13,21,.64);display:grid;place-items:center;padding:20px}
 .support-dialog{position:relative;width:min(100%,420px);background:var(--cream);border-radius:9px;padding:35px 32px 30px;box-shadow:0 30px 100px rgba(0,0,0,.2)}
 .dialog-close{position:absolute;right:17px;top:12px;min-width:40px;min-height:40px;background:none;border:0;color:var(--ink);font-size:26px}.support-dialog h2{font:400 26px/1.3 var(--display);letter-spacing:-.04em;margin:0 0 14px}.support-dialog p{font-size:14px;line-height:1.7;color:var(--muted);margin:0 0 25px}.dialog-confirm{border:0;border-radius:5px;background:var(--ink);color:var(--cream);min-height:46px;padding:0 22px}
@@ -50,6 +54,17 @@
 @media(max-width:900px){.layout{display:block}.visual{display:none}.access{min-height:100svh;padding:26px clamp(24px,7vw,72px)}.access-header{justify-content:space-between}.mobile-brand{display:flex}.access-main{padding:40px 0}.form-card{width:min(100%,405px)}.form-card h2{font-size:clamp(38px,5vw,48px)}}
 @media(max-width:520px){.access{padding:21px 23px 20px}.mobile-brand{font-size:12px;letter-spacing:.22em}.mobile-brand svg{height:30px;width:25px}.access-tag{font-size:9px}.access-main{padding:37px 0 48px}.form-card h2{font-size:40px}.form-subtitle{margin-bottom:28px}.access-footer{font-size:10px}.support-dialog{padding:34px 22px 24px}}
 @media(max-height:690px) and (min-width:901px){.visual,.access{padding-top:23px;padding-bottom:18px}.access-main{padding:13px 0}.form-subtitle{margin-bottom:22px}#login-form{gap:13px}.help-link{margin-top:10px}}
+/* Celular (T3, 14/11): corpo >= 15 px, toque >= 44 px; rótulos em caixa alta podem ficar em 12 px. Veio de public/css/sentinel-login-extra.css. */
+/* F3 do front (14/11): os mesmos tamanhos valem em qualquer largura (skill §3: nada abaixo de 15 px, rótulo em caixa alta 12 px). */
+@media all {
+    .form-subtitle,.field label,.input-wrap input,.password-toggle,.submit-button,.field-error,.form-notice,.help-link,
+    .support-dialog p {font-size:15px}
+    .input-wrap input {font-size:16px}
+    .access-tag,.access-footer {font-size:12px}
+}
+@media (max-width:900px) {
+    .mobile-brand {min-height:44px;display:inline-flex;align-items:center}
+}
 @media(prefers-reduced-motion:reduce){.ceu-meteoros{display:none}*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
   
@@ -62,7 +77,7 @@
 .revelacao-metade{position:absolute;left:0;right:0;height:50.5%;background:var(--night)}.revelacao-cima{top:0}.revelacao-baixo{bottom:0}
 .revelacao-progresso{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:grid;justify-items:center;gap:14px;width:min(240px,60vw);transition:opacity 280ms ease}
 .revelacao-trilho{width:100%;height:1px;background:color-mix(in srgb,var(--ice) 18%,transparent);overflow:hidden}.revelacao-trilho span{display:block;height:100%;background:var(--ice);transform:scaleX(var(--progresso,0));transform-origin:left;transition:transform 300ms ease}
-.revelacao-contagem{color:var(--muted-dark);font:11px/1 "IBM Plex Mono",Consolas,monospace;letter-spacing:.14em;font-variant-numeric:tabular-nums}
+.revelacao-contagem{color:var(--muted-dark);font:12px/1 "IBM Plex Mono",Consolas,monospace;letter-spacing:.14em;font-variant-numeric:tabular-nums}
 .revelacao[data-fase] .revelacao-progresso{opacity:0}
 .revelacao[data-fase=abrir] .revelacao-cima{animation:revelacao-cima 400ms cubic-bezier(.76,0,.24,1) forwards}.revelacao[data-fase=abrir] .revelacao-baixo{animation:revelacao-baixo 400ms cubic-bezier(.76,0,.24,1) forwards}
 @keyframes revelacao-cima{to{transform:translate3d(0,-100%,0)}}@keyframes revelacao-baixo{to{transform:translate3d(0,100%,0)}}@keyframes revelacao-seguranca{to{visibility:hidden}}

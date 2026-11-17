@@ -1,0 +1,7 @@
+n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao;papel
+1;remarcar;remarcar o retorno do dr. rafael para dia 16/11, às 10h;;remarcar_agendamento;confirmacao_pendente|resultado_leitura;pedido do Lucas de 15/11 (antes abria o card de criar vazio);recepcao
+2;remarcar;remarca o banho do Bidu pra sexta às 14h;;remarcar_agendamento;confirmacao_pendente|resultado_leitura;atendente remarca banho e tosa;atendente
+3;permissao;remarca a consulta do Thor para amanhã às 10h;;remarcar_agendamento;negado;vendedor nao mexe na agenda;vendedor
+4;agenda;agenda uma consulta pro Thor amanhã às 15h com o Dr. Rafael;;agendar_atendimento;confirmacao_pendente;pedido 7 da bateria (agendar novo continua sendo agendar);recepcao
+5;agenda;cancela a consulta da Nina de depois de amanhã;;alterar_status_agendamento;confirmacao_pendente;pedido 11 da bateria, arg:novo_status=cancelado;recepcao
+6;caixa;"Mensagem da caixa de entrada (tutor #1; pets: Thor = pet #1, Mel = pet #2): ""Oi! Queria remarcar o banho do Thor para sábado, pode ser?""";;remarcar_agendamento;confirmacao_pendente|resultado_leitura;texto do botao Pedir ao agente: o tutor pede para remarcar (antes o esperado era agendar);recepcao

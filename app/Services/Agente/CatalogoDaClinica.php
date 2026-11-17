@@ -2,11 +2,16 @@
 
 namespace App\Services\Agente;
 
+use App\Http\Requests\AgendarRequest;
+use App\Http\Requests\AlterarServicoAgendamentoRequest;
 use App\Http\Requests\AlterarStatusAgendamentoRequest;
 use App\Http\Requests\CatalogoItemAtualizacaoRequest;
 use App\Http\Requests\CatalogoItemRequest;
+use App\Http\Requests\EstornarCobrancaRequest;
+use App\Http\Requests\EstornarVendaRequest;
 use App\Http\Requests\PetRequest;
 use App\Http\Requests\ReceberCobrancaRequest;
+use App\Http\Requests\RemarcarRequest;
 use App\Http\Requests\RegistrarVendaRequest;
 use App\Http\Requests\RegistroIdRequest;
 use App\Http\Requests\TutorRequest;
@@ -17,6 +22,7 @@ use App\Models\Mensagem;
 use App\Models\Pet;
 use App\Models\Tutor;
 use App\Models\User;
+use App\Models\Venda;
 use App\Services\AgendaService;
 use App\Services\CatalogoService;
 use App\Services\CobrancaService;
@@ -33,13 +39,27 @@ use App\Services\VendaService;
  *
  * Quem acessa o quê (proposta de 10/11/2026, confirmar com o Lucas): toda a equipe consulta tutores, pets e
  * catálogo e mantém o cadastro de tutores e pets; o catálogo (preços!) é só do dono; excluir, restaurar e excluir
- * de vez dependem do que a entidade permite (restaurar e excluir de vez pedem a senha do dono no card).
+ * de vez são só do dono (item C, 12/11), e restaurar e excluir de vez pedem a senha do dono no card.
  */
 trait CatalogoDaClinica
 {
     private const PAPEIS_EQUIPE = ['atendente', 'vendedor', 'recepcao', 'veterinario', 'dono'];
 
     private const PAPEIS_DO_DONO = ['dono'];
+
+    /** Quem vê e mexe na agenda (tabela da FASE oito, 15/11): o vendedor não. Mesma lista no chat e na tela /agenda. */
+    private const PAPEIS_DA_AGENDA = ['atendente', 'recepcao', 'veterinario', 'dono'];
+
+    /** As colunas da tabela da agenda: a lista de escolha (vários candidatos) usa as mesmas (15/11). */
+    private const COLUNAS_DA_AGENDA = ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'setor', 'status'];
+
+    /** Caixa de entrada: quantos pets do tutor vão no pedido ao agente e o limite do campo do chat (AgenteController). */
+    private const PETS_NO_PEDIDO = 5;
+
+    private const LIMITE_DO_PEDIDO = 1000;
+
+    /** Quantos itens do catálogo cabem na descrição da venda (numerosDoCatalogo). */
+    private const LIMITE_CATALOGO_NA_DESCRICAO = 80;
 
     /** @return array<int, array<string, mixed>> */
     private function toolsDaClinica(): array
@@ -71,6 +91,7 @@ trait CatalogoDaClinica
                 sucessoCriar: 'Tutor cadastrado',
                 tituloAtualizar: 'Alterar tutor',
                 sucessoAtualizar: 'Tutor atualizado',
+                resumirAtualizar: fn (array $v, int $tenantId) => $this->petsDoTutorNoCard((int) ($v['id'] ?? 0), $tenantId),
             ),
             ...$this->definirCadastro(
                 entidade: 'Pet',
@@ -97,6 +118,7 @@ trait CatalogoDaClinica
                 sucessoCriar: 'Pet cadastrado',
                 tituloAtualizar: 'Alterar pet',
                 sucessoAtualizar: 'Pet atualizado',
+                resumirAtualizar: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
             ),
             ...$this->definirCadastro(
                 entidade: 'CatalogoItem',
@@ -113,9 +135,9 @@ trait CatalogoDaClinica
                     'nome_comercial' => ['type' => 'string'],
                     'preco_centavos' => ['type' => 'integer', 'description' => 'Preço em CENTAVOS inteiros (4590 = R$ 45,90). Nunca decimal.'],
                     'cobranca_por' => ['type' => 'string', 'enum' => CatalogoItem::COBRANCA_POR],
-                    'controla_estoque' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Obrigatório. Serviço: "nao".'],
+                    'controla_estoque' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Só preencha se o usuário disser se o item controla estoque; se ele não disse, deixe de fora, mesmo para serviço: quem cadastra escolhe no card. Nunca presuma.'],
                     'estoque' => ['type' => 'integer', 'description' => 'Estoque inicial, só produto que controla estoque.'],
-                    'exige_receita' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Obrigatório. Só item de farmácia da clínica pode ser "sim".'],
+                    'exige_receita' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'Só preencha se o usuário disser se o item exige receita; se ele não disse, deixe de fora: quem cadastra escolhe no card. Nunca presuma. Só item de farmácia da clínica pode ser "sim".'],
                 ],
                 obrigatorios: ['tipo', 'setor', 'categoria', 'nome_comercial', 'preco_centavos', 'cobranca_por', 'controla_estoque', 'exige_receita'],
                 propriedadesAtualizar: [
@@ -162,8 +184,9 @@ trait CatalogoDaClinica
     }
 
     /**
-     * Agenda, cobrança (P-B4: cobrar, receber, cancelar), venda avulsa e caixa de entrada (P-B5). Agendar e o
-     * encaixe de emergência entram com a P-C4 (data e hora separadas, duração do serviço, horários livres).
+     * Agenda (consultar, mudar status, agendar e encaixe de emergência: P-C4), cobrança (P-B4: cobrar, receber,
+     * cancelar), venda avulsa e caixa de entrada (P-B5). Fora da P-C4 (ficam para depois): data e hora separadas no
+     * card, duração vinda do serviço e sugestão de horários livres.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -184,7 +207,7 @@ trait CatalogoDaClinica
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Agendamento',
-                papeis: self::PAPEIS_EQUIPE,
+                papeis: self::PAPEIS_DA_AGENDA,
                 propriedades: [
                     'data_inicio' => ['type' => 'string', 'format' => 'date'],
                     'data_fim' => ['type' => 'string', 'format' => 'date'],
@@ -194,7 +217,7 @@ trait CatalogoDaClinica
                     'status' => ['type' => 'string', 'enum' => Agendamento::STATUS],
                 ],
                 obrigatorios: [],
-                executar: fn (array $a) => $agenda->buscarPorFiltro($a['data_inicio'] ?? null, $a['data_fim'] ?? null, $a['setor'] ?? null,
+                executar: fn (array $a) => $agenda->buscarPorFiltro($a['data_inicio'] ?? null, $a['data_fim'] ?? null, $this->setorDaAgendaPedido($a['setor'] ?? null),
                     isset($a['profissional_id']) ? (int) $a['profissional_id'] : null, isset($a['pet_id']) ? (int) $a['pet_id'] : null, $a['status'] ?? null, $a['tenant_id'])
                     ->map(fn (Agendamento $ag) => [
                         'id' => (int) $ag->id,
@@ -214,25 +237,165 @@ trait CatalogoDaClinica
                 descricao: 'Muda o status de um agendamento em aberto (agendado ou confirmado) para confirmado, realizado, cancelado ou faltou. Achado pelo id ou pelo nome do pet.',
                 acao: 'atualizar',
                 entidade: 'Agendamento',
-                papeis: ['atendente', 'recepcao', 'veterinario', 'dono'],
+                papeis: self::PAPEIS_DA_AGENDA,
                 propriedades: ['novo_status' => ['type' => 'string', 'enum' => ['confirmado', 'realizado', 'cancelado', 'faltou']]],
                 obrigatorios: ['novo_status'],
                 formRequest: AlterarStatusAgendamentoRequest::class,
-                executar: fn (array $d, int $tenantId) => $agenda->alterarStatus($d['id'], $d['novo_status'], $tenantId),
+                executar: fn (array $d, int $tenantId, User $ator) => $agenda->alterarStatus($d['id'], $d['novo_status'], $tenantId, $d['versao'], $this->autorizacaoDaAgenda($ator)),
                 mensagemErro: 'Não consegui mudar o status do agendamento. Tente novamente.',
                 titulo: 'Mudar o status do agendamento',
                 sucesso: 'Status do agendamento atualizado',
                 conferir: function (array $a) use ($agenda): ?array {
-                    $motivo = $agenda->motivoParaNaoAlterarStatus((int) ($a['id'] ?? 0), (string) ($a['novo_status'] ?? ''), (int) $a['tenant_id']);
+                    $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoAlterarStatus((int) ($a['id'] ?? 0), (string) ($a['novo_status'] ?? ''), (int) $a['tenant_id'], $this->versaoDaFicha($a),
+                            $this->autorizacaoDaAgenda(null));
 
                     return $motivo === null ? null : ['campo' => 'novo_status', 'motivo' => $motivo];
                 },
-                localizar: $agenda->localizarEmAberto(...),
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $agenda->localizarEmAberto($id, $busca, $tenantId, $this->setoresDaAgenda()),
                 rotulo: 'o agendamento',
                 colunaRotulo: 'pet',
+                rotuloAcao: 'Escolher',
                 campos: ['novo_status'],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDoAgendamento((int) ($v['id'] ?? 0), $tenantId),
+                colunasLista: self::COLUNAS_DA_AGENDA,
+                comVersao: true,
+                // Adendo final (15/11): cancelar cirurgia pede CRMV + senha; faltou e realizado seguem a regra atual.
+                exigeCrmv: fn (array $v, int $tenantId) => $agenda->exigeCrmvNoStatus((int) ($v['id'] ?? 0), $v['novo_status'] ?? null, $tenantId),
             ),
+            // Remarcar (15/11): muda o início (e, se escolhido no calendário, o profissional do mesmo setor) de um agendamento
+            // que já existe. Nunca cria agendamento novo; o fim recalcula. "Abrir a ficha do agendamento" também abre esta.
+            $this->definirAcao(
+                nome: 'remarcar_agendamento',
+                descricao: 'Remarca um agendamento que já existe (em aberto): muda o início (e, se o usuário pedir, o profissional do mesmo setor); o servidor recalcula o fim; pet, tutor e serviço continuam. Também é a tool para "ver", "abrir" ou "mostrar a ficha" de um agendamento. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional). Nunca cria um agendamento novo. Novo início no formato AAAA-MM-DD HH:MM (horário de São Paulo); sem horário dito, deixe em branco: a ficha abre com o calendário.',
+                acao: 'atualizar',
+                entidade: 'Agendamento',
+                papeis: self::PAPEIS_DA_AGENDA,
+                propriedades: [
+                    'inicio' => ['type' => 'string', 'description' => 'Novo início: AAAA-MM-DD HH:MM'],
+                    'profissional_id' => ['type' => 'integer', 'description' => 'Só se o usuário pedir outro profissional (do mesmo setor).'],
+                ],
+                obrigatorios: [],
+                formRequest: RemarcarRequest::class,
+                executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    $agendamento = $agenda->remarcar($d['id'], $d['inicio'], $tenantId, $d['profissional_id'], $d['versao'], $this->autorizacaoDaAgenda($ator));
+                    // O "antes" na auditoria: de que horário e de que profissional saiu (o update() guarda em getPrevious()).
+                    $campos = ['profissional_id', 'inicio', 'fim'];
+                    $this->detalhesAuditoria->anotar('valores_anteriores', array_intersect_key([...$agendamento->only($campos), ...$agendamento->getPrevious()], array_flip($campos)));
+
+                    return $agendamento;
+                },
+                mensagemErro: 'Não consegui remarcar o agendamento. Nada foi gravado.',
+                titulo: 'Remarcar o agendamento',
+                sucesso: 'Agendamento remarcado',
+                conferir: function (array $a) use ($agenda): ?array {
+                    $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoRemarcar((int) ($a['id'] ?? 0), $a['inicio'] ?? null, (int) $a['tenant_id'], $a['profissional_id'] ?? null, $this->versaoDaFicha($a),
+                            $this->autorizacaoDaAgenda(null));
+
+                    return $motivo === null ? null : ['campo' => 'inicio', 'motivo' => $motivo];
+                },
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $agenda->localizarParaRemarcar($id, $busca, $tenantId, $this->setoresDaAgenda()),
+                rotulo: 'o agendamento',
+                buscaPor: 'pet, serviço ou profissional',
+                colunaRotulo: 'resumo',
+                rotuloAcao: 'Escolher',
+                campos: ['profissional_id', 'inicio'],
+                resumir: fn (array $v, int $tenantId) => $this->fichaDoAgendamento('remarcar', $v, $tenantId),
+                colunasLista: self::COLUNAS_DA_AGENDA,
+                comVersao: true,
+                exigeCrmv: fn (array $v, int $tenantId) => $agenda->exigeCrmv((int) ($v['id'] ?? 0), null, $tenantId),
+            ),
+            // Trocar o serviço (15/11): "não era banho, era consulta". O MESMO agendamento é alterado, nunca duplicado. No
+            // mesmo setor a ficha mantém o profissional e o horário (o fim recalcula); em outro setor, o profissional fica
+            // em branco e a ficha abre com a lista do setor novo e o calendário.
+            $this->definirAcao(
+                nome: 'alterar_servico_agendamento',
+                descricao: 'Troca o serviço de um agendamento que já existe (em aberto), quando foi marcado errado ("não era banho, era consulta", "troca o banho do Thor por tosa"). Altera o mesmo agendamento, nunca cria outro. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional) no campo busca. Informe em catalogo_item_id o número do serviço novo, escolhido na lista de serviços; sem certeza, deixe em branco: a ficha mostra a lista.',
+                acao: 'atualizar',
+                entidade: 'Agendamento',
+                papeis: self::PAPEIS_DA_AGENDA,
+                propriedades: [
+                    'catalogo_item_id' => ['type' => 'integer', 'description' => 'Número do serviço NOVO.'.$this->numerosDosServicos()],
+                ],
+                obrigatorios: [],
+                formRequest: AlterarServicoAgendamentoRequest::class,
+                executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    $agendamento = $agenda->trocarServico($d['id'], $d['catalogo_item_id'], $d['profissional_id'], $d['inicio'], $tenantId, $d['versao'],
+                        $this->autorizacaoDaAgenda($ator));
+                    // O "antes" na auditoria: serviço, setor, profissional, início e fim de antes da troca.
+                    $campos = ['catalogo_item_id', 'setor', 'profissional_id', 'inicio', 'fim'];
+                    $this->detalhesAuditoria->anotar('valores_anteriores', array_intersect_key([...$agendamento->only($campos), ...$agendamento->getPrevious()], array_flip($campos)));
+
+                    return $agendamento;
+                },
+                mensagemErro: 'Não consegui trocar o serviço do agendamento. Nada foi gravado.',
+                titulo: 'Trocar o serviço do agendamento',
+                sucesso: 'Serviço do agendamento trocado',
+                conferir: function (array $a) use ($agenda): ?array {
+                    $tenantId = (int) $a['tenant_id'];
+                    $motivo = $this->motivoForaDoSetorDaAgenda(Agendamento::query()->where('tenant_id', $tenantId)->find((int) ($a['id'] ?? 0))?->setor)
+                        ?? $this->motivoForaDoSetorDaAgenda(CatalogoItem::query()->where('tenant_id', $tenantId)->find((int) ($a['catalogo_item_id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoTrocarServico((int) ($a['id'] ?? 0), $a['catalogo_item_id'] ?? null, $a['profissional_id'] ?? null, $a['inicio'] ?? null,
+                            $tenantId, $this->versaoDaFicha($a), $this->autorizacaoDaAgenda(null));
+
+                    return $motivo === null ? null : ['campo' => 'catalogo_item_id', 'motivo' => $motivo];
+                },
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $agenda->localizarParaRemarcar($id, $busca, $tenantId, $this->setoresDaAgenda()),
+                rotulo: 'o agendamento',
+                buscaPor: 'pet, serviço ou profissional',
+                colunaRotulo: 'resumo',
+                rotuloAcao: 'Escolher',
+                campos: ['catalogo_item_id', 'profissional_id', 'inicio'],
+                resumir: fn (array $v, int $tenantId) => $this->fichaDoAgendamento('trocar_servico', $v, $tenantId),
+                colunasLista: self::COLUNAS_DA_AGENDA,
+                preparar: fn (array $argumentos, array $propostos, int $tenantId) => $this->prepararTrocaDeServico($argumentos, $propostos, $tenantId),
+                comVersao: true,
+                exigeCrmv: fn (array $v, int $tenantId) => $agenda->exigeCrmv((int) ($v['id'] ?? 0), $v['catalogo_item_id'] ?? null, $tenantId),
+            ),
+            // F (P-C4): agendar e encaixe de emergência. A origem é fixada pelo servidor em cada tool (a IA não escolhe):
+            // a regra (pet, serviço e profissional do tenant, setor, passado, vaga, conflito, duração) é toda do AgendaService.
+            ...array_map(fn (array $t) => $this->definirAcao(
+                nome: $t['nome'],
+                descricao: $t['descricao'].' Pet, serviço do catálogo e profissional pelo id; início no formato AAAA-MM-DD HH:MM (horário de São Paulo).',
+                acao: 'agendar',
+                entidade: 'Agendamento',
+                papeis: $t['papeis'],
+                propriedades: [
+                    'pet_id' => ['type' => 'integer'],
+                    'pet' => ['type' => 'string', 'description' => 'Nome do pet, quando o número não é conhecido (o servidor procura).'],
+                    'catalogo_item_id' => ['type' => 'integer', 'description' => 'Id do serviço do catálogo (não produto).'.$this->numerosDosServicos()],
+                    'profissional_id' => ['type' => 'integer', 'description' => 'Id do veterinário (clínica) ou do atendente (banho e tosa). Em branco se o usuário não disse quem ("qualquer veterinário").'],
+                    'inicio' => ['type' => 'string', 'description' => 'AAAA-MM-DD HH:MM'],
+                ],
+                obrigatorios: ['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'],
+                formRequest: AgendarRequest::class,
+                // O fim não é pedido: o servidor calcula pelo modelo do setor (AgendaService / GradeDaAgenda).
+                executar: fn (array $d, int $tenantId, User $ator) => $agenda->agendar([
+                    ...array_intersect_key($d, array_flip(['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'])),
+                    'origem' => $t['origem'],
+                ], $tenantId, $this->autorizacaoDaAgenda($ator)),
+                mensagemErro: 'Não consegui agendar agora. Nada foi gravado.',
+                titulo: $t['titulo'],
+                sucesso: $t['sucesso'],
+                conferir: function (array $a) use ($agenda, $t): ?array {
+                    $motivo = $this->motivoForaDoSetorDaAgenda(CatalogoItem::query()->where('tenant_id', (int) $a['tenant_id'])->find((int) ($a['catalogo_item_id'] ?? 0))?->setor)
+                        ?? $agenda->motivoParaNaoAgendar([...$a, 'origem' => $t['origem']], (int) $a['tenant_id'], $this->autorizacaoDaAgenda(null));
+
+                    return $motivo === null ? null : ['campo' => 'inicio', 'motivo' => $motivo];
+                },
+                // Só o agendar normal usa a ficha com o calendário; o encaixe (já aconteceu) segue o card comum.
+                resumir: $t['origem'] === 'normal' ? fn (array $v, int $tenantId) => $this->fichaDoAgendamento('agendar', $v, $tenantId) : null,
+                preparar: fn (array $argumentos, array $propostos, int $tenantId) => $this->prepararPetPeloNome($argumentos, $tenantId),
+                exigeCrmv: $t['origem'] === 'normal' ? fn (array $v, int $tenantId) => $agenda->exigeCrmv(null, $v['catalogo_item_id'] ?? null, $tenantId) : null,
+            ), [
+                ['nome' => 'agendar_atendimento', 'origem' => 'normal', 'papeis' => self::PAPEIS_DA_AGENDA,
+                    'titulo' => 'Agendar', 'sucesso' => 'Atendimento agendado',
+                    'descricao' => 'Agenda um NOVO atendimento da clínica ou do banho e tosa, de agora em diante. Informe só o início: o servidor calcula o fim. Para mudar o horário de um agendamento que já existe, use remarcar_agendamento; para trocar o serviço dele, alterar_servico_agendamento. Na clínica o horário é por bloco de 1 h (08:00 … 17:00): consultas dividem o bloco (até 4 por veterinário), os demais serviços ocupam o bloco inteiro e a cirurgia 2 blocos; cirurgia só o próprio veterinário com CRMV agenda, para si. No banho e tosa, 1 por vez.'],
+                ['nome' => 'registrar_encaixe_emergencia', 'origem' => 'encaixe_emergencia', 'papeis' => ['recepcao', 'veterinario', 'dono'],
+                    'titulo' => 'Registrar encaixe de emergência', 'sucesso' => 'Encaixe de emergência registrado',
+                    'descricao' => 'Registra na agenda da clínica um atendimento de emergência que já começou (início agora ou antes); não confere vaga nem horário. Só da clínica.'],
+            ]),
 
             // ---------------------------------------------------------------- cobrança (P-B4)
             $this->definirTool(
@@ -242,7 +405,8 @@ trait CatalogoDaClinica
                 risco: 'leitura',
                 acao: 'consultar',
                 entidade: 'Cobranca',
-                papeis: $quemCobra,
+                // Decisão do Lucas (15/11), tabela da FASE oito: o veterinário VÊ as cobranças (não cobra, não recebe, não cancela).
+                papeis: [...$quemCobra, 'veterinario'],
                 propriedades: [
                     'status' => ['type' => 'string', 'enum' => Cobranca::STATUS],
                     'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
@@ -255,12 +419,16 @@ trait CatalogoDaClinica
                         'servico' => $c->getAttribute('servico'),
                         'atendimento' => \Carbon\CarbonImmutable::parse($c->getAttribute('atendimento_em'), (string) config('app.timezone'))->format('d/m/Y H:i'),
                         'total' => $this->reais((int) $c->total_centavos),
+                        // T2: estornado (soma dos estornos por itens; estorno antigo, de antes da T2: a coluna estorno_valor) e líquido.
+                        'estornado' => $this->reais($estornado = $this->estornadoDaCobranca($c)),
+                        // Líquido só onde houve pagamento (paga, ou cancelada por estorno); nas outras, "—".
+                        'liquido' => $c->status === 'paga' || $estornado > 0 ? $this->reais((int) $c->total_centavos - $estornado) : '—',
                         'status' => $c->status === 'fechada' ? 'a receber' : $c->status,
                         'forma_pagamento' => $c->forma_pagamento,
                         ...($c->status === 'fechada' && $this->podeEditar('receber_cobranca') ? ['acao' => ['tool' => 'receber_cobranca', 'rotulo' => 'Receber']] : []),
                     ])->all(),
                 mensagemErro: 'Não consegui consultar as cobranças agora. Tente novamente.',
-                colunas: ['id', 'pet', 'servico', 'atendimento', 'total', 'status', 'forma_pagamento'],
+                colunas: ['id', 'pet', 'servico', 'atendimento', 'total', 'estornado', 'liquido', 'status', 'forma_pagamento'],
             ),
             $this->definirAcao(
                 nome: 'cobrar_atendimento',
@@ -333,6 +501,45 @@ trait CatalogoDaClinica
                 campos: [],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId),
             ),
+            // H, T2 (14/11): estorno por itens de cobrança PAGA no card. Pede: a recepção (clínica), o atendente (petshop) ou o
+            // dono; quem é do setor certo o CobrancaService confere. Autoriza: o supervisor do setor ou o dono, com o PIN
+            // (T1), digitado no card (reautenticar 'estorno'); a conferência fica no /agente/confirmar e nunca vai para a IA.
+            // A IA escolhe o modo e, em "itens", as linhas e as quantidades; o VALOR é sempre do servidor.
+            $this->definirAcao(
+                nome: 'estornar_cobranca',
+                descricao: 'Estorna, no todo ou em parte, uma cobrança PAGA. modo: "tudo" (tudo o que ainda não foi estornado), "tudo_menos_prontuario" (sem o que veio do prontuário) ou "itens" (só as linhas e quantidades em linhas; item_id é o número da linha da cobrança). Nunca informe valor: o servidor calcula pelo preço da época. Parcial: a cobrança continua paga. O estoque dos itens avulsos volta; o do prontuário nunca. Precisa de motivo e da autorização de um supervisor do setor ou do dono (PIN), digitada só no card de confirmação: nunca peça nem aceite PIN ou senha no chat. Achada pelo id da cobrança ou pelo nome do pet.',
+                acao: 'estornar',
+                entidade: 'Cobranca',
+                papeis: ['recepcao', 'atendente', 'dono'],
+                propriedades: [
+                    'motivo' => ['type' => 'string', 'description' => 'Por que a cobrança paga está sendo estornada.'],
+                    ...$this->propriedadesDoEstorno(EstornarCobrancaRequest::MODOS),
+                ],
+                obrigatorios: [],
+                formRequest: EstornarCobrancaRequest::class,
+                // Quem pede é o usuário logado; quem autorizou é quem o card conferiu (autorizadoPor), nunca a IA.
+                executar: fn (array $d, int $tenantId, User $ator) => $cobrancas->estornar($d['id'], (string) $d['motivo'], $ator->id,
+                    $this->autorizadoPor() ?? 0, $tenantId, $this->autorizadoPor() !== null, (string) $d['modo'], $this->itensDoEstorno($d['linhas'] ?? [])),
+                mensagemErro: 'Não consegui estornar a cobrança. Nada foi gravado.',
+                titulo: 'Estornar a cobrança',
+                sucesso: 'Estorno registrado',
+                conferir: fn (array $a) => $cobrancas->localizar((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], ['paga'])->isEmpty()
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei a cobrança paga #'.(int) ($a['id'] ?? 0).'.']
+                    : $this->recusaDe(fn () => $cobrancas->planoDoEstorno((int) $a['id'], (string) ($a['modo'] ?? ''), $this->itensDoEstorno($a['linhas'] ?? []), (int) $a['tenant_id']), 'a cobrança paga', 'itens'),
+                risco: 'exclusao',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $cobrancas->localizar($id, $busca, $tenantId, ['paga']),
+                rotulo: 'a cobrança paga',
+                colunaRotulo: 'pet',
+                rotuloAcao: 'Estornar',
+                campos: ['modo', 'motivo', 'linhas'],
+                resumir: fn (array $v, int $tenantId) => $this->resumoDoEstorno(
+                    $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId, comLinhas: false),
+                    fn () => $cobrancas->linhasParaEstornar((int) ($v['id'] ?? 0), $tenantId),
+                    fn () => $cobrancas->planoDoEstorno((int) ($v['id'] ?? 0), (string) ($v['modo'] ?? ''), $this->itensDoEstorno($v['linhas'] ?? []), $tenantId),
+                    $v,
+                ),
+                reautenticar: 'estorno',
+            ),
 
             // ---------------------------------------------------------------- venda avulsa (decisão de 09/11)
             $this->definirAcao(
@@ -342,7 +549,7 @@ trait CatalogoDaClinica
                 entidade: 'Venda',
                 papeis: self::PAPEIS_EQUIPE,
                 propriedades: [
-                    'itens' => ['type' => 'array', 'description' => 'Cada item: o id do item do catálogo e a quantidade inteira.', 'items' => [
+                    'itens' => ['type' => 'array', 'description' => 'Cada item: o id do item do catálogo e a quantidade inteira.'.$this->numerosDoCatalogo(), 'items' => [
                         'type' => 'object',
                         'properties' => ['catalogo_item_id' => ['type' => 'integer'], 'quantidade' => ['type' => 'integer']],
                         'required' => ['catalogo_item_id', 'quantidade'],
@@ -374,6 +581,73 @@ trait CatalogoDaClinica
                 },
             ),
 
+            // T2 (14/11): consulta das vendas (total, estornado e líquido) e estorno por itens da venda PAGA (resposta E).
+            $this->definirTool(
+                nome: 'consultar_vendas',
+                descricao: 'Lista as vendas avulsas (aberta, paga, cancelada), com setor, tutor, pet, total, estornado e líquido. Ação de leitura — não exige confirmação.',
+                tipo: 'leitura',
+                risco: 'leitura',
+                acao: 'consultar',
+                entidade: 'Venda',
+                papeis: self::PAPEIS_EQUIPE,
+                propriedades: [
+                    'status' => ['type' => 'string', 'enum' => Venda::STATUS],
+                    'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
+                ],
+                obrigatorios: [],
+                executar: fn (array $a) => $vendas->buscarPorFiltro($a['status'] ?? null, $a['setor'] ?? null, $a['tenant_id'])
+                    ->map(fn (Venda $venda) => [
+                        'id' => (int) $venda->id,
+                        'data' => ($venda->pago_em ?? $venda->created_at)?->format('d/m/Y H:i'),
+                        'setor' => $venda->setor === 'clinica' ? 'Clínica' : 'Petshop',
+                        'tutor' => $venda->getAttribute('tutor'),
+                        'pet' => $venda->getAttribute('pet'),
+                        'total' => $this->reais((int) $venda->total_centavos),
+                        'estornado' => $this->reais((int) $venda->getAttribute('estornado_centavos')),
+                        'liquido' => $venda->status === 'paga' || (int) $venda->getAttribute('estornado_centavos') > 0
+                            ? $this->reais((int) $venda->total_centavos - (int) $venda->getAttribute('estornado_centavos')) : '—',
+                        'status' => $venda->status,
+                        'forma_pagamento' => $venda->forma_pagamento,
+                    ])->all(),
+                mensagemErro: 'Não consegui consultar as vendas agora. Tente novamente.',
+                colunas: ['id', 'data', 'setor', 'tutor', 'pet', 'total', 'estornado', 'liquido', 'status', 'forma_pagamento'],
+            ),
+            $this->definirAcao(
+                nome: 'estornar_venda',
+                descricao: 'Estorna, no todo ou em parte, uma venda avulsa PAGA, com a mesma regra da cobrança. modo: "tudo" (tudo o que ainda não foi estornado) ou "itens" (só as linhas e quantidades em linhas; item_id é o número da linha da venda). Nunca informe valor: o servidor calcula pelo preço da época. Parcial: a venda continua paga; o estoque volta. Precisa de motivo e da autorização de um supervisor do setor ou do dono (PIN), digitada só no card de confirmação: nunca peça nem aceite PIN ou senha no chat. Achada pelo id da venda ou pelo nome do tutor ou do pet.',
+                acao: 'estornar',
+                entidade: 'Venda',
+                papeis: ['recepcao', 'atendente', 'dono'],
+                propriedades: [
+                    'motivo' => ['type' => 'string', 'description' => 'Por que a venda paga está sendo estornada.'],
+                    ...$this->propriedadesDoEstorno(EstornarVendaRequest::MODOS),
+                ],
+                obrigatorios: [],
+                formRequest: EstornarVendaRequest::class,
+                executar: fn (array $d, int $tenantId, User $ator) => $vendas->estornar($d['id'], (string) $d['motivo'], $ator->id,
+                    $this->autorizadoPor() ?? 0, $tenantId, $this->autorizadoPor() !== null, (string) $d['modo'], $this->itensDoEstorno($d['linhas'] ?? [])),
+                mensagemErro: 'Não consegui estornar a venda. Nada foi gravado.',
+                titulo: 'Estornar a venda',
+                sucesso: 'Estorno registrado',
+                conferir: fn (array $a) => $vendas->localizar((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], ['paga'])->isEmpty()
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei a venda paga #'.(int) ($a['id'] ?? 0).'.']
+                    : $this->recusaDe(fn () => $vendas->planoDoEstorno((int) $a['id'], (string) ($a['modo'] ?? ''), $this->itensDoEstorno($a['linhas'] ?? []), (int) $a['tenant_id']), 'a venda paga', 'itens'),
+                risco: 'exclusao',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $vendas->localizar($id, $busca, $tenantId, ['paga']),
+                rotulo: 'a venda paga',
+                buscaPor: 'nome do tutor ou do pet',
+                colunaRotulo: 'tutor',
+                rotuloAcao: 'Estornar',
+                campos: ['modo', 'motivo', 'linhas'],
+                resumir: fn (array $v, int $tenantId) => $this->resumoDoEstorno(
+                    $this->resumoDaVenda((int) ($v['id'] ?? 0), $tenantId),
+                    fn () => $vendas->linhasParaEstornar((int) ($v['id'] ?? 0), $tenantId),
+                    fn () => $vendas->planoDoEstorno((int) ($v['id'] ?? 0), (string) ($v['modo'] ?? ''), $this->itensDoEstorno($v['linhas'] ?? []), $tenantId),
+                    $v,
+                ),
+                reautenticar: 'estorno',
+            ),
+
             // ---------------------------------------------------------------- caixa de entrada (P-B5)
             $this->definirTool(
                 nome: 'consultar_mensagens',
@@ -385,17 +659,21 @@ trait CatalogoDaClinica
                 papeis: self::PAPEIS_EQUIPE,
                 propriedades: ['status' => ['type' => 'string', 'enum' => Mensagem::STATUS]],
                 obrigatorios: [],
-                executar: fn (array $a) => $mensagens->buscarPorFiltro($a['status'] ?? null, $a['tenant_id'])
-                    ->map(fn (Mensagem $m) => [
+                executar: function (array $a) use ($mensagens): array {
+                    $lista = $mensagens->buscarPorFiltro($a['status'] ?? null, $a['tenant_id']);
+                    $pets = $this->petsDosTutores($lista, (int) $a['tenant_id']);
+
+                    return $lista->map(fn (Mensagem $m) => [
                         'id' => (int) $m->id,
                         'de' => $m->getAttribute('tutor') ?? $m->remetente ?? '—',
                         'mensagem' => $m->texto,
                         'recebida_em' => $m->created_at?->format('d/m/Y H:i'),
                         'status' => $m->status,
-                        // P-B5: o botão "Pedir ao agente" manda este texto como um pedido normal (com Revisar e segurar).
-                        ...($m->status === 'nova' ? ['pedido' => $m->texto] : []),
+                        // P-B5: o botão "Pedir ao agente" manda este texto (com o tutor e os pets) como um pedido normal (com Revisar e segurar).
+                        ...($m->status === 'nova' ? ['pedido' => $this->pedidoDaMensagem($m, $pets)] : []),
                         ...($m->status === 'nova' && $this->podeEditar('marcar_mensagem_tratada') ? ['acao' => ['tool' => 'marcar_mensagem_tratada', 'rotulo' => 'Marcar como tratada']] : []),
-                    ])->all(),
+                    ])->all();
+                },
                 mensagemErro: 'Não consegui consultar as mensagens agora. Tente novamente.',
                 colunas: ['id', 'de', 'mensagem', 'recebida_em', 'status'],
             ),
@@ -430,6 +708,227 @@ trait CatalogoDaClinica
         ];
     }
 
+    /** Até PETS_NO_PEDIDO pets (id e nome) de cada tutor das mensagens novas, só do tenant, numa consulta só. */
+    private function petsDosTutores(\Illuminate\Support\Collection $mensagens, int $tenantId): array
+    {
+        $tutores = $mensagens->where('status', 'nova')->pluck('tutor_id')->filter()->unique()->values()->all();
+
+        return $tutores === [] ? [] : Pet::query()->where('tenant_id', $tenantId)->whereIn('tutor_id', $tutores)
+            ->orderBy('nome')->orderBy('id')->get(['id', 'nome', 'tutor_id'])->groupBy('tutor_id')
+            ->map(fn ($pets) => $pets->take(self::PETS_NO_PEDIDO)->map(fn (Pet $p) => ['id' => (int) $p->id, 'nome' => (string) $p->nome])->all())->all();
+    }
+
+    /**
+     * Caixa de entrada → pedido ao agente: o texto da mensagem com o contexto que a IA não tem (o número do tutor e os
+     * pets dele, com o número de cada um), para o card de agendamento já vir com o pet. O nome e o telefone de quem
+     * escreveu não vão: os números bastam, e o card mostra os nomes. Acima do limite do chat, vai só o texto.
+     */
+    private function pedidoDaMensagem(Mensagem $mensagem, array $petsPorTutor): string
+    {
+        $tutorId = $mensagem->tutor_id === null ? null : (int) $mensagem->tutor_id;
+        $pets = $tutorId === null ? [] : ($petsPorTutor[$tutorId] ?? []);
+        $contexto = match (true) {
+            $tutorId === null => 'remetente sem cadastro',
+            $pets === [] => 'tutor #'.$tutorId.', sem pet cadastrado',
+            default => 'tutor #'.$tutorId.'; pets: '.implode(', ', array_map(fn (array $p) => $p['nome'].' = pet #'.$p['id'], $pets)),
+        };
+        // O texto vai como string JSON (aspas e quebras escapadas): quem escreveu não fecha a aspa para forjar o contexto.
+        $pedido = 'Mensagem da caixa de entrada ('.$contexto.'): '.json_encode((string) $mensagem->texto, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+
+        return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : (string) $mensagem->texto;
+    }
+
+    /**
+     * A ficha de agendamento (15/11; agendar, remarcar e trocar o serviço): o cabeçalho (pet e tutor com link, e o
+     * serviço, o profissional e o horário atuais), só leitura, e o que o calendário precisa (serviço, setor, dia e o
+     * agendamento a ignorar na contagem). Os atalhos abrem a ficha de outra ação do mesmo agendamento, sem IA, só as
+     * que o papel pode usar. Tudo do tenant; o agendamento já veio do localizar, que filtra o setor do papel.
+     */
+    private function fichaDoAgendamento(string $acao, array $v, int $tenantId): array
+    {
+        $ag = $acao === 'agendar' ? null
+            : Agendamento::query()->where('tenant_id', $tenantId)->whereIn('setor', $this->setoresDaAgenda())->with(['pet.tutor', 'servico', 'profissional'])->find((int) ($v['id'] ?? 0));
+        $petId = (int) ($v['pet_id'] ?? 0);
+        $pet = $ag?->pet ?? ($petId >= 1 ? Pet::query()->where('tenant_id', $tenantId)->with('tutor')->find($petId) : null);
+        $servicoId = $acao === 'remarcar' ? (int) $ag?->catalogo_item_id : (int) ($v['catalogo_item_id'] ?? 0);
+        $servico = $servicoId >= 1 ? CatalogoItem::query()->where('tenant_id', $tenantId)->where('tipo', 'servico')->find($servicoId) : null;
+
+        $cabecalho = [];
+        if ($pet !== null) {
+            $cabecalho[] = ['rotulo' => 'Pet', 'valor' => $pet->nome, 'href' => '/pets/'.$pet->id];
+            $tutor = $pet->tutor !== null && (int) $pet->tutor->tenant_id === $tenantId ? $pet->tutor : null;
+            if ($tutor !== null) {
+                $cabecalho[] = ['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id];
+            }
+        }
+        if ($ag !== null) {
+            $cabecalho[] = ['rotulo' => $acao === 'trocar_servico' ? 'Serviço atual' : 'Serviço', 'valor' => $ag->servico?->nome_comercial];
+            $cabecalho[] = ['rotulo' => 'Profissional atual', 'valor' => $ag->profissional?->name];
+            $cabecalho[] = ['rotulo' => 'Horário atual', 'valor' => $ag->inicio->format('d/m/Y H:i').'–'.$ag->fim->format('H:i')];
+            $cabecalho[] = ['rotulo' => 'Situação', 'valor' => $ag->status];
+        }
+
+        $atalhos = [];
+        if ($ag !== null) {
+            $dela = $acao === 'remarcar' ? 'remarcar_agendamento' : 'alterar_servico_agendamento';
+            foreach (['remarcar_agendamento' => 'Remarcar', 'alterar_servico_agendamento' => 'Trocar serviço', 'alterar_status_agendamento' => 'Mudar status'] as $tool => $rotulo) {
+                if ($tool !== $dela && $this->podeExecutar($tool)) {
+                    $atalhos[] = ['tool' => $tool, 'rotulo' => $rotulo];
+                }
+            }
+        }
+
+        $inicio = is_string($v['inicio'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}/', $v['inicio']) === 1 ? substr($v['inicio'], 0, 10) : null;
+        $avisos = [];
+        // 15/11: cirurgia e internação só por quem tem CRMV no perfil; os demais papéis veem logo que só consultam.
+        if ($servico !== null && blank($this->contexto->usuario()->crmv) && app(AgendaService::class)->exigeCrmv($ag?->id, $servico->id, $tenantId)) {
+            $avisos[] = AgendaService::RECUSA_SEM_CRMV;
+        }
+        // Troca no mesmo setor: o horário atual pode não servir para o serviço novo (ex.: cirurgia de 2 blocos).
+        if ($acao === 'trocar_servico' && $ag !== null && $servico !== null && ! blank($v['profissional_id'] ?? null)) {
+            $motivo = app(AgendaService::class)->motivoParaNaoTrocarServico((int) $ag->id, $servico->id, $v['profissional_id'], $v['inicio'] ?? null, $tenantId,
+                null, $this->autorizacaoDaAgenda(null));
+            if ($motivo !== null) {
+                $avisos[] = $motivo.' Escolha outro horário no calendário.';
+            }
+        }
+
+        return [
+            'resumo' => $cabecalho,
+            'avisos' => $avisos,
+            'ficha' => [
+                'acao' => $acao,
+                'agendamento_id' => $ag?->id,
+                'servico_id' => $servico?->id,
+                'setor' => $servico?->setor,
+                'dia' => $inicio ?? ($ag !== null ? $ag->inicio->format('Y-m-d') : now()->format('Y-m-d')),
+                'atalhos' => $atalhos,
+            ],
+        ];
+    }
+
+    /**
+     * Trocar o serviço: o serviço novo é o que a IA indicou (do tenant, serviço; senão fica em branco e a ficha marca o
+     * campo). Setor diferente do atual: o profissional fica em branco (a ficha mostra os do setor novo e o calendário).
+     */
+    private function prepararTrocaDeServico(array $argumentos, array $propostos, int $tenantId): array
+    {
+        $ag = Agendamento::query()->where('tenant_id', $tenantId)->find((int) ($argumentos['id'] ?? 0));
+        $novoId = filter_var($propostos['catalogo_item_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $novo = $novoId === false ? null : CatalogoItem::query()->where('tenant_id', $tenantId)->where('tipo', 'servico')->find($novoId);
+
+        if ($ag === null || $novo === null || (int) $novo->id === (int) $ag->catalogo_item_id) {
+            return [...$argumentos, 'catalogo_item_id' => null];
+        }
+
+        return [...$argumentos, 'catalogo_item_id' => (int) $novo->id, ...($novo->setor !== $ag->setor ? ['profissional_id' => null] : [])];
+    }
+
+    /** Agendar: o nome do pet dito pelo usuário vira o pet_id quando só um pet do tenant bate (nome igual primeiro). */
+    private function prepararPetPeloNome(array $argumentos, int $tenantId): array
+    {
+        $nome = is_string($argumentos['pet'] ?? null) ? trim($argumentos['pet']) : '';
+        unset($argumentos['pet']);
+
+        // pet_id 0 (ou outro número inválido) que a IA manda no lugar de "não sei" conta como em branco.
+        if ($nome !== '' && filter_var($argumentos['pet_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+            $pets = app(PetService::class)->buscarPorFiltro($nome, null, $tenantId);
+            $iguais = $pets->filter(fn (Pet $p) => mb_strtolower((string) $p->nome) === mb_strtolower($nome));
+            $um = $iguais->count() === 1 ? $iguais->first() : ($pets->count() === 1 ? $pets->first() : null);
+            if ($um !== null) {
+                $argumentos['pet_id'] = (int) $um->id;
+            }
+        }
+
+        return $argumentos;
+    }
+
+    /** Card de alterar tutor (15/11): os pets dele, só leitura, cada um com link para a ficha (nome e espécie). */
+    private function petsDoTutorNoCard(int $tutorId, int $tenantId): array
+    {
+        if ($tutorId < 1 || ! $this->podeExecutar('consultar_pets')) {
+            return [];
+        }
+        $pets = Pet::query()->where('tenant_id', $tenantId)->where('tutor_id', $tutorId)->orderBy('nome')->orderBy('id')->get(['id', 'nome', 'especie']);
+
+        return $pets->isEmpty() ? [['rotulo' => 'Pets', 'valor' => 'Nenhum pet cadastrado']]
+            : $pets->map(fn (Pet $p) => ['rotulo' => 'Pet', 'valor' => $p->nome.' ('.$p->especie.')', 'href' => '/pets/'.$p->id])->all();
+    }
+
+    /** Card de alterar pet (15/11): o tutor dele, só leitura (nome e telefone), com link para a ficha do tutor. */
+    private function tutorDoPetNoCard(int $petId, int $tenantId): array
+    {
+        $pet = $petId >= 1 && $this->podeExecutar('consultar_tutores') ? Pet::query()->where('tenant_id', $tenantId)->find($petId) : null;
+        $tutor = $pet === null ? null : Tutor::query()->where('tenant_id', $tenantId)->find($pet->tutor_id);
+
+        return $tutor === null ? [] : [['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id]];
+    }
+
+    /**
+     * Quem grava na agenda, para a regra de cirurgia e internação (AgendaService::conferirRestrito): o usuário logado (do
+     * servidor) e se ele confirmou com CRMV + senha NESTA requisição (o /agente/confirmar põe o autorizado_por depois de
+     * conferir). Sem $ator é o Revisar: reautenticado = null (a senha só vem no Confirmar).
+     *
+     * @return array{ator: User, reautenticado: ?bool}
+     */
+    private function autorizacaoDaAgenda(?User $ator): array
+    {
+        $usuario = $ator ?? $this->contexto->usuario();
+
+        return ['ator' => $usuario, 'reautenticado' => $ator === null ? null : $this->autorizadoPor() === (int) $usuario->id];
+    }
+
+    /** A versão da ficha que veio do rascunho (o servidor a pôs ao localizar). Sem ela, '' nunca bate: recusa. */
+    private function versaoDaFicha(array $a): string
+    {
+        return is_string($a['versao'] ?? null) ? $a['versao'] : '';
+    }
+
+    /** Como numerosDoCatalogo(), só os SERVIÇOS dos setores da agenda do papel (agendar e trocar o serviço). */
+    private function numerosDosServicos(): string
+    {
+        $setores = $this->setoresDaAgenda();
+        $itens = app(CatalogoService::class)->buscarPorFiltro(null, null, null, $this->contexto->tenantId())
+            ->filter(fn (CatalogoItem $i) => $i->tipo === 'servico' && in_array($i->setor, $setores, true));
+        if ($itens->isEmpty() || $itens->count() > self::LIMITE_CATALOGO_NA_DESCRICAO) {
+            return '';
+        }
+
+        return ' Serviços (número = serviço): '.$itens->sortBy('id')->map(fn (CatalogoItem $i) => $i->id.' = '.$this->nomeNaDescricao((string) $i->nome_comercial))->implode('; ').'.';
+    }
+
+    /**
+     * Setores da agenda do papel logado, a fonte única do chat e das telas (tabela da FASE oito, decisão do Lucas de
+     * 15/11; Bloco A de 15/11): o atendente só o banho e tosa; recepção, veterinário e dono os dois; quem não está em
+     * PAPEIS_DA_AGENDA (o vendedor), nenhum.
+     *
+     * @return string[]
+     */
+    public function setoresDaAgenda(): array
+    {
+        return match ($this->contexto->papel()) {
+            'atendente' => ['petshop'],
+            'recepcao', 'veterinario', 'dono' => ['clinica', 'petshop'],
+            default => [],
+        };
+    }
+
+    /** Quem só vê um setor fica preso nele, qualquer que seja o setor pedido (como na tela /agenda). */
+    private function setorDaAgendaPedido(mixed $setor): ?string
+    {
+        $setores = $this->setoresDaAgenda();
+
+        return count($setores) === 1 ? $setores[0] : (is_string($setor) ? $setor : null);
+    }
+
+    /** Agendar ou mudar o status fora do setor do papel (o atendente na agenda da clínica) é recusado no Revisar. */
+    private function motivoForaDoSetorDaAgenda(?string $setor): ?string
+    {
+        return $setor === null || in_array($setor, $this->setoresDaAgenda(), true)
+            ? null
+            : 'Seu papel só mexe na agenda do banho e tosa. Este atendimento é da clínica: peça à recepção.';
+    }
+
     /** O agendamento no card: pet, serviço, profissional, horário e situação (só leitura, do tenant). */
     private function resumoDoAgendamento(int $id, int $tenantId, string $prefixo = ''): array
     {
@@ -450,8 +949,8 @@ trait CatalogoDaClinica
         return $prefixo === '' ? $linhas : array_map(fn (array $l) => [...$l, 'rotulo' => $prefixo.': '.mb_strtolower($l['rotulo'])], $linhas);
     }
 
-    /** A cobrança no card: pet, serviço, cada linha (cópia do preço da época), total e situação. */
-    private function resumoDaCobranca(int $id, int $tenantId): array
+    /** A cobrança no card: pet, serviço, cada linha (cópia do preço da época), total e situação. Sem $comLinhas (estorno): só o cabeçalho. */
+    private function resumoDaCobranca(int $id, int $tenantId, bool $comLinhas = true): array
     {
         $cobranca = Cobranca::query()->where('tenant_id', $tenantId)->with(['agendamento.pet', 'agendamento.servico', 'itens'])->find($id);
 
@@ -459,11 +958,185 @@ trait CatalogoDaClinica
             return [];
         }
 
+        if (! $comLinhas) {
+            return [
+                ['rotulo' => 'Pet', 'valor' => $cobranca->agendamento?->pet?->nome],
+                ['rotulo' => 'Atendimento', 'valor' => $cobranca->agendamento?->servico?->nome_comercial.' em '.$cobranca->agendamento?->inicio?->format('d/m/Y H:i')],
+                ['rotulo' => 'Pago em', 'valor' => $cobranca->pago_em?->format('d/m/Y H:i').' ('.$cobranca->forma_pagamento.')'],
+            ];
+        }
+
         return [
             ['rotulo' => 'Pet', 'valor' => $cobranca->agendamento?->pet?->nome],
             ['rotulo' => 'Atendimento', 'valor' => $cobranca->agendamento?->servico?->nome_comercial.' em '.$cobranca->agendamento?->inicio?->format('d/m/Y H:i')],
             ...$this->linhasDoResumo($cobranca->itens->sortBy('id')->map(fn ($l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->values()->all(), (int) $cobranca->total_centavos),
             ['rotulo' => 'Situação', 'valor' => $cobranca->status === 'fechada' ? 'a receber' : $cobranca->status],
+        ];
+    }
+
+    /** A venda no card do estorno: setor, tutor, pet e quando foi paga (só leitura, do tenant). */
+    private function resumoDaVenda(int $id, int $tenantId): array
+    {
+        $venda = Venda::query()->where('tenant_id', $tenantId)->with(['tutor', 'pet'])->find($id);
+
+        return $venda === null ? [] : [
+            ['rotulo' => 'Setor', 'valor' => $venda->setor === 'clinica' ? 'Clínica' : 'Petshop'],
+            ['rotulo' => 'Tutor', 'valor' => $venda->tutor?->nome],
+            ['rotulo' => 'Pet', 'valor' => $venda->pet?->nome],
+            ['rotulo' => 'Pago em', 'valor' => $venda->pago_em?->format('d/m/Y H:i').' ('.$venda->forma_pagamento.')'],
+        ];
+    }
+
+    /** T2: estornado de uma linha da consulta de cobranças (soma dos estornos; estorno de antes da T2: estorno_valor_centavos). */
+    private function estornadoDaCobranca(Cobranca $c): int
+    {
+        $porItens = (int) $c->getAttribute('estornado_centavos');
+
+        return $porItens > 0 ? $porItens : (int) ($c->estorno_valor_centavos ?? 0);
+    }
+
+    /**
+     * T2, 1ª passada do reviewer (imp. 2): as linhas do estorno só com item_id e quantidade, venham da IA ou do navegador
+     * (/agente/revisar). Assim nenhuma chave a mais (um "valor_centavos") vai para a sessão nem para a auditoria.
+     */
+    public function limparLinhasDoEstorno(string $tool, array $valores): array
+    {
+        if (in_array($tool, ['estornar_cobranca', 'estornar_venda'], true) && array_key_exists('linhas', $valores)) {
+            $valores['linhas'] = $this->itensDoEstorno($valores['linhas']);
+        }
+
+        return $valores;
+    }
+
+    /**
+     * T2, 1ª passada do reviewer (imp. 1): no Revisar, o plano que o card mostrou é congelado em linhas explícitas (modo
+     * "itens", com as quantidades daquele instante). No Confirmar, "tudo" não é recalculado: se outro estorno levou parte
+     * das linhas nesse meio-tempo, o service recusa ("restam N"), em vez de gravar um valor que quem autorizou não viu.
+     */
+    public function congelarEstorno(string $tool, array $revisados): array
+    {
+        $servico = match ($tool) {
+            'estornar_cobranca' => app(CobrancaService::class),
+            'estornar_venda' => app(VendaService::class),
+            default => null,
+        };
+        if ($servico === null) {
+            return $revisados;
+        }
+
+        $plano = $servico->planoDoEstorno((int) ($revisados['id'] ?? 0), (string) ($revisados['modo'] ?? ''),
+            $this->itensDoEstorno($revisados['linhas'] ?? []), $this->contexto->tenantId());
+
+        return [...$revisados, 'modo' => 'itens', 'linhas' => array_values(array_map(
+            fn (array $l) => ['item_id' => $l['item_id'], 'quantidade' => $l['quantidade']],
+            array_filter($plano['linhas'], fn (array $l) => $l['quantidade'] >= 1),
+        ))];
+    }
+
+    /**
+     * Bateria da clínica (15/11): o card da venda não escolhe itens, e o pedido tem uma resposta só (a consulta do catálogo
+     * não volta para a IA). A descrição dos itens leva o número e o nome de cada item ativo do catálogo DO TENANT logado:
+     * nada de preço, estoque ou dado de pessoa. Acima de LIMITE_CATALOGO_NA_DESCRICAO itens, a lista sai (protótipo).
+     */
+    private function numerosDoCatalogo(): string
+    {
+        $itens = app(CatalogoService::class)->buscarPorFiltro(null, null, null, $this->contexto->tenantId());
+        if ($itens->isEmpty() || $itens->count() > self::LIMITE_CATALOGO_NA_DESCRICAO) {
+            return '';
+        }
+
+        return ' Números do catálogo (número = item): '.$itens->sortBy('id')->map(fn (CatalogoItem $i) => $i->id.' = '.$this->nomeNaDescricao((string) $i->nome_comercial))->implode('; ').'.';
+    }
+
+    /** Revisão de 15/11 (C4): nome do item na descrição, em uma linha, sem os separadores da lista e com até 60 caracteres. */
+    private function nomeNaDescricao(string $nome): string
+    {
+        return \Illuminate\Support\Str::limit(trim((string) preg_replace('/[;=\s]+/u', ' ', $nome)), 60, '');
+    }
+
+    /** As propriedades do estorno por itens no esquema da tool (a IA nunca informa valor). */
+    private function propriedadesDoEstorno(array $modos): array
+    {
+        return [
+            'modo' => ['type' => 'string', 'enum' => $modos],
+            'linhas' => ['type' => 'array', 'description' => 'Só no modo "itens": cada linha com item_id (o número da linha da venda ou da cobrança, obrigatório) e a quantidade inteira a estornar. Se você não souber o número da linha, não mande linhas: o card mostra os itens para a pessoa escolher.', 'items' => [
+                'type' => 'object',
+                'properties' => ['item_id' => ['type' => 'integer'], 'quantidade' => ['type' => 'integer']],
+                'required' => ['item_id', 'quantidade'],
+                'additionalProperties' => false,
+            ]],
+        ];
+    }
+
+    /** Itens do estorno: só item_id e quantidade de cada linha (qualquer outra chave, como um "valor", é descartada). */
+    private function itensDoEstorno(mixed $itens): array
+    {
+        if (! is_array($itens)) {
+            return [];
+        }
+
+        // Pontos fracos da bateria (15/11): linha sem item_id inteiro positivo não é linha (a IA não sabe o número e manda só a
+        // quantidade). Ela sai aqui, e o card pede o item na lista; o service continua recusando item que não é da venda/cobrança.
+        $comItem = array_filter($itens, fn ($linha) => is_array($linha) && $this->itemDaLinha($linha['item_id'] ?? null));
+
+        return array_values(array_map(fn (array $linha) => array_intersect_key($linha, array_flip(['item_id', 'quantidade'])), $comItem));
+    }
+
+    /** O item_id de uma linha do estorno é um inteiro positivo (ou texto só de dígitos, como o formulário manda). */
+    private function itemDaLinha(mixed $id): bool
+    {
+        return (is_int($id) && $id >= 1) || (is_string($id) && preg_match('/^[1-9]\d{0,8}$/', trim($id)) === 1);
+    }
+
+    /**
+     * O card do estorno (T2): o cabeçalho do registro, o que este estorno leva (linha a linha, com o valor da época), o
+     * valor do estorno, o já estornado e o líquido que fica; e o editor de itens (itens_estorno: cada linha com o que
+     * resta e a quantidade escolhida). Recusa do plano (ex.: modo sem itens) vira aviso: o Revisar recusa de novo.
+     */
+    private function resumoDoEstorno(array $cabecalho, \Closure $linhas, \Closure $plano, array $valores): array
+    {
+        try {
+            $todas = $linhas();
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return ['resumo' => $cabecalho];
+        }
+
+        $avisos = [];
+        try {
+            $previsto = $plano();
+        } catch (\App\Exceptions\RegraDeNegocioException $e) {
+            $previsto = null;
+            $avisos[] = $e->getMessage();
+        }
+
+        $escolhidas = $previsto === null ? array_column($this->itensDoEstorno($valores['linhas'] ?? []), 'quantidade', 'item_id')
+            : array_column($previsto['linhas'], 'quantidade', 'item_id');
+        $resumo = $cabecalho;
+        if ($previsto !== null) {
+            foreach ($previsto['linhas'] as $l) {
+                if ($l['quantidade'] >= 1) {
+                    $resumo[] = ['rotulo' => 'Estornar '.$l['quantidade'].' × '.$l['descricao'].($l['prontuario'] ? ' (prontuário: o estoque não volta)' : ''), 'valor' => $this->reais($l['valor_centavos'])];
+                }
+            }
+            $resumo[] = ['rotulo' => 'Valor do estorno', 'valor' => $this->reais($previsto['valor_centavos'])];
+            $resumo[] = ['rotulo' => 'Total pago', 'valor' => $this->reais($previsto['total_centavos'])];
+            $resumo[] = ['rotulo' => 'Já estornado antes', 'valor' => $this->reais($previsto['estornado_antes_centavos'])];
+            $resumo[] = ['rotulo' => 'Líquido depois do estorno', 'valor' => $this->reais($previsto['liquido_centavos'])];
+        }
+
+        return [
+            'resumo' => $resumo,
+            'avisos' => $avisos,
+            'itens_estorno' => array_map(fn (array $l) => [
+                'item_id' => $l['item_id'],
+                'descricao' => $l['descricao'],
+                'origem' => $l['prontuario'] ? 'Prontuário' : 'Avulso',
+                'lancada' => $l['lancada'],
+                'estornada' => $l['estornada'],
+                'restante' => $l['restante'],
+                'preco' => $this->reais($l['preco_unitario_centavos']),
+                'quantidade' => (int) ($escolhidas[$l['item_id']] ?? 0),
+            ], $todas),
         ];
     }
 
@@ -533,7 +1206,10 @@ trait CatalogoDaClinica
 
     /**
      * A lixeira da clínica: o vínculo tool ↔ entidade ↔ service, no mesmo formato de lixeiras() do domínio antigo.
-     * "papeis" é quem restaura (a senha do dono é pedida no card); excluir e excluir de vez são sempre do dono.
+     * "papeis" é quem restaura (a senha do dono é pedida no card); excluir e excluir de vez usam as listas do
+     * definirLixeira (dono, e 'admin' só no domínio antigo: o Administrador da clínica não tem tool nenhuma, T1).
+     * Item C (12/11): só o dono restaura, em toda entidade, pelo chat e pela tela: é o mesmo papel que abre a Lixeira
+     * (consultar_lixeira). Antes, a recepção (e o resto da equipe) recebia 403 na tela, mas restaurava tutor e pet pelo chat.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -541,9 +1217,9 @@ trait CatalogoDaClinica
     {
         return [
             'tutor' => ['entidade' => 'Tutor', 'modelo' => Tutor::class, 'rotulo' => 'o tutor', 'servico' => app(TutorService::class),
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papeis' => self::PAPEIS_EQUIPE],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'documento', 'email', 'telefone'], 'papeis' => self::PAPEIS_DO_DONO],
             'pet' => ['entidade' => 'Pet', 'modelo' => Pet::class, 'rotulo' => 'o pet', 'servico' => app(PetService::class),
-                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'especie', 'raca', 'microchip'], 'papeis' => self::PAPEIS_EQUIPE],
+                'busca_por' => 'nome', 'coluna_rotulo' => 'nome', 'colunas' => ['nome', 'especie', 'raca', 'microchip'], 'papeis' => self::PAPEIS_DO_DONO],
             'item_catalogo' => ['entidade' => 'CatalogoItem', 'modelo' => CatalogoItem::class, 'rotulo' => 'o item do catálogo', 'servico' => app(CatalogoService::class),
                 'busca_por' => 'nome', 'coluna_rotulo' => 'nome_comercial', 'colunas' => ['nome_comercial', 'setor', 'categoria', 'preco_centavos'], 'papeis' => self::PAPEIS_DO_DONO],
         ];

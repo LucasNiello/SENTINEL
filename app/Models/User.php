@@ -20,12 +20,24 @@ class User extends Authenticatable
 
     protected static function booted(): void
     {
-        // Mudou o papel: a marcação de supervisor e o PIN de autorização não acompanham. Quem passa a ter outro
-        // papel (ou perde o acesso) não continua autorizando estorno com o que tinha antes.
+        // Mudou o papel ou o tenant (item B, 12/11): a marcação de supervisor e o PIN de autorização não acompanham.
+        // Quem passa a ter outro papel, vai para outra empresa ou perde o acesso não continua autorizando estorno com
+        // o que tinha antes.
+        // - Troca de papel: por campo, só fica o que for gravado nesta mesma operação (um PIN antigo não sobrevive
+        //   só porque a marcação foi regravada junto).
+        // - Troca de tenant: os dois zeram sempre, mesmo gravados junto. Marcar supervisor é ato do dono do tenant
+        //   novo, e o PIN só vale com a marcação.
+        // Limite: update em massa (query builder) e SQL manual não disparam o evento e pulam esta regra.
         static::updating(function (User $usuario) {
-            if ($usuario->isDirty('papel') && ! $usuario->isDirty('supervisor_setor') && ! $usuario->isDirty('pin_autorizacao')) {
-                $usuario->supervisor_setor = null;
-                $usuario->pin_autorizacao = null;
+            $trocouTenant = $usuario->isDirty('tenant_id');
+
+            if ($trocouTenant || $usuario->isDirty('papel')) {
+                if ($trocouTenant || ! $usuario->isDirty('supervisor_setor')) {
+                    $usuario->supervisor_setor = null;
+                }
+                if ($trocouTenant || ! $usuario->isDirty('pin_autorizacao')) {
+                    $usuario->pin_autorizacao = null;
+                }
             }
         });
     }

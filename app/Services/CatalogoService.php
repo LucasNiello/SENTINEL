@@ -32,10 +32,9 @@ class CatalogoService
 
     public function criar(array $dados, int $tenantId): CatalogoItem
     {
-        $dados = [
-            'cobranca_por' => 'unidade', 'controla_estoque' => false, 'estoque' => 0, 'exige_receita' => false,
-            ...Arr::only($dados, self::CAMPOS),
-        ];
+        // Item A (12/11): cobranca_por, controla_estoque e exige_receita são obrigatórios também aqui, sem valor
+        // padrão (o conferir() recusa a falta). Só o estoque inicial tem padrão (0, falha segura).
+        $dados = ['estoque' => 0, ...Arr::only($dados, self::CAMPOS)];
         $this->conferir($dados, criacao: true);
 
         return CatalogoItem::create([...$dados, 'tenant_id' => $tenantId]);
@@ -194,6 +193,17 @@ class CatalogoService
         }
         if ($d['preco_centavos'] > self::PRECO_MAXIMO_CENTAVOS) {
             $recusar('O preço passa do limite de R$ 1.000.000,00 por item.');
+        }
+        if ($criacao) {
+            if (! isset($d['cobranca_por'])) {
+                $recusar('Informe a forma de cobrança: "unidade" ou "diaria".');
+            }
+            if (! is_bool($d['controla_estoque'] ?? null)) {
+                $recusar('Informe se o item controla estoque (sim ou não).');
+            }
+            if (! is_bool($d['exige_receita'] ?? null)) {
+                $recusar('Informe se o item exige receita (sim ou não).');
+            }
         }
         if (! in_array($d['cobranca_por'], CatalogoItem::COBRANCA_POR, true)) {
             $recusar('A cobrança deve ser por "unidade" ou por "diaria".');

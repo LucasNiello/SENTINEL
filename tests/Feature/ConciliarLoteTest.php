@@ -28,7 +28,6 @@ class ConciliarLoteTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.azure_foundry' => ['endpoint' => 'https://foundry.test', 'api_key' => 'k', 'deployment' => 'd']]);
         $this->logarComo('operador', 1);
     }
 
@@ -103,7 +102,7 @@ class ConciliarLoteTest extends TestCase
 
     private function confirmar(string $token, array $extra = [])
     {
-        $this->travel(ConfirmacoesPendentes::ESPERA_MINIMA_S + 1)->seconds();
+        // Decisão B (13/11): sem espera mínima; confirma logo depois de revisar.
 
         return $this->postJson('/agente/confirmar', ['token' => $token, ...$extra]);
     }
@@ -290,7 +289,7 @@ class ConciliarLoteTest extends TestCase
     {
         $a = $this->lancamento('2026-09-05');
         [, $token] = $this->revisarLote();
-        $this->travel(ConfirmacoesPendentes::VALIDADE_MAXIMA_S + 1)->seconds();
+        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
         $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
         $this->get('/agente')->assertOk(); // varredura de novo: não pode duplicar

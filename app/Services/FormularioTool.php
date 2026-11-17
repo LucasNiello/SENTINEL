@@ -25,6 +25,8 @@ class FormularioTool
         'saida' => 'Saída', 'sim' => 'Sim', 'nao' => 'Não',
         // Clínica vet.
         'cao' => 'Cão', 'femea' => 'Fêmea', 'reptil' => 'Réptil', 'servico' => 'Serviço', 'clinica' => 'Clínica', 'diaria' => 'Diária',
+        // T2: o que estornar.
+        'tudo' => 'Tudo o que resta', 'tudo_menos_prontuario' => 'Tudo menos o que veio do prontuário', 'itens' => 'Só os itens escolhidos abaixo',
     ];
 
     /**
@@ -207,7 +209,7 @@ class FormularioTool
 
     /**
      * Opções de um vínculo: só registros do tenant que não estão na lixeira (o
-     * mesmo escopo que validar() aplica à regra exists:). Mostra id + nome. O
+     * mesmo escopo que validar() aplica à regra exists:). Mostra nome + id ("Retorno · #2"). O
      * valor proposto entra sempre que existir nesse escopo, mesmo fora dos
      * LIMITE_REFERENCIAS mais recentes — senão a proposta da IA se perderia.
      *
@@ -230,7 +232,8 @@ class FormularioTool
         return $linhas
             ->map(fn (object $linha) => [
                 'valor' => $linha->{$chave},
-                'rotulo' => '#'.$linha->{$chave}.($coluna ? ' — '.$linha->{$coluna} : ''),
+                // Nome primeiro ("Retorno · #2"): digitar no select acha pelo começo do rótulo, e o número ficava na frente.
+                'rotulo' => $coluna ? $linha->{$coluna}.' · #'.$linha->{$chave} : '#'.$linha->{$chave},
             ])
             ->all();
     }

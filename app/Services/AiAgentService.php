@@ -128,7 +128,14 @@ class AiAgentService
         'exige_receita' => 'a exigência de receita',
         'forma_pagamento' => 'a forma de pagamento',
         'pet_id' => 'o pet',
+        'catalogo_item_id' => 'o serviço',
+        'profissional_id' => 'o profissional',
+        'inicio' => 'o início',
+        'fim' => 'o fim',
         'agendamento_id' => 'o atendimento',
+        // T2: estorno por itens.
+        'modo' => 'a escolha do que estornar',
+        'linhas' => 'as linhas do estorno',
         'itens' => 'os itens',
         'itens.*.catalogo_item_id' => 'o item do catálogo',
         'itens.*.quantidade' => 'a quantidade',
@@ -167,6 +174,18 @@ class AiAgentService
         'categoria_lancamento_id.min' => 'Categoria inválida.',
     ];
 
+    /** P-C1: até quantas linhas da última tabela ficam guardadas para "o segundo", "a última". */
+    private const LIMITE_LISTA = 50;
+
+    /**
+     * P-C1: tools cujo id NÃO é da entidade delas (o localizar acha outra coisa). cobrar_atendimento é da Cobranca,
+     * mas acha o ATENDIMENTO (agendamento): "cobre o segundo" vale para a tabela da agenda, nunca para a de cobranças.
+     */
+    private const ENTIDADE_DO_ID = ['cobrar_atendimento' => 'Agendamento'];
+
+    /** P-C1: o campo de posição nas tools que alteram um registro achado (atualizar_*). */
+    public const PROPRIEDADE_POSICAO = ['posicao' => ['type' => 'integer', 'description' => 'Linha da última tabela mostrada ao usuário, quando ele se refere a ela ("o segundo" = 2, "a última" = -1). Nunca use o número da linha como id.']];
+
     /** Até quantos itens a consulta da lixeira devolve (os excluídos mais recentes). */
     private const LIMITE_LIXEIRA = 50;
 
@@ -189,9 +208,9 @@ class AiAgentService
     }
 
     /**
-     * Ponto único de contato com a Chat Completions API do Microsoft Foundry
-     * (Azure OpenAI) — chamada HTTP REST stateless, sem SDK, na rota
-     * unificada /openai/v1/chat/completions (versionamento implícito).
+     * Ponto único de contato com a Messages API da Anthropic — chamada HTTP REST
+     * stateless, sem SDK. O corpo interno segue o formato de chat/tools e o
+     * adaptador (chamarAnthropic/traduzirAnthropic) faz a conversão.
      *
      * Tools de leitura (consultar_lancamentos) são executadas direto e o
      * resultado volta como tabela crua — uma única chamada à API por
@@ -199,7 +218,7 @@ class AiAgentService
      * aqui: o tool_call é devolvido ao front como confirmação pendente
      * (depois de checado o RBAC — sem permissão, nem chega a propor).
      */
-    public function processar(string $mensagem, array $historico = []): array
+    public function processar(string $mensagem, array $historico = [], ?array $lista = null): array
     {
         // A intenção explícita pertence ao pedido atual, não à ferramenta escolhida pela IA.
         $intencao = $this->operacoes->reconhecer($mensagem);
@@ -211,38 +230,44 @@ class AiAgentService
             return $this->negar($toolSolicitada, $compativeis[$toolSolicitada], []);
         }
 
-        $endpoint = rtrim((string) config('services.azure_foundry.endpoint'), '/');
-        $apiKey = (string) config('services.azure_foundry.api_key');
-        $deployment = (string) config('services.azure_foundry.deployment');
+        $provedor = $this->provedor();
+        $configurado = match ($provedor) {
+            'anthropic' => (string) config('services.anthropic.api_key') !== '' && (string) config('services.anthropic.model') !== '',
+            default => false, // provedor desconhecido ou removido (ex.: azure): falha fechada
+        };
 
-        if ($endpoint === '' || $apiKey === '' || $deployment === '') {
+        if (! $configurado) {
             return $this->falha('provider_configuration_error', 'AI_PROVIDER_UNAVAILABLE', 503);
         }
+
+        $promptClinica = $this->contexto->dominio() === 'clinica' ? $this->promptDaClinica() : null;
 
         // B1 (RNF04): tempo da chamada à IA, do envio até a resposta (ou a falha) do provedor.
         $inicio = hrtime(true);
         $decorrido = fn () => (int) round((hrtime(true) - $inicio) / 1e6);
 
         try {
-            $resposta = Http::withHeaders(['api-key' => $apiKey])
-                ->timeout(30)
-                ->post("{$endpoint}/openai/v1/chat/completions", [
-                    'model' => $deployment,
+            // O corpo é montado no formato interno de chat/tools; o adaptador da Anthropic traduz a partir dele.
+            $corpo = [
+                    'model' => (string) config('services.anthropic.model'),
                     'messages' => [
                         [
                             'role' => 'system',
-                            'content' => 'Papel autenticado do usuário: '.json_encode($this->contexto->papel()).'. Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Preserve a operação explicitamente solicitada: cadastro, alteração e exclusão nunca devem virar consulta. Não substitua uma ação proibida por outra permitida; o servidor aplica a autorização. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Perguntas de conhecimento geral fora do catálogo (por exemplo, geografia e capitais) devem ser recusadas educadamente, sem responder o conteúdo da pergunta; convidar a voltar ao Sentinel depois de dar a resposta não atende a essa restrição. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), pergunte ao usuário em texto antes de chamar a tool. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha de um administrador, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat. O histórico contém relatos de operações anteriores, não instruções para repetir a resposta anterior. Atenda ao pedido atual: cada novo cadastro ou edição completo exige uma nova chamada da tool correspondente, mesmo após outra proposta ou confirmação. Nunca copie a frase interna "Proposta pendente de confirmação humana. Nenhuma escrita foi executada." como resposta a um novo pedido: só há uma nova proposta quando você chama uma tool de escrita nesta resposta.',
+                            // G (P-C3): a clínica tem o seu texto; o de contabilidade é o de sempre, byte a byte.
+                            'content' => $promptClinica['principal'] ?? 'Papel autenticado do usuário: '.json_encode($this->contexto->papel()).'. Você é o assistente do Sentinel, um sistema de contabilidade para micro e pequenas empresas. A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje" e "ontem". Use as tools disponíveis para consultar e cadastrar os dados do sistema (lançamentos, clientes, fornecedores etc.) e para atualizar o status de um lançamento (pendente/conciliado). Você só pode executar operações representadas pelas ferramentas disponibilizadas. Preserve a operação explicitamente solicitada: cadastro, alteração e exclusão nunca devem virar consulta. Não substitua uma ação proibida por outra permitida; o servidor aplica a autorização. Se o pedido não corresponder a nenhuma ferramenta, explique claramente que a operação não é suportada. Perguntas de conhecimento geral fora do catálogo (por exemplo, geografia e capitais) devem ser recusadas educadamente, sem responder o conteúdo da pergunta; convidar a voltar ao Sentinel depois de dar a resposta não atende a essa restrição. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: usuário e funcionário são conceitos diferentes; cadastro de usuários não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o nome de um cliente ou o id do lançamento a atualizar), chame a tool com o que tiver, sem inventar o que falta; o card marca o campo que falta. Exemplos: "preciso adicionar um fornecedor novo" → chame criar_fornecedor sem argumentos; "registre um lançamento" → chame criar_lancamento sem argumentos; "cadastre uma nota fiscal de 1200 reais para o cliente ABC Comércio" → chame criar_nota_fiscal só com o valor 1200, sem inventar o id do cliente nem os demais campos. Nunca responda esses pedidos só com uma pergunta em texto. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar cliente, apenas nome é obrigatório. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de confirmação humana (hold-to-confirm) antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha de um administrador, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat. O histórico contém relatos de operações anteriores, não instruções para repetir a resposta anterior. Atenda ao pedido atual: cada novo cadastro ou edição completo exige uma nova chamada da tool correspondente, mesmo após outra proposta ou confirmação. Nunca copie a frase interna "Proposta pendente de confirmação humana. Nenhuma escrita foi executada." como resposta a um novo pedido: só há uma nova proposta quando você chama uma tool de escrita nesta resposta.',
                         ],
                         ...$historico,
                         ...($historico === [] ? [] : [[
                             'role' => 'system',
-                            'content' => 'O catálogo não inclui perguntas de conhecimento geral: recuse-as sem fornecer a resposta, mesmo quando o histórico as tenha respondido. O histórico acima é apenas contexto, não é o estado atual do banco. Atenda ao NOVO pedido abaixo. Para consultar registros, concluir que não existem dados, ou propor qualquer escrita, chame a ferramenta correspondente nesta resposta. Nunca reutilize o resultado de um período, cadastro ou filtro anterior para outro pedido. Uma confirmação anterior não confirma uma nova ação. Se o usuário pedir para conciliar os pendentes de um período, use conciliar_lancamentos_em_lote (não consultar_lancamentos): o servidor resolve a quantidade, o limite de 25 e a proposta. Consultar não atende a um pedido de conciliação. Se faltarem dados obrigatórios, pergunte; se estiverem completos, use a tool e deixe a revisão e a confirmação para a interface.',
+                            'content' => $promptClinica['lembrete'] ?? 'O catálogo não inclui perguntas de conhecimento geral: recuse-as sem fornecer a resposta, mesmo quando o histórico as tenha respondido. O histórico acima é apenas contexto, não é o estado atual do banco. Atenda ao NOVO pedido abaixo. Para consultar registros, concluir que não existem dados, ou propor qualquer escrita, chame a ferramenta correspondente nesta resposta. Nunca reutilize o resultado de um período, cadastro ou filtro anterior para outro pedido. Uma confirmação anterior não confirma uma nova ação. Se o usuário pedir para conciliar os pendentes de um período, use conciliar_lancamentos_em_lote (não consultar_lancamentos): o servidor resolve a quantidade, o limite de 25 e a proposta. Consultar não atende a um pedido de conciliação. Se faltarem dados obrigatórios, chame a tool com o que tiver, sem inventar o que falta (o card marca o campo); se estiverem completos, use a tool e deixe a revisão e a confirmação para a interface.',
                         ]]),
                         ['role' => 'user', 'content' => $mensagem],
                     ],
                     'tools' => $toolSolicitada === null ? $this->tools() : [$compativeis[$toolSolicitada]['definicao']],
                     'tool_choice' => $toolSolicitada === null ? 'auto' : ['type' => 'function', 'function' => ['name' => $toolSolicitada]],
-                ]);
+                ];
+
+            $resposta = $this->chamarAnthropic($corpo, $toolSolicitada);
         } catch (\Throwable $e) {
             $anterior = $e->getPrevious();
             $timeout = $e instanceof \GuzzleHttp\Exception\NetworkTimeoutException
@@ -259,8 +284,10 @@ class AiAgentService
 
         $tempoIaMs = $decorrido();
 
+        $resposta = $this->traduzirAnthropic($resposta);
+
         // Tudo o que esta resposta auditar (leitura, negado, tool fora do catálogo) leva o tempo da IA.
-        return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada));
+        return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada, $lista));
     }
 
     /**
@@ -269,14 +296,16 @@ class AiAgentService
      * vai só para o log, sem conteúdo. Exceção: a divergência de intenção (AI_INTENT_MISMATCH)
      * é auditada como negado, só com os nomes dos argumentos.
      */
-    private function interpretar(\Illuminate\Http\Client\Response $resposta, int $tempoIaMs, ?string $toolSolicitada = null): array
+    private function interpretar(\Illuminate\Http\Client\Response $resposta, int $tempoIaMs, ?string $toolSolicitada = null, ?array $lista = null): array
     {
         if (! $resposta->successful()) {
             $status = $resposta->status();
             $categoria = match ($status) {
                 401 => 'provider_authentication_error',
+                402 => 'provider_billing_error',
                 403 => 'provider_authorization_error',
                 429 => 'provider_rate_limit',
+                529 => 'provider_overloaded',
                 408, 504 => 'provider_timeout',
                 default => 'provider_http_error',
             };
@@ -290,7 +319,7 @@ class AiAgentService
                 $localStatus, ['status' => $status, 'tempo_ia_ms' => $tempoIaMs]);
         }
 
-        // N1: o corpo da Azure é dado externo. Fora do formato esperado (message que não é objeto, choices
+        // N1: o corpo do provedor é dado externo. Fora do formato esperado (message que não é objeto, choices
         // vazio, HTML com 200, name/arguments que não são texto...) vira erro amigável, nunca 500.
         $mensagemResposta = $resposta->json('choices.0.message');
 
@@ -305,7 +334,7 @@ class AiAgentService
             return $this->respostaForaDoFormato($resposta->status());
         }
 
-        // Em seleção nominal, o Azure observado termina com stop + tool_calls.
+        // Em seleção nominal, o provedor termina com stop + tool_calls.
         // Só esse modo aceita a combinação; nome, argumentos e schema ainda são conferidos abaixo.
         $fim = $resposta->json('choices.0.finish_reason');
         if ($fim === 'length' || $fim === 'content_filter') {
@@ -405,14 +434,38 @@ class AiAgentService
             // vem com os valores atuais mais o que a IA mudou. Nenhum ou vários: responde sem formulário.
             $propostosPelaIa = $argumentos;
 
+            // P-C1: "edite o segundo", "a última": a IA manda só a posição na última tabela mostrada, e o servidor
+            // troca pelo id congelado na sessão (depois do RBAC, antes de localizar). id e busca vindos junto são descartados.
+            if (isset($argumentos['posicao'])) {
+                $resolvido = $this->resolverPosicao($tool, $definicao, $argumentos, $lista);
+
+                if (isset($resolvido['resposta'])) {
+                    return $this->comAviso($resolvido['resposta'], $aviso);
+                }
+
+                $argumentos = $resolvido['argumentos'];
+            }
+            unset($argumentos['posicao']);
+
             if ($definicao['localizar'] !== null) {
                 $localizado = $this->localizarRegistro($tool, $definicao, $argumentos);
 
                 if (isset($localizado['resposta'])) {
-                    return $this->comAviso($localizado['resposta'], $aviso);
+                    $encontrados = $localizado['resposta'];
+
+                    // Vários com esse nome: a lista que o usuário vai escolher também vale para "o segundo".
+                    if (($encontrados['tipo'] ?? null) === 'resultado_leitura') {
+                        $encontrados['lista'] = $this->listaParaGuardar($tool, $definicao, $encontrados['resultado'] ?? []);
+                    }
+
+                    return $this->comAviso($encontrados, $aviso);
                 }
 
                 $argumentos = $localizado['argumentos'];
+            }
+
+            if ($definicao['preparar'] !== null) {
+                $argumentos = ($definicao['preparar'])($argumentos, $propostosPelaIa, $this->contexto->tenantId());
             }
 
             // RF03: o servidor resolve o filtro do lote UMA vez; os ids ficam no rascunho e o Confirmar só executa eles.
@@ -448,6 +501,11 @@ class AiAgentService
         try {
             $resposta = $this->executarTool($tool, $argumentos);
 
+            // P-C1: a tabela mostrada fica congelada na sessão (ids em ordem), e o histórico ganha uma frase sem dados.
+            if (($resposta['tipo'] ?? null) === 'resultado_leitura') {
+                $resposta['lista'] = $this->listaParaGuardar($tool, $definicao, $resposta['resultado'] ?? []);
+            }
+
             // A3 (RF02): tabela de consulta pode ser exportada. Os argumentos voltam para o controller
             // guardar no servidor; ele tira esta chave antes de responder (o front só recebe um id).
             if (($resposta['tipo'] ?? null) === 'resultado_leitura' && ($definicao['tipo'] ?? null) === 'leitura' && $definicao['colunas'] !== []) {
@@ -469,6 +527,165 @@ class AiAgentService
     }
 
     /**
+     * G (P-C3): o system prompt da clínica veterinária (principal e lembrete do meio), com as mesmas regras do de
+     * contabilidade adaptadas ao domínio. Só o papel e a data entram como dado; nada do usuário além disso.
+     *
+     * @return array{principal: string, lembrete: string}
+     */
+    private function promptDaClinica(): array
+    {
+        return [
+            'principal' => 'Papel autenticado do usuário: '.json_encode($this->contexto->papel()).'. Você é o assistente do Sentinel, um sistema de gestão para uma clínica veterinária com petshop (banho e tosa). A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje", "amanhã" e "ontem". Use as tools disponíveis para consultar e cadastrar tutores, pets e itens do catálogo, consultar a agenda, agendar, remarcar, trocar o serviço e mudar o status de um agendamento, cobrar atendimentos, receber e cancelar cobranças, registrar vendas avulsas, e consultar as mensagens dos tutores e marcá-las como tratadas. Você só pode executar operações representadas pelas ferramentas disponibilizadas. Preserve a operação explicitamente solicitada: cadastro, alteração, cobrança, recebimento, cancelamento e exclusão nunca devem virar consulta. Não substitua uma ação proibida por outra permitida; o servidor aplica a autorização. Se o pedido não corresponder a nenhuma ferramenta (por exemplo, registrar prontuário ou receitar), explique claramente que a operação não é suportada. Perguntas de conhecimento geral fora do catálogo (por exemplo, geografia, ou diagnóstico, dose e tratamento de animais) devem ser recusadas educadamente, sem responder o conteúdo da pergunta; convidar a voltar ao Sentinel depois de dar a resposta não atende a essa restrição. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: tutor é a pessoa responsável e pet é o animal; todo pet pertence a um tutor. Cadastro de usuários e de profissionais não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o tutor, o nome ou a espécie de um pet), chame a tool com o que tiver, sem inventar o que falta; o card marca o campo que falta. Exemplos: "preciso cadastrar um tutor novo" → chame criar_tutor sem argumentos; "quero cadastrar um pet" → chame criar_pet sem argumentos; "cadastre um pet chamado Rex" → chame criar_pet só com o nome Rex, sem inventar o tutor nem a espécie. Nunca responda esses pedidos só com uma pergunta em texto. Cada pedido recebe uma única resposta sua, e o resultado de uma consulta vai para a tela, não volta para você. Por isso, quando o pedido é uma ação (agendar um atendimento novo, remarcar (mudar o horário de um agendamento que já existe: use remarcar_agendamento e nunca agende de novo no lugar dele), trocar o serviço de um agendamento marcado errado ("não era banho, era consulta": use alterar_servico_agendamento, que altera o mesmo agendamento), ver ou abrir a ficha de um agendamento (use remarcar_agendamento com o número ou a busca), encaixe de emergência, mudar o status de um agendamento, cadastrar, alterar, vender, cobrar, receber, cancelar ou estornar), chame nesta resposta a tool dessa ação, mesmo sem saber os números: nunca chame uma consulta antes para descobrir o pet, o tutor, o serviço, o profissional, o item ou o registro. Para achar o registro de uma ação, use o campo busca com o nome do pet ou do tutor; números que você não sabe ficam em branco (o card mostra as listas para a pessoa escolher), e nunca invente um número. Quando o usuário se refere a uma linha da última tabela mostrada, use o campo posicao. Agendamento sempre abre a ficha para a pessoa preencher: nunca discuta opções em texto (por exemplo "remarcar ou cancelar?") nem diga que não consegue mostrar ou trocar o agendamento; chame a tool com o que souber, e o que faltar vira campo na ficha. Isso vale também para marcar ou remarcar sem dizer o horário (ou o dia): chame agendar_atendimento ou remarcar_agendamento com o início em branco, nunca responda em texto pedindo a hora; a ficha resolve com o calendário, no passo de escolher o horário. Para agendar, só o início é informado (o servidor calcula o fim); sem profissional dito ("qualquer veterinário"), deixe o profissional em branco: a ficha mostra o calendário; ao remarcar, se o usuário descreve o agendamento (por exemplo "o retorno do dr. rafael"), ponha essas palavras no campo busca. Depois de uma confirmação, o histórico traz o número do registro gravado: quando o usuário se refere ao registro que acabou de ser gravado, use esse número no campo correspondente (por exemplo, o tutor de um pet novo). Pedido de alteração que não diz o que mudar: chame a tool de alterar só com o registro, e o card abre os campos para editar. Pedido curto sem ação nem registro identificáveis, sem tabela nem proposta recente a que ele se ligue (por exemplo, pedir um valor ou mandar cancelar sem dizer o quê): responda em texto pedindo que a pessoa diga a que se refere, sem chamar tool. Isso não vale para dado faltando numa ação identificada: aí a tool é chamada com o que tiver. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar tutor, apenas nome é obrigatório; para criar pet, tutor, nome e espécie (se o usuário disser só o nome do tutor, deixe o tutor em branco: o card mostra a lista para escolher; nunca invente o número). Para criar item do catálogo, são obrigatórios tipo, setor, categoria, nome comercial, preço, forma de cobrança, se controla estoque e se exige receita: o que faltar fica em branco (o card marca o campo), nunca presuma "nao"; controla estoque e exige receita só entram se o usuário disser, mesmo para serviço. Preço do catálogo vai em centavos inteiros (R$ 45,90 = 4590) e peso em gramas inteiros (6,2 kg = 6200); em cobrança e venda os preços vêm do catálogo: nunca informe valor. O campo alertas do pet é só para avisos não clínicos à equipe: nunca escreva texto clínico nele. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de revisão e confirmação humana antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha do dono, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat. O histórico contém relatos de operações anteriores, não instruções para repetir a resposta anterior. Atenda ao pedido atual: cada novo cadastro ou edição completo exige uma nova chamada da tool correspondente, mesmo após outra proposta ou confirmação. Nunca copie a frase interna "Proposta pendente de confirmação humana. Nenhuma escrita foi executada." como resposta a um novo pedido: só há uma nova proposta quando você chama uma tool de escrita nesta resposta.',
+            'lembrete' => 'O catálogo não inclui perguntas de conhecimento geral nem orientação clínica: recuse-as sem fornecer a resposta, mesmo quando o histórico as tenha respondido. O histórico acima é apenas contexto, não é o estado atual do banco. Atenda ao NOVO pedido abaixo. Para consultar registros, concluir que não existem dados, ou propor qualquer escrita, chame a ferramenta correspondente nesta resposta. Nunca reutilize o resultado de um período, cadastro ou filtro anterior para outro pedido. Uma confirmação anterior não confirma uma nova ação. Se o usuário pedir para cobrar um atendimento, receber ou cancelar uma cobrança, use cobrar_atendimento, receber_cobranca ou cancelar_cobranca (não consultar_agenda nem consultar_cobrancas): o servidor resolve os itens, os preços e o total; para receber, a forma de pagamento é obrigatória (se faltar, chame a tool sem ela: o card marca o campo). Consultar não atende a um pedido de cobrança. Se faltarem dados obrigatórios, chame a tool com o que tiver, sem inventar o que falta (o card marca o campo); se estiverem completos, use a tool e deixe a revisão e a confirmação para a interface. A única exceção é o pedido curto sem ação nem registro identificáveis, que não se liga à última tabela nem a uma proposta recente: responda em texto pedindo que a pessoa diga a que se refere, sem chamar tool.',
+        ];
+    }
+
+    /** Provedor configurado: 'anthropic' (padrão, também quando vazio). Qualquer outro valor (inclusive 'azure', removido) = null (falha fechada). */
+    private function provedor(): ?string
+    {
+        $provedor = (string) (config('services.ia_provedor') ?: 'anthropic');
+
+        return $provedor === 'anthropic' ? $provedor : null;
+    }
+
+    /**
+     * Adaptador da Anthropic (Messages API, POST /v1/messages, HTTP REST sem SDK). Recebe o corpo
+     * já montado no formato interno de chat/tools e traduz: as mensagens system (a principal e a do meio do
+     * histórico) vão para o campo system; do histórico só passam user/assistant com texto não vazio,
+     * sem nenhuma outra chave. Tool solicitada: tool_choice auto + só essa tool + instrução no system,
+     * porque o modelo padrão (claude-sonnet-5-5) recusa tool_choice forçado com 400. A conferência no
+     * servidor (AI_INTENT_MISMATCH) continua igual. Sem temperature: o modelo recusa valor não padrão.
+     *
+     * @param  array<string, mixed>  $corpo
+     */
+    private function chamarAnthropic(array $corpo, ?string $toolSolicitada): \Illuminate\Http\Client\Response
+    {
+        $sistema = [];
+        $mensagens = [];
+        $houveConversa = false;
+
+        foreach ($corpo['messages'] as $item) {
+            $papel = is_array($item) ? ($item['role'] ?? null) : null;
+            $conteudo = is_array($item) ? ($item['content'] ?? null) : null;
+
+            // Texto vazio é recusado pela API; não é conteúdo.
+            if (! is_string($conteudo) || trim($conteudo) === '') {
+                continue;
+            }
+
+            if ($papel === 'system') {
+                // A do meio (depois do histórico) fala em "histórico acima" e "pedido abaixo": no campo system,
+                // a referência tem de dizer a que mensagem ela vale.
+                $sistema[] = $houveConversa
+                    ? "Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):\n".$conteudo
+                    : $conteudo;
+            } elseif ($papel === 'user' || $papel === 'assistant') {
+                $mensagens[] = ['role' => $papel, 'content' => $conteudo];
+                $houveConversa = true;
+            }
+        }
+
+        // A primeira mensagem tem de ser do usuário.
+        while ($mensagens !== [] && $mensagens[0]['role'] !== 'user') {
+            array_shift($mensagens);
+        }
+
+        if ($toolSolicitada !== null) {
+            $sistema[] = "Para este pedido, use a ferramenta {$toolSolicitada} nesta resposta; não a troque por outra operação nem por consulta.";
+        }
+
+        $tools = array_map(function (array $definicao) {
+            $funcao = $definicao['function'];
+            $esquema = $funcao['parameters'] ?? ['type' => 'object'];
+
+            // Lista vazia em PHP vira [] no JSON; o esquema exige objeto.
+            if (($esquema['properties'] ?? null) === []) {
+                $esquema['properties'] = new \stdClass;
+            }
+
+            return [
+                'name' => $funcao['name'],
+                ...(isset($funcao['description']) ? ['description' => $funcao['description']] : []),
+                'input_schema' => $esquema,
+            ];
+        }, $corpo['tools']);
+
+        $esforco = (string) config('services.anthropic.effort');
+
+        return Http::withHeaders([
+            'x-api-key' => (string) config('services.anthropic.api_key'),
+            'anthropic-version' => (string) config('services.anthropic.versao'),
+        ])
+            ->timeout(30)
+            ->post('https://api.anthropic.com/v1/messages', [
+                'model' => (string) config('services.anthropic.model'),
+                'max_tokens' => (int) config('services.anthropic.max_tokens'),
+                'system' => implode("\n\n", $sistema),
+                'messages' => $mensagens,
+                'tools' => $tools,
+                'tool_choice' => ['type' => 'auto'],
+                ...($esforco === '' ? [] : ['output_config' => ['effort' => $esforco]]),
+            ]);
+    }
+
+    /**
+     * Converte a resposta 2xx da Anthropic para o MESMO formato interno que o interpretar() já lê
+     * interno (choices.0.message com content/tool_calls e finish_reason). Não 2xx passa como veio
+     * (o interpretar trata o status). O corpo é decodificado com objetos: input {} continua "{}" e
+     * input que não é objeto continua não sendo, para o interpretar recusar. Fora do formato (sem
+     * content em lista, stop_reason ausente ou desconhecido, end_turn com tool_use) vira resposta
+     * que o interpretar recusa; nunca null, que ele aceitaria.
+     */
+    private function traduzirAnthropic(\Illuminate\Http\Client\Response $resposta): \Illuminate\Http\Client\Response
+    {
+        if (! $resposta->successful()) {
+            return $resposta;
+        }
+
+        $corpo = json_decode($resposta->body(), false, 64);
+        $mensagem = null;
+        $fim = 'fora_do_formato';
+
+        if ($corpo instanceof \stdClass && ($corpo->type ?? null) === 'message' && is_array($corpo->content ?? null)) {
+            $textos = [];
+            $chamadas = [];
+
+            $malformado = false;
+
+            foreach ($corpo->content as $bloco) {
+                $tipo = $bloco instanceof \stdClass ? ($bloco->type ?? null) : null;
+
+                // thinking, fallback e outros blocos não são resposta ao usuário: ignorados.
+                // Bloco de texto sem texto não some calado: a resposta inteira fica fora do formato.
+                if ($tipo === 'text') {
+                    is_string($bloco->text ?? null) ? $textos[] = $bloco->text : $malformado = true;
+                } elseif ($tipo === 'tool_use') {
+                    $chamadas[] = ['id' => $bloco->id ?? null, 'type' => 'function', 'function' => [
+                        'name' => $bloco->name ?? null,
+                        'arguments' => json_encode($bloco->input ?? null, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    ]];
+                }
+            }
+
+            $mensagem = ['role' => 'assistant', 'content' => $textos === [] ? null : implode("\n\n", $textos), 'tool_calls' => $chamadas];
+            // Fim normal sem texto e sem tool (content vazio, só thinking) não é resposta: fora do formato.
+            $fim = $malformado ? 'fora_do_formato' : match ($corpo->stop_reason ?? null) {
+                'end_turn', 'stop_sequence' => $chamadas === [] && $textos !== [] ? 'stop' : 'fora_do_formato',
+                'tool_use' => 'tool_calls',
+                'max_tokens' => 'length',
+                'refusal' => 'content_filter',
+                default => 'fora_do_formato',
+            };
+        }
+
+        return new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(
+            $resposta->status(),
+            ['Content-Type' => 'application/json'],
+            (string) json_encode(['choices' => [['message' => $mensagem, 'finish_reason' => $fim]]]),
+        ));
+    }
+
+    /**
      * Acrescenta o campo "aviso" à resposta quando o modelo pediu mais de uma
      * tool na mesma mensagem (só a primeira é processada).
      *
@@ -478,6 +695,70 @@ class AiAgentService
     private function comAviso(array $resposta, ?string $aviso): array
     {
         return $aviso === null ? $resposta : [...$resposta, 'aviso' => $aviso];
+    }
+
+    /**
+     * P-C1: a tabela que o usuário acabou de ver, para guardar na sessão (ConversaAgente::guardarLista): a entidade e
+     * os ids EM ORDEM, até LIMITE_LISTA linhas. A frase vai para o histórico no lugar da tabela: só a quantidade e
+     * como se referir a uma linha, sem id, nome nem documento. Linha sem id fica null (não desloca as posições).
+     * A lixeira mistura entidades: ela não vale para posição (entidade 'Lixeira' nunca casa com uma tool).
+     *
+     * @return array{entidade: ?string, linhas: array<int, ?int>, frase: string}
+     */
+    private function listaParaGuardar(string $tool, ?array $definicao, mixed $resultado): array
+    {
+        $resultado = is_array($resultado) && array_is_list($resultado) ? $resultado : [];
+        $linhas = array_map(function ($linha) {
+            $id = is_array($linha) ? ($linha['id'] ?? null) : null;
+
+            return is_int($id) || (is_string($id) && ctype_digit($id)) ? (int) $id : null;
+        }, array_slice($resultado, 0, self::LIMITE_LISTA));
+        $n = count($linhas);
+
+        return [
+            'entidade' => self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade'] ?? null,
+            'linhas' => $linhas,
+            'frase' => $n === 0
+                ? "A consulta ({$tool}) não encontrou registros."
+                : "Mostrei ao usuário uma tabela com {$n} ".($n === 1 ? 'linha' : 'linhas')." ({$tool}). Ela fica guardada no servidor: para alterar uma linha dela (\"edite o segundo\", \"a última\"), use o campo posicao (1 = primeira, -1 = última), nunca o número da linha como id.",
+        ];
+    }
+
+    /**
+     * P-C1: troca a "posicao" (1..N, ou -1 = última) pelo id congelado na última tabela mostrada a este usuário neste
+     * tenant (a sessão confere a identidade e o prazo). A IA nunca dá o id: id e busca que vierem junto são descartados.
+     * Tabela de outra entidade, posição fora dela ou sem tabela: recusa (422), sem rascunho e sem auditoria, como as
+     * recusas de localizarRegistro(). Depois disto o registro ainda é localizado no tenant (e na situação certa).
+     *
+     * @return array{argumentos: array<string, mixed>}|array{resposta: array<string, mixed>}
+     */
+    private function resolverPosicao(string $tool, array $definicao, array $argumentos, ?array $lista): array
+    {
+        $recusa = fn (string $mensagem) => ['resposta' => [
+            'tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422, 'mensagem' => $mensagem,
+        ]];
+        $linhas = is_array($lista['linhas'] ?? null) ? array_values($lista['linhas']) : [];
+        $posicao = $argumentos['posicao'];
+
+        if ($linhas === []) {
+            return $recusa('Não tenho uma tabela recente para saber qual é esse registro. Consulte de novo ou diga o nome.');
+        }
+        if (($lista['entidade'] ?? null) !== (self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade'])) {
+            return $recusa('A última tabela mostrada é de outro tipo de registro. Consulte de novo ou diga o nome.');
+        }
+
+        $indice = is_int($posicao) ? ($posicao === -1 ? count($linhas) - 1 : $posicao - 1) : null;
+        $id = $indice !== null && $indice >= 0 ? ($linhas[$indice] ?? null) : null;
+
+        if (! is_int($id)) {
+            $total = count($linhas);
+
+            return $recusa("A última tabela tem {$total} ".($total === 1 ? 'linha' : 'linhas').'; essa posição não existe nela.');
+        }
+
+        unset($argumentos['posicao'], $argumentos['busca']);
+
+        return ['argumentos' => [...$argumentos, 'id' => $id]];
     }
 
     /**
@@ -502,7 +783,7 @@ class AiAgentService
     private function falha(string $categoria, string $codigo, int $status, array $metadados = [], ?Throwable $e = null, ?string $mensagem = null): array
     {
         $correlacao = (string) Str::uuid();
-        $contexto = ['correlation_id' => $correlacao, 'categoria' => $categoria, 'provider' => 'azure', ...$metadados];
+        $contexto = ['correlation_id' => $correlacao, 'categoria' => $categoria, 'provider' => $this->provedor() ?? 'desconhecido', ...$metadados];
         // B1 (RNF04): dentro do interpretar() (resposta truncada, filtrada ou fora do formato) o tempo vem do escopo.
         $tempoIaMs = $contexto['tempo_ia_ms'] ?? $this->detalhesAuditoria->atuais()['tempo_ia_ms'] ?? null;
         if ($tempoIaMs !== null) {
@@ -523,7 +804,7 @@ class AiAgentService
     /**
      * Definições das tools expostas ao modelo, no formato de function
      * calling da Chat Completions API. Enviadas no parâmetro `tools` da
-     * chamada ao Azure OpenAI.
+     * chamada ao provedor de IA.
      *
      * Derivadas de catalogo() — a fonte única de tools: o que não está lá
      * não é oferecido ao modelo nem executável.
@@ -697,6 +978,22 @@ class AiAgentService
         return (bool) ($this->catalogo()[$tool]['reautenticar'] ?? false);
     }
 
+    /** 15/11: o Confirmar desta proposta pede CRMV + senha do próprio usuário (cirurgia, internação)? Pelos valores da sessão. */
+    public function exigeCrmv(string $tool, array $valores): bool
+    {
+        $regra = $this->catalogo()[$tool]['exige_crmv'] ?? null;
+
+        return $regra !== null && (bool) $regra($valores, $this->contexto->tenantId());
+    }
+
+    /** H: que conferência o card faz antes de executar: 'admin' (senha de admin) ou 'estorno' (PIN do supervisor ou do dono). */
+    public function tipoReautenticacao(string $tool): ?string
+    {
+        $reautenticar = $this->catalogo()[$tool]['reautenticar'] ?? false;
+
+        return $reautenticar === 'estorno' ? 'estorno' : ($reautenticar === true ? 'admin' : null);
+    }
+
     /** O admin que reautenticou nesta requisição — posto só pelo /agente/confirmar, depois de conferir a senha. */
     private function autorizadoPor(): ?int
     {
@@ -736,7 +1033,7 @@ class AiAgentService
         }
 
         if ($encontrados->count() > 1) {
-            $colunas = ['id', $definicao['coluna_rotulo']];
+            $colunas = $definicao['colunas_lista'] ?? ['id', $definicao['coluna_rotulo']];
             // Bloco 4: na lixeira o botão de cada linha é a própria ação ("Restaurar"), não "Editar".
             $acao = $definicao['rotulo_acao'] !== '' ? ['acao' => ['tool' => $tool, 'rotulo' => $definicao['rotulo_acao']]] : [];
 
@@ -800,7 +1097,10 @@ class AiAgentService
 
         foreach (array_keys(FormularioTool::campos($definicao['regras'])) as $campo) {
             $atual = $registro->getAttribute($campo);
-            $valores[$campo] = $atual instanceof \DateTimeInterface ? $atual->format('Y-m-d') : $atual;
+            // Data com hora (o início de um agendamento) mantém a hora; só data (meia-noite) segue como AAAA-MM-DD.
+            $valores[$campo] = $atual instanceof \DateTimeInterface
+                ? $atual->format($atual->format('H:i:s') === '00:00:00' ? 'Y-m-d' : 'Y-m-d H:i')
+                : $atual;
 
             if (array_key_exists($campo, $informados) && $informados[$campo] !== null) {
                 $valores[$campo] = $informados[$campo];
@@ -845,6 +1145,10 @@ class AiAgentService
             $argumentos = $localizado['argumentos'];
         }
 
+        if ($definicao['preparar'] !== null) {
+            $argumentos = ($definicao['preparar'])($argumentos, [], $this->contexto->tenantId());
+        }
+
         return [
             'tipo' => 'confirmacao_pendente',
             'tool' => $tool,
@@ -861,7 +1165,7 @@ class AiAgentService
      * $autorizadoPor: o admin cuja senha o /agente/confirmar acabou de conferir (RF10);
      * fica na auditoria ao lado de quem estava logado e libera as tools que pedem senha.
      */
-    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null, ?int $tempoIaMs = null, ?array $loteIds = null): array
+    public function executarConfirmada(string $tool, array $argumentos, array $propostos, string $origem = 'agente', ?int $autorizadoPor = null, ?int $tempoIaMs = null, ?array $loteIds = null, ?string $conferencia = null): array
     {
         // RF03: os ids do lote vêm só da proposta guardada na sessão (o controller passa); nada do navegador.
         unset($argumentos['ids']);
@@ -874,6 +1178,8 @@ class AiAgentService
             'origem' => $origem,
             'tempo_ia_ms' => $tempoIaMs,
             ...($autorizadoPor === null ? [] : ['autorizado_por' => $autorizadoPor]),
+            // Adendo final (15/11): que conferência autorizou ("crmv+senha", "pin", "senha de admin"); vai na mensagem da auditoria.
+            ...($autorizadoPor === null || $conferencia === null ? [] : ['conferencia' => $conferencia]),
         ], fn () => $this->executarTool($tool, $argumentos));
     }
 
@@ -934,7 +1240,7 @@ class AiAgentService
 
     /**
      * Modo manual (B2, RF05/RNF05): a mesma consulta da tool, SEM chamar a IA — para quando a
-     * Azure está fora do ar ou o usuário prefere a tela. Só tool de leitura do catálogo; os
+     * a IA está fora do ar ou o usuário prefere a tela. Só tool de leitura do catálogo; os
      * filtros são conferidos contra o esquema da própria tool (nenhuma chave a mais, enum e data
      * no formato) e a execução é o executarTool de sempre: RBAC, tenant, colunas, máscara LGPD e
      * auditoria (origem "manual").
@@ -1048,6 +1354,25 @@ class AiAgentService
     }
 
     /**
+     * Decisão B do Lucas (13/11): o Confirmar pede o gesto de segurar 2 s (só visual, sem trava no servidor) nas ações
+     * destrutivas; as demais escritas confirmam com um clique. Destrutivas: risco 'exclusao' (excluir para a lixeira,
+     * excluir de vez, cancelar cobrança, estornar), a conciliação em lote e cancelar um agendamento (pelo valor
+     * REVISADO do novo status, que o humano pode ter mudado no card). Tool fora do catálogo cai em segurar.
+     */
+    public function exigeSegurar(string $tool, array $argumentos): bool
+    {
+        return $this->risco($tool) === 'exclusao'
+            || $tool === 'conciliar_lancamentos_em_lote'
+            || ($tool === 'alterar_status_agendamento' && ($argumentos['novo_status'] ?? null) === 'cancelado');
+    }
+
+    /** Tools cujo Revisar devolve o card refeito com os avisos do que foi revisado (agendar/remarcar: quantos já ocupam o horário). */
+    public function avisaNoRevisar(string $tool): bool
+    {
+        return in_array($tool, ['agendar_atendimento', 'remarcar_agendamento', 'alterar_servico_agendamento', 'alterar_status_agendamento'], true);
+    }
+
+    /**
      * Formulário do card (RF04) a partir das regras da tool, com os valores dados e,
      * se houver, a frase de erro de cada campo. Null para tool sem formulário.
      */
@@ -1085,6 +1410,15 @@ class AiAgentService
                 if (($resumido['avisos'] ?? []) !== []) {
                     $formulario['avisos'] = array_values($resumido['avisos']);
                 }
+                // 15/11: a ficha de agendamento (agendar, remarcar, trocar o serviço): o front monta o molde com o calendário.
+                if (isset($resumido['ficha'])) {
+                    $formulario['ficha'] = $resumido['ficha'];
+                }
+                // T2: o editor de itens do estorno (quantidade por linha) substitui o campo "linhas" (que seria um texto).
+                if (isset($resumido['itens_estorno'])) {
+                    $formulario['itens_estorno'] = array_values($resumido['itens_estorno']);
+                    $formulario['campos'] = array_values(array_filter($formulario['campos'], fn (array $c) => $c['nome'] !== 'linhas'));
+                }
             } catch (ToolRecusadaException $e) {
                 $formulario['resumo'] = [];
                 $erros = ['_acao' => $e->getMessage(), ...$erros];
@@ -1092,6 +1426,13 @@ class AiAgentService
         }
         if ($definicao['reautenticar']) {
             $formulario['reautenticar'] = true;
+            if ($definicao['reautenticar'] === 'estorno') {
+                $formulario['tipo_autorizacao'] = 'estorno'; // a tela troca o rótulo: supervisor (PIN) ou dono (senha)
+            }
+        } elseif ($definicao['exige_crmv'] !== null && filled($this->contexto->usuario()->crmv) && $this->exigeCrmv($tool, $valores)) {
+            // 15/11: cirurgia e internação. O próprio usuário digita o CRMV e a senha (campos fora do formulário, como na lixeira).
+            $formulario['reautenticar'] = true;
+            $formulario['tipo_autorizacao'] = 'crmv';
         }
 
         // Recusa que não é de um campo do formulário (ex.: "existem lançamentos vinculados"): vai no topo do card.
@@ -1247,7 +1588,8 @@ class AiAgentService
         // lista nunca vê as tools da clínica, e o tenant da clínica não vê as de contabilidade.
         $dominio = $this->contexto->dominio();
 
-        return $this->catalogos[$dominio] ??= array_column($dominio === 'clinica' ? $this->toolsDaClinica() : $this->toolsDeContabilidade(), null, 'nome');
+        // Revisão de 15/11 (C1): a descrição da venda leva o catálogo DO TENANT, então o cache é por domínio e tenant.
+        return $this->catalogos[$dominio.':'.$this->contexto->tenantId()] ??= array_column($dominio === 'clinica' ? $this->toolsDaClinica() : $this->toolsDeContabilidade(), null, 'nome');
     }
 
     /** @return array<int, array<string, mixed>> as tools do domínio antigo (contabilidade) */
@@ -1307,9 +1649,11 @@ class AiAgentService
                 papeis: self::PAPEIS_OPERADOR,
                 propriedades: [
                     'id' => ['type' => 'integer', 'description' => 'Id do lançamento a atualizar.'],
+                    ...self::PROPRIEDADE_POSICAO,
                     'novo_status' => ['type' => 'string', 'enum' => ['pendente', 'conciliado']],
                 ],
-                obrigatorios: ['id', 'novo_status'],
+                // P-C1: o id pode vir da posição na última tabela; sem nenhum dos dois, o Revisar pede o lançamento.
+                obrigatorios: ['novo_status'],
                 executar: fn (array $a) => $this->atualizarStatusLancamento($a),
                 mensagemErro: 'Não consegui atualizar o status do lançamento. Tente novamente.',
                 // Sem Form Request próprio: as mesmas regras desenham o formulário e validam no executor.
@@ -1727,7 +2071,8 @@ class AiAgentService
                     acao: $acao,
                     entidade: $entidade,
                     // DECISÃO PENDENTE (Lucas): papéis da lixeira. Padrão fechado do plano aprovado: excluir e
-                    // excluir de vez só admin; restaurar com o papel de criar/alterar a entidade + senha de admin.
+                    // excluir de vez só admin; restaurar com o "papeis" da lixeira de cada domínio + senha de admin
+                    // (contabilidade: o papel de criar/alterar a entidade; clínica: só o dono, item C de 12/11).
                     papeis: $papeis,
                     propriedades: $propriedades,
                     obrigatorios: [],
@@ -2040,6 +2385,7 @@ class AiAgentService
         string $titulo,
         string $sucesso,
         array $mensagens = [],
+        ?Closure $resumir = null, // 15/11: o que o card mostra só para leitura (ex.: os pets do tutor, o tutor do pet)
     ): array {
         $regras = (new $formRequest)->rules();
 
@@ -2054,6 +2400,7 @@ class AiAgentService
             propriedades: [
                 'id' => ['type' => 'integer', 'description' => 'Número (id) do registro a alterar, se o usuário informou.'],
                 'busca' => ['type' => 'string', 'description' => Str::ucfirst($buscaPor).' do registro a alterar, quando o número não foi informado.'],
+                ...self::PROPRIEDADE_POSICAO,
                 ...$propriedades,
             ],
             obrigatorios: [],
@@ -2088,6 +2435,7 @@ class AiAgentService
             buscaPor: $buscaPor,
             colunaRotulo: $colunaRotulo,
             feito: str_starts_with($rotulo, 'a ') ? 'alterada' : 'alterado',
+            resumir: $resumir,
         );
     }
 
@@ -2123,12 +2471,15 @@ class AiAgentService
         string $colunaRotulo = '',
         ?Closure $conferir = null,
         array $resumo = [],
-        bool $reautenticar = false,
+        bool|string $reautenticar = false, // true = senha de admin (lixeira); 'estorno' = PIN do supervisor ou do dono (H, T1)
         string $feito = 'alterado',
         string $onde = '',
         string $rotuloAcao = '',
         ?Closure $resumir = null,
         ?array $regrasRevisar = null,
+        ?array $colunasLista = null,
+        ?Closure $preparar = null,
+        ?Closure $exigeCrmv = null,
     ): array {
         // "tipo" decide se há confirmação humana (RNF02); "risco" só pinta o card. Os dois precisam concordar:
         // leitura <-> risco leitura; escrita <-> risco escrita ou exclusao. Combinação incoerente quebra cedo.
@@ -2175,6 +2526,15 @@ class AiAgentService
             // ação (definirAcao): o Revisar valida estas regras (todas as do Form Request), não só as do card; assim nada
             // inválido (ex.: 21 itens, atendimento "abc") passa pelo Revisar para quebrar só depois do segurar.
             'regras_revisar' => $regrasRevisar,
+            // 15/11 (agenda): colunas da lista de escolha quando há vários candidatos (null = id + coluna_rotulo).
+            'colunas_lista' => $colunasLista,
+            // 15/11 (agenda): fn(array $argumentos, array $propostosPelaIa, int $tenantId): array, depois do localizar,
+            // na proposta pelo agente e na ficha aberta sem IA. Só ajusta valores do formulário (ex.: limpa o profissional
+            // quando o serviço novo é de outro setor); RBAC, tenant e regras continuam no Revisar e na execução.
+            'preparar' => $preparar,
+            // 15/11 (cirurgia e internação): fn(array $valores, int $tenantId): bool. Se true, o card pede CRMV + senha do
+            // próprio usuário e o /agente/confirmar confere antes de executar (a regra é conferida de novo no service).
+            'exige_crmv' => $exigeCrmv,
             'definicao' => [
                 'type' => 'function',
                 'function' => [
@@ -2201,6 +2561,13 @@ class AiAgentService
     private function papelAtualPermite(array $papeis): bool
     {
         $atual = $this->contexto->papel();
+
+        // T1 (resposta F, 1ª passada do reviewer): o Administrador da clínica só gerencia PINs. Nenhuma tool vale para
+        // ele, nem as da lixeira que o domínio antigo dá ao 'admin' (consultar, excluir, excluir de vez): o RBAC de
+        // todas as rotas /agente/*, da tela /lixeira e do menu passa por aqui.
+        if ($this->contexto->ehAdminDaClinica()) {
+            return false;
+        }
 
         return in_array($atual, (array) config('sentinel.papeis', []), true) && in_array($atual, $papeis, true);
     }

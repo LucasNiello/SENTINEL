@@ -17,7 +17,7 @@ use Tests\TestCase;
 /**
  * Governança das tools do agente: auditoria real (RF06/RF07), RBAC placeholder,
  * tenant fixo no servidor (RNF01/RNF06) e whitelist única de tools.
- * A API do Foundry é sempre simulada com Http::fake.
+ * A API da Anthropic é sempre simulada com Http::fake.
  */
 class AgenteGovernancaTest extends TestCase
 {

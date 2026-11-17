@@ -38,7 +38,7 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)->by(Str::lower(is_string($email) ? $email : '').'|'.$request->ip());
         });
 
-        // RNF10: cada pedido ao agente gasta crédito do Foundry. 10 por minuto por usuário logado,
+        // RNF10: cada pedido ao agente gasta crédito da Anthropic. 10 por minuto por usuário logado,
         // com o 429 no mesmo formato {tipo, mensagem} que o front já exibe.
         RateLimiter::for('agente', function (Request $request) {
             return Limit::perMinute(10)->by((string) $request->user()->id)->response(
@@ -70,12 +70,16 @@ class AppServiceProvider extends ServiceProvider
             );
         });
 
+        // (O limiter 'agente-sem-ia' também cobre as rotas /supervisao/*, no mesmo balde por usuário.)
+        // Item I/T1: o teto de 5 tentativas da senha ao gerar o PIN é contado no SupervisaoController, antes do Hash::check.
+
         // RF10 (Bloco 4): a senha de admin digitada no card não é aparada (espaço faz parte dela) e nunca
-        // volta à sessão como "valor antigo" num redirecionamento de erro de validação.
-        TrimStrings::except(['senha_admin']);
+        // volta à sessão como "valor antigo" num redirecionamento de erro de validação. Item I: idem para
+        // a senha de login do Administrador ao gerar um PIN (/supervisao/pins/{id}/gerar, T1).
+        TrimStrings::except(['senha_admin', 'senha_atual']);
         $tratador = $this->app->make(ExceptionHandler::class);
         if ($tratador instanceof Handler) {
-            $tratador->dontFlash('senha_admin');
+            $tratador->dontFlash(['senha_admin', 'senha_atual']);
         }
     }
 }

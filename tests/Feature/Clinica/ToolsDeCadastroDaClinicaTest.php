@@ -16,7 +16,7 @@ use Tests\TestCase;
  * P-B7: os testes padrão de tool, rodados para CADA entidade que nasce de definirCadastro (tutor, pet, item do
  * catálogo). Entidade nova da clínica entra aqui com uma linha em entidades() e uma em ficha(). Cobre: consulta
  * (tenant, auditoria), criar (confirmação, tenant do servidor, validação com frase amigável, auditoria), atualizar,
- * RBAC por lista de papéis e o esquema enviado à IA. Foundry sempre simulado.
+ * RBAC por lista de papéis e o esquema enviado à IA. Anthropic sempre simulada.
  */
 class ToolsDeCadastroDaClinicaTest extends TestCase
 {
@@ -377,6 +377,28 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
         $this->assertSame([['Com tudo', true, true, 4], ['Com nao', false, false, 0]], $flags);
     }
 
+    /**
+     * Pontos fracos da bateria (15/11, pedido 16): a IA preenchia controla_estoque e exige_receita com "nao" sem o usuário
+     * dizer (a descrição sugeria 'Serviço: "nao"'). Agora a descrição e o prompt mandam deixar de fora o que não foi dito.
+     */
+    public function test_descricao_e_prompt_mandam_nao_presumir_estoque_nem_receita(): void
+    {
+        $this->logarComo('dono', self::T);
+        $propriedades = collect(app(\App\Services\AiAgentService::class)->tools())->firstWhere('function.name', 'criar_item_catalogo')['function']['parameters']['properties'];
+
+        $this->assertStringStartsWith('Só preencha se o usuário disser se o item controla estoque; se ele não disse, deixe de fora, mesmo para serviço', $propriedades['controla_estoque']['description']);
+        $this->assertStringStartsWith('Só preencha se o usuário disser se o item exige receita; se ele não disse, deixe de fora', $propriedades['exige_receita']['description']);
+        foreach (['controla_estoque', 'exige_receita'] as $campo) {
+            $this->assertStringNotContainsString('Serviço: "nao"', $propriedades[$campo]['description']);
+            $this->assertStringContainsString('Nunca presuma.', $propriedades[$campo]['description']);
+        }
+
+        $this->respostaIa = ['choices' => [['message' => ['content' => 'Ok.']]]];
+        $this->postJson('/agente/comando', ['mensagem' => 'oi'])->assertOk();
+        $sistema = (string) \Illuminate\Support\Facades\Http::recorded()[count(\Illuminate\Support\Facades\Http::recorded()) - 1][0]['system'];
+        $this->assertStringContainsString('controla estoque e exige receita só entram se o usuário disser, mesmo para serviço', $sistema);
+    }
+
     /** @return array<string, array{string, string}> campo obrigatório => trecho da frase */
     public static function camposSemPadrao(): array
     {
@@ -423,6 +445,46 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
         $this->logarComo('dono', self::T);
         $this->confirmar($this->propor(['busca' => 'Bidu'], 'excluir_pet'))->assertOk();
         $this->assertNotNull(Pet::withTrashed()->find($pet->id)->deleted_at);
+    }
+
+    /** @return array<string, array{string, string}> */
+    public static function equipeSemDonoNaLixeira(): array
+    {
+        $casos = [];
+        foreach (['atendente', 'vendedor', 'recepcao', 'veterinario'] as $papel) {
+            foreach (['tutor', 'pet', 'item_catalogo'] as $tipo) {
+                $casos["{$papel} {$tipo}"] = [$papel, $tipo];
+            }
+        }
+
+        return $casos;
+    }
+
+    /** Item C (12/11): só o dono restaura, pelo chat e pela tela (a recepção já recebia 403 na Lixeira e restaurava pelo chat). */
+    #[DataProvider('equipeSemDonoNaLixeira')]
+    public function test_so_o_dono_restaura_da_lixeira_inclusive_pelo_chat(string $papel, string $tipo): void
+    {
+        $registro = match ($tipo) {
+            'tutor' => Tutor::create(['nome' => 'Na Lixeira', 'tenant_id' => self::T]),
+            'pet' => Pet::create(['tutor_id' => Tutor::create(['nome' => 'Dono do Pet', 'tenant_id' => self::T])->id, 'nome' => 'Na Lixeira', 'especie' => 'cao', 'tenant_id' => self::T]),
+            'item_catalogo' => CatalogoItem::create(['tipo' => 'servico', 'setor' => 'clinica', 'categoria' => 'consulta', 'nome_comercial' => 'Na Lixeira',
+                'preco_centavos' => 100, 'cobranca_por' => 'unidade', 'controla_estoque' => false, 'exige_receita' => false, 'estoque' => 0, 'tenant_id' => self::T]),
+        };
+        $registro->delete();
+
+        $this->logarComo($papel, self::T);
+        $this->assertFalse(app(AiAgentService::class)->podeExecutar("restaurar_{$tipo}"), 'a tela não mostra o botão');
+        $this->comando("restaurar_{$tipo}", ['busca' => 'Na Lixeira'])->assertStatus(403)->assertJsonPath('tipo', 'negado');
+        $this->postJson('/agente/formulario', ['tool' => "restaurar_{$tipo}", 'id' => $registro->id])->assertStatus(403);
+        $this->get('/lixeira')->assertForbidden();
+
+        $this->assertNotNull($registro::withTrashed()->find($registro->id)->deleted_at, 'continua na lixeira');
+        $this->assertSame(['negado'], AuditLog::query()->where('tool', "restaurar_{$tipo}")->pluck('resultado')->unique()->values()->all());
+        $this->assertEmpty(session('confirmacoes', []));
+
+        // O dono continua podendo propor a restauração (a senha do dono é pedida no card).
+        $this->logarComo('dono', self::T);
+        $this->comando("restaurar_{$tipo}", ['busca' => 'Na Lixeira'])->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente');
     }
 
     /** O passo "Revisar" de uma proposta já existente (sem editar nada). */

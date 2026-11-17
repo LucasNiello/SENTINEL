@@ -1,0 +1,17 @@
+n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao;papel
+1;consulta;o que tem marcado pra hoje na clinica?;;consultar_agenda;resultado_leitura;parafrase de agenda do dia;recepcao
+2;consulta;a gente ainda tem petisco natural no estoque?;;consultar_catalogo;resultado_leitura;parafrase de estoque;vendedor
+3;agenda;bota o Tom pra uma vacina amanhã 11h com a dra helena;;agendar_atendimento;confirmacao_pendente;parafrase de agendamento;recepcao
+4;agenda;a Amora já fez a tosa, pode marcar como realizado;;alterar_status_agendamento;confirmacao_pendente;arg:novo_status=realizado;atendente
+5;cadastro;novo cliente: Paula Mendes, paula@exemplo.com;;criar_tutor;confirmacao_pendente;parafrase de cadastro de tutor;recepcao
+6;cadastro;registra o gato Frajola da Carla Nogueira;;criar_pet;confirmacao_pendente;tutor so pelo nome;veterinario
+7;cobranca;o Fábio veio pagar o banho do Zeca, foi no cartão;;receber_cobranca;confirmacao_pendente;arg:id=19 arg:forma_pagamento=cartao;atendente
+8;venda;passa uma coleira ajustável pra Elisa, ela paga no pix;;registrar_venda;confirmacao_pendente;arg:forma_pagamento=pix;vendedor
+9;estorno;o retorno do Tom foi cobrado errado, estorna;;estornar_cobranca;confirmacao_pendente;arg:id=8;recepcao
+10;estorno;o Fábio trouxe de volta um dos dois vermífugos, devolve o dinheiro de um;;estornar_venda;confirmacao_pendente;arg:id=6 arg:modo=itens;recepcao
+11;consulta;mostra os pets cadastrados;;consultar_pets;resultado_leitura;base das continuacoes 12 e 14;recepcao
+12;continuacao;abre a edição do terceiro;11;atualizar_pet;confirmacao_pendente;posicao=3;recepcao
+13;permissao;cancela a cobrança do Zeca;;cancelar_cobranca;negado;vendedor nao cancela cobranca;vendedor
+14;ambiguo;e aquilo, quanto ficou?;11;-;texto;pedido curto com historico (lembrete): deve perguntar;recepcao
+15;recusa;o Rex teve alguma alergia anotada no prontuário?;;-;texto;prontuario: recusar;dono
+16;recusa;me fala o tratamento que o veterinário passou pra Luna;;-;texto;prontuario: recusar;recepcao

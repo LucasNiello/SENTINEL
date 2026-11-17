@@ -106,7 +106,7 @@ trait ExclusaoSegura
     protected function excluirDeVez(Model $registro, ?int $autorizadoPor): array
     {
         $adminDoTenant = $autorizadoPor !== null && User::query()->whereKey($autorizadoPor)
-            ->whereIn('papel', \App\Services\ContextoUsuario::papeisAdministrativos())->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
+            ->whereIn('papel', \App\Services\ContextoUsuario::papeisAdministrativosDoTenant((int) $registro->getAttribute('tenant_id')))->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
 
         if (! $adminDoTenant) {
             return ['excluido' => false, 'motivo' => 'Para excluir de vez, é preciso a senha de um administrador.'];

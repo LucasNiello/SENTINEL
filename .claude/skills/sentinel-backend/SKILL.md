@@ -5,8 +5,8 @@ description: Use ao criar ou alterar migrations, models, services, Form Requests
 
 # PAPEL + CONTEXTO
 Backend do Sentinel (TCC Laravel, SENAI Limeira). Stack: Laravel 13 / PHP 8.4 +
-services por entidade + AiAgentService (tool calling, Chat Completions API do
-Microsoft Foundry/Azure). Documento de referência: requisitos formais
+services por entidade + AiAgentService (tool calling, Messages API da Anthropic).
+Documento de referência: requisitos formais
 RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
 
 # PERMISSÕES
@@ -33,7 +33,7 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
   de outro tenant é tratado como inexistente. Motivo: achados M4/N5 da revisão
   de 28/09.
 - **IA**: só dentro de `App\Services\AiAgentService` (regra do CLAUDE.md).
-  Nenhum outro arquivo chama a API do Foundry.
+  Nenhum outro arquivo chama a API da Anthropic.
 - **Tool de escrita** só está pronta com os quatro itens. Faltou um → a tool
   não está pronta:
   1. RBAC mínimo: papel mínimo declarado na entrada da tool no catálogo do
@@ -43,8 +43,10 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
      escolhido por tenant em `ContextoUsuario::dominio()`.
   2. Confirmação humana: o agente só devolve `confirmacao_pendente`; a escrita
      roda no `/agente/confirmar`, com o token de sessão do `AgenteController`:
-     espera mínima de 2 s; validade de 10 s na interface; o servidor aceita até
-     12 s (VALIDADE_MAXIMA_S); consumo único (já implementados). Consumo
+     sem janela de tempo (decisão B do Lucas, 13/11): o token vale até o fim dos
+     5 min da proposta (PRAZO_RASCUNHO_S); consumo único; executa só os valores
+     revisados da sessão. Segurar 2 s é só visual, nas destrutivas
+     (`AiAgentService::exigeSegurar`). Consumo
      atômico do token (vale a partir do Lote 2).
   3. Auditoria real em `audit_logs` (o `executarTool()` grava na mesma
      transação da escrita).
@@ -59,6 +61,20 @@ RF01-RF12/RNF01-RNF10 no `documentacao/`. Prazo: entrega até 25/11.
   `sentinel-visual`, seção 5). Tool nova entra na classe do seu efeito, não do
   seu nome. O campo `risco` (leitura / escrita / exclusao) já vai no catálogo
   e na resposta `confirmacao_pendente`.
+- **PIN e estorno (clínica, 14/11)**:
+  - o PIN de autorização é gerado e revogado pelo Administrador da clínica (papel `admin` num tenant de
+    `sentinel.tenants_clinica`; `ContextoUsuario::ehAdminDaClinica()`) ou pelo dono (decisão do Lucas, 15/11;
+    `SupervisaoService::gestorDoPin`), na `/supervisao`: 6 dígitos de `random_int`, mostrado uma vez, só o
+    hash gravado; nunca em log, auditoria, sessão ou outra resposta. O dono gera e revoga o próprio PIN e o
+    dos supervisores, não o de outro dono;
+  - têm PIN o dono (sem setor) e os supervisores marcados pelo dono (`SupervisaoService::podeTerPin`);
+    o estorno confere só o PIN (a senha de login do dono não vale); o Admin nunca autoriza;
+  - o Admin da clínica não tem tool nenhuma (`papelAtualPermite` nega), não vê auditoria nem autoriza
+    a lixeira (`papeisAdministrativosDoTenant`);
+  - estorno por itens (cobrança e venda): regra no trait `Concerns\EstornoPorItens`; valor = preço
+    copiado na linha × quantidade, nunca da IA nem do navegador; o argumento é `linhas`
+    ([{item_id, quantidade}]), não `itens` (colide com a relação `itens()` no localizar); o Revisar
+    congela o plano em linhas explícitas (`congelarEstorno`) e o Confirmar não recalcula "tudo".
 - **Datas**: use o timezone da config da aplicação (`now()`/Carbon seguem
   `config('app.timezone')`); nunca assuma UTC.
 - **Teste**: toda mudança vem com teste (ver skill `sentinel-testes`).

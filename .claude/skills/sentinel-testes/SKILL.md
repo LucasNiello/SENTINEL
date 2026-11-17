@@ -6,7 +6,7 @@ description: Use ao escrever ou rodar testes do Sentinel (PHPUnit/Feature): gove
 # PAPEL + CONTEXTO
 Testes do Sentinel. A suíte roda com `php artisan test` (PHPUnit) em SQLite na
 memória (`phpunit.xml`: `DB_CONNECTION=sqlite`, `DB_DATABASE=:memory:`) —
-nenhum teste toca o MySQL de desenvolvimento, e a API do Foundry é sempre
+nenhum teste toca o MySQL de desenvolvimento, e a API da Anthropic é sempre
 simulada com `Http::fake`. O RNF09 exige cobertura automatizada de RBAC,
 validação e bloqueio por dependência.
 
@@ -22,7 +22,7 @@ A lista de arquivos cresce a cada bloco; descubra por pasta e padrão de nome
   papel; isolamento de tenant; construtores de tool). Mesmo padrão de nome.
 - `tests/Unit/*Test.php` — poucos testes sem banco nem fluxo HTTP.
 - `tests/Concerns/` — apoio reutilizável, sem sufixo `Test`: `SimulaAgente`
-  (Foundry simulado e os passos `comando()`, `propor()`, `confirmar()`),
+  (IA simulada e os passos `comando()`, `propor()`, `confirmar()`),
   `CenarioClinica` (dados-base da clínica) e `ProvaDeTravas` (prova que a
   leitura usa trava), mais a classe auxiliar da gramática SQLite que mostra
   a trava.
@@ -46,8 +46,9 @@ domínio dele.
   tipo nome de relação Eloquent).
 - Ciclo soft delete → lixeira → arquivado (RF09-RF12).
 - Confirmação no fluxo /agente (RNF02), conferida no servidor:
-  - espera mínima (antes de 2 s → 422);
-  - validade (depois de 12 s → 422);
+  - sem janela de tempo (decisão B, 13/11): confirmar no mesmo instante do
+    Revisar grava; depois dos 5 min da proposta → 422 e auditoria "expirado";
+  - `segurar` do Revisar: true só nas destrutivas (`exigeSegurar`), pelo valor revisado;
   - token usado uma única vez, inclusive com duas confirmações simultâneas
     (consumo atômico — vale a partir do Lote 2);
   - token malformado → 422 (vale a partir do Lote 2).
@@ -55,6 +56,15 @@ domínio dele.
   tool tem teste mostrando que o registro de outro tenant dá
   `ModelNotFoundException` (no service; na tool, é recusado como inexistente)
   e fica intacto.
+- PIN (clínica): só o Admin gera; o código aparece uma vez e nunca na auditoria, no
+  log (todos os níveis), na sessão ou na lista; código novo invalida o antigo; o
+  dono autoriza só com PIN (a senha falha); o Admin não autoriza; outro tenant não
+  vale; o teto conta a tentativa ANTES do `Hash::check`. Nos testes de estorno, o
+  PIN conhecido vem do helper `comPin()` (`CenarioClinica`).
+- Estorno por itens: parcial (continua paga), parciais até esgotar (cancelada),
+  acima do restante recusado, prontuário nunca devolve estoque, preço da época,
+  linha de mesmo número em cobrança e venda, travas (`ProvaDeTravas`), e a IA ou
+  o navegador mandando "valor" (recusado ou descartado).
 - Auditoria (RF06/RF07): o teste confere que gravou o registro certo E que o
   dado sensível (CPF, salário, CPF no documento) está mascarado — não só que
   não deu erro.

@@ -56,15 +56,19 @@ class IsolamentoDeTenantTest extends TestCase
             'CatalogoService::restaurarDaLixeira', 'CatalogoService::excluirDefinitivo',
             'AgendaService::agendar', 'AgendaService::motivoParaNaoAgendar', 'AgendaService::alterarStatus',
             'AgendaService::motivoParaNaoAlterarStatus', 'AgendaService::buscarPorFiltro', 'AgendaService::localizarEmAberto',
+            'AgendaService::remarcar', 'AgendaService::motivoParaNaoRemarcar', 'AgendaService::localizarParaRemarcar',
+            'AgendaService::trocarServico', 'AgendaService::motivoParaNaoTrocarServico', 'AgendaService::disponibilidadeDoDia',
+            'AgendaService::disponibilidadeDoMes', 'AgendaService::exigeCrmv', 'AgendaService::exigeCrmvNoStatus',
             'ProntuarioService::abrir', 'ProntuarioService::atualizar', 'ProntuarioService::adicionarItem', 'ProntuarioService::removerItem',
             'ProntuarioService::assinar', 'ProntuarioService::adendar', 'ProntuarioService::vincular', 'ProntuarioService::metadados',
             'CobrancaService::abrir', 'CobrancaService::adicionarItem', 'CobrancaService::removerItem', 'CobrancaService::importarDoProntuario',
             'CobrancaService::fechar', 'CobrancaService::registrarPagamento', 'CobrancaService::cancelar', 'CobrancaService::estornar',
             'CobrancaService::cobrarAtendimento', 'CobrancaService::previaDaCobranca', 'CobrancaService::buscarPorFiltro', 'CobrancaService::localizar',
-            'CobrancaService::atendimentosParaCobrar',
+            'CobrancaService::atendimentosParaCobrar', 'CobrancaService::planoDoEstorno', 'CobrancaService::linhasParaEstornar',
             'VendaService::registrar', 'VendaService::registrarPagamento', 'VendaService::cancelar', 'VendaService::previa',
+            'VendaService::estornar', 'VendaService::planoDoEstorno', 'VendaService::linhasParaEstornar', 'VendaService::buscarPorFiltro', 'VendaService::localizar',
             'MensagemService::buscarPorFiltro', 'MensagemService::localizar', 'MensagemService::marcarTratada',
-            'SupervisaoService::marcarSupervisor', 'SupervisaoService::definirProprioPin', 'SupervisaoService::resetarPin',
+            'SupervisaoService::marcarSupervisor', 'SupervisaoService::gerarPin', 'SupervisaoService::revogarPin',
         ];
 
         return array_combine($nomes, array_map(fn (string $n) => [$n], $nomes));
@@ -148,7 +152,8 @@ class IsolamentoDeTenantTest extends TestCase
             'PetService::excluirDefinitivo' => fn () => $this->inexistente(fn () => $pets->excluirDefinitivo($this->arquivado($this->pet())->id, self::B, $this->usuarioClinica('dono', self::B)->id)),
 
             'CatalogoService::criar' => function () use ($catalogo) {
-                $criado = $catalogo->criar(['tipo' => 'servico', 'setor' => 'clinica', 'categoria' => 'consulta', 'nome_comercial' => 'Novo', 'preco_centavos' => 100], self::B);
+                $criado = $catalogo->criar(['tipo' => 'servico', 'setor' => 'clinica', 'categoria' => 'consulta', 'nome_comercial' => 'Novo', 'preco_centavos' => 100,
+                    'cobranca_por' => 'unidade', 'controla_estoque' => false, 'exige_receita' => false], self::B); // item A: sem padrão no service
                 $this->assertSame([self::B, 0], [$criado->tenant_id, CatalogoItem::where('tenant_id', self::T)->count()], 'grava no tenant que o servidor passou');
             },
             'CatalogoService::atualizar' => function () use ($catalogo) {
@@ -202,6 +207,57 @@ class IsolamentoDeTenantTest extends TestCase
                 $agendamento = $this->agendado();
                 $this->assertCount(1, $agenda->localizarEmAberto($agendamento->id, null, self::T));
                 $this->vazio($agenda->localizarEmAberto($agendamento->id, null, self::B));
+            },
+            'AgendaService::remarcar' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $this->inexistente(fn () => $agenda->remarcar($agendamento->id, '2030-01-10 10:00', self::B), \App\Models\Agendamento::class, 'inicio');
+            },
+            'AgendaService::motivoParaNaoRemarcar' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $this->assertStringStartsWith('Não encontrei', (string) $agenda->motivoParaNaoRemarcar($agendamento->id, '2030-01-10 10:00', self::B));
+                $this->assertNull($agenda->motivoParaNaoRemarcar($agendamento->id, '2030-01-10 10:00', self::T), 'no tenant dono, a remarcação vale');
+            },
+            'AgendaService::localizarParaRemarcar' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $this->assertCount(1, $agenda->localizarParaRemarcar($agendamento->id, null, self::T));
+                $this->assertCount(1, $agenda->localizarParaRemarcar(null, 'thor', self::T), 'por palavra do pet');
+                $this->vazio($agenda->localizarParaRemarcar($agendamento->id, null, self::B));
+                $this->vazio($agenda->localizarParaRemarcar(null, 'thor', self::B));
+            },
+            // 15/11 (ficha de agendamento e cirurgia com CRMV): os métodos novos, no lugar dos sobrepostos* (que saíram com o
+            // modelo de blocos).
+            'AgendaService::trocarServico' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $retorno = $this->item(['nome_comercial' => 'Retorno']);
+                $this->inexistente(fn () => $agenda->trocarServico($agendamento->id, $retorno->id, $agendamento->profissional_id, '2026-11-11 09:00', self::B));
+                $this->assertSame($agendamento->catalogo_item_id, $agendamento->fresh()->catalogo_item_id, 'nada mudou');
+            },
+            'AgendaService::motivoParaNaoTrocarServico' => function () use ($agenda) {
+                $agendamento = $this->agendado();
+                $retorno = $this->item(['nome_comercial' => 'Retorno']);
+                $this->assertStringStartsWith('Não encontrei', (string) $agenda->motivoParaNaoTrocarServico($agendamento->id, $retorno->id, $agendamento->profissional_id, '2026-11-11 09:00', self::B));
+                $this->assertNull($agenda->motivoParaNaoTrocarServico($agendamento->id, $retorno->id, $agendamento->profissional_id, '2026-11-11 09:00', self::T), 'no tenant dono, a troca vale');
+            },
+            'AgendaService::disponibilidadeDoDia' => function () use ($agenda) {
+                $servico = $this->item();
+                $this->usuarioClinica('veterinario');
+                $this->assertNotEmpty($agenda->disponibilidadeDoDia($servico->id, '2026-11-11', null, null, ['clinica', 'petshop'], self::T)['horarios']);
+                $this->inexistente(fn () => $agenda->disponibilidadeDoDia($servico->id, '2026-11-11', null, null, ['clinica', 'petshop'], self::B));
+            },
+            'AgendaService::disponibilidadeDoMes' => function () use ($agenda) {
+                $servico = $this->item();
+                $this->assertArrayHasKey('2026-11-11', $agenda->disponibilidadeDoMes($servico->id, '2026-11', null, null, ['clinica', 'petshop'], self::T)['dias']);
+                $this->inexistente(fn () => $agenda->disponibilidadeDoMes($servico->id, '2026-11', null, null, ['clinica', 'petshop'], self::B));
+            },
+            'AgendaService::exigeCrmv' => function () use ($agenda) {
+                $cirurgia = $this->item(['categoria' => 'cirurgia', 'nome_comercial' => 'Castração']);
+                $this->assertTrue($agenda->exigeCrmv(null, $cirurgia->id, self::T));
+                $this->assertFalse($agenda->exigeCrmv(null, $cirurgia->id, self::B), 'o serviço de outro tenant não existe para ele');
+            },
+            'AgendaService::exigeCrmvNoStatus' => function () use ($agenda) {
+                $cirurgia = $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(['categoria' => 'cirurgia', 'nome_comercial' => 'Castração']), ['status' => 'agendado']);
+                $this->assertTrue($agenda->exigeCrmvNoStatus($cirurgia->id, 'cancelado', self::T));
+                $this->assertFalse($agenda->exigeCrmvNoStatus($cirurgia->id, 'cancelado', self::B));
             },
 
             'ProntuarioService::abrir' => fn () => $this->inexistente(fn () => $prontuarios->abrir(['pet_id' => $this->pet()->id, 'tipo' => 'consulta'], $this->usuarioClinica('veterinario', self::B)->id, self::B), \App\Models\Prontuario::class),
@@ -275,6 +331,21 @@ class IsolamentoDeTenantTest extends TestCase
                 $this->inexistente(fn () => $cobrancas->estornar($cobranca->id, 'Duplicidade.', $dono->id, $dono->id, self::B, true));
                 $this->assertSame('paga', $cobranca->fresh()->status);
             },
+            // T2: o plano e as linhas do estorno por itens.
+            'CobrancaService::planoDoEstorno' => function () use ($cobrancas) {
+                $cobranca = $this->cobrancaAberta();
+                $cobrancas->fechar($cobranca->id, self::T);
+                $cobrancas->registrarPagamento($cobranca->id, 'pix', self::T);
+                $this->assertGreaterThan(0, $cobrancas->planoDoEstorno($cobranca->id, 'tudo', [], self::T)['valor_centavos'], 'no tenant dono, o plano sai');
+                $this->inexistente(fn () => $cobrancas->planoDoEstorno($cobranca->id, 'tudo', [], self::B));
+            },
+            'CobrancaService::linhasParaEstornar' => function () use ($cobrancas) {
+                $cobranca = $this->cobrancaAberta();
+                $cobrancas->fechar($cobranca->id, self::T);
+                $cobrancas->registrarPagamento($cobranca->id, 'pix', self::T);
+                $this->assertNotEmpty($cobrancas->linhasParaEstornar($cobranca->id, self::T));
+                $this->inexistente(fn () => $cobrancas->linhasParaEstornar($cobranca->id, self::B));
+            },
             'CobrancaService::cobrarAtendimento' => fn () => $this->inexistente(fn () => $cobrancas->cobrarAtendimento($this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item())->id, self::B), \App\Models\Cobranca::class),
             'CobrancaService::previaDaCobranca' => function () use ($cobrancas) {
                 $agendamento = $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item());
@@ -326,22 +397,52 @@ class IsolamentoDeTenantTest extends TestCase
                 $this->assertSame('aberta', $venda->fresh()->status);
             },
 
+            // T2: estorno por itens da venda paga e as leituras novas.
+            'VendaService::estornar' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $dono = $this->comPin($this->usuarioClinica('dono', self::B));
+                $this->inexistente(fn () => $vendas->estornar($venda->id, 'Duplicidade.', $dono->id, $dono->id, self::B, true), \App\Models\Estorno::class);
+                $this->assertSame('paga', $venda->fresh()->status);
+            },
+            'VendaService::planoDoEstorno' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $this->assertSame(2500, $vendas->planoDoEstorno($venda->id, 'tudo', [], self::T)['valor_centavos'], 'no tenant dono, o plano sai');
+                $this->inexistente(fn () => $vendas->planoDoEstorno($venda->id, 'tudo', [], self::B));
+            },
+            'VendaService::linhasParaEstornar' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $this->assertCount(1, $vendas->linhasParaEstornar($venda->id, self::T));
+                $this->inexistente(fn () => $vendas->linhasParaEstornar($venda->id, self::B));
+            },
+            'VendaService::buscarPorFiltro' => function () use ($vendas) {
+                $this->vendaPaga();
+                $this->assertCount(1, $vendas->buscarPorFiltro(null, null, self::T));
+                $this->assertCount(0, $vendas->buscarPorFiltro(null, null, self::B));
+            },
+            'VendaService::localizar' => function () use ($vendas) {
+                $venda = $this->vendaPaga();
+                $this->assertCount(1, $vendas->localizar($venda->id, null, self::T, ['paga']));
+                $this->assertCount(0, $vendas->localizar($venda->id, null, self::B, ['paga']));
+                $this->assertCount(0, $vendas->localizar(null, '', self::B, ['paga']));
+            },
+
             'SupervisaoService::marcarSupervisor' => function () use ($supervisao) {
                 $usuario = $this->usuarioClinica('recepcao');
                 $this->inexistente(fn () => $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono', self::B)->id, self::B));
                 $this->assertNull($usuario->fresh()->supervisor_setor);
             },
-            'SupervisaoService::definirProprioPin' => function () use ($supervisao) {
+            // T1: o Administrador de OUTRA clínica (o tenant B também é da clínica aqui) não alcança o usuário de T.
+            'SupervisaoService::gerarPin' => function () use ($supervisao) {
+                config(['sentinel.tenants_clinica' => [self::T, self::B]]);
                 $usuario = $this->usuarioClinica('recepcao');
                 $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
-                $this->inexistente(fn () => $supervisao->definirProprioPin($usuario->id, '482915', self::B));
+                $this->inexistente(fn () => $supervisao->gerarPin($usuario->id, $this->usuarioClinica('admin', self::B)->id, self::B));
                 $this->assertNull($usuario->fresh()->pin_autorizacao);
             },
-            'SupervisaoService::resetarPin' => function () use ($supervisao) {
-                $usuario = $this->usuarioClinica('recepcao');
-                $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
-                $supervisao->definirProprioPin($usuario->id, '482915', self::T);
-                $this->inexistente(fn () => $supervisao->resetarPin($usuario->id, $this->usuarioClinica('dono', self::B)->id, self::B));
+            'SupervisaoService::revogarPin' => function () use ($supervisao) {
+                config(['sentinel.tenants_clinica' => [self::T, self::B]]);
+                $usuario = $this->comPin($this->usuarioClinica('dono'));
+                $this->inexistente(fn () => $supervisao->revogarPin($usuario->id, $this->usuarioClinica('admin', self::B)->id, self::B));
                 $this->assertNotNull($usuario->fresh()->pin_autorizacao);
             },
         };
@@ -449,6 +550,12 @@ class IsolamentoDeTenantTest extends TestCase
     private function mensagem(): \App\Models\Mensagem
     {
         return \App\Models\Mensagem::create(['remetente' => 'Marcos', 'texto' => 'Vocês abrem no feriado?', 'status' => 'nova', 'tenant_id' => self::T]);
+    }
+
+    private function vendaPaga(): Venda
+    {
+        return app(VendaService::class)->registrar([['catalogo_item_id' => $this->produto(['estoque' => 10, 'preco_centavos' => 2500])->id, 'quantidade' => 1]],
+            $this->usuarioClinica('vendedor')->id, null, 'pix', self::T);
     }
 
     private function vendaAberta(): Venda

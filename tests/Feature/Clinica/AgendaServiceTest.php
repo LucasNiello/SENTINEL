@@ -58,24 +58,33 @@ class AgendaServiceTest extends TestCase
         $this->assertSame('2026-11-11 14:00:00', $agendamento->fresh()->getRawOriginal('inicio'));
     }
 
+    /**
+     * Regra de 09/11 (um agendamento por vez), que a decisão do Lucas de 15/11 manteve só no PETSHOP; a clínica aceita
+     * até 4 sobrepostos (AgendaLimiteERemarcarTest). O mesmo cenário, agora com banho e tosa.
+     */
     public function test_recusa_conflito_de_horario_do_mesmo_profissional(): void
     {
-        $this->agenda->agendar($this->dados(), self::T);
+        $banho = $this->item(['setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho']);
+        $dados = fn (array $extra = []) => $this->dados(['catalogo_item_id' => $banho->id, 'profissional_id' => $this->usuarioClinica('atendente')->id, ...$extra]);
+        $primeiro = $dados();
+        $this->agenda->agendar($primeiro, self::T);
+        $dados = fn (array $extra = []) => [...$primeiro, ...$extra];
 
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 14:15', 'fim' => '2026-11-11 14:45']), self::T),
+        $this->recusa(fn () => $this->agenda->agendar($dados(['inicio' => '2026-11-11 14:15', 'fim' => '2026-11-11 14:45']), self::T),
             'O profissional já tem um agendamento nesse horário.');
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 13:00', 'fim' => '2026-11-11 15:00']), self::T),
+        // 15/11 (modelo de blocos): o fim é calculado (banho = 60 min) e a grade é de 15 min; 13:30 cruza o das 14:00.
+        $this->recusa(fn () => $this->agenda->agendar($dados(['inicio' => '2026-11-11 13:30']), self::T),
             'já tem um agendamento');
         $this->assertSame(1, Agendamento::count());
         $this->assertSame('O profissional já tem um agendamento nesse horário.',
-            $this->agenda->motivoParaNaoAgendar($this->dados(['inicio' => '2026-11-11 14:10']), self::T));
+            $this->agenda->motivoParaNaoAgendar($dados(['inicio' => '2026-11-11 14:45']), self::T));
     }
 
     public function test_horarios_que_encostam_e_outro_profissional_nao_conflitam(): void
     {
         $this->agenda->agendar($this->dados(), self::T);
 
-        $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 14:30', 'fim' => '2026-11-11 15:00']), self::T);
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 15:00']), self::T); // 15/11: o bloco seguinte (o das 14h acaba às 15:00)
         $this->agenda->agendar($this->dados(['profissional_id' => $this->usuarioClinica('dono')->id]), self::T);
 
         $this->assertSame(3, Agendamento::count());
@@ -107,12 +116,18 @@ class AgendaServiceTest extends TestCase
         $this->assertSame(3, Agendamento::count());
     }
 
-    public function test_agendamento_normal_nao_cai_em_cima_de_um_encaixe(): void
+    /**
+     * O encaixe conta como agendamento ativo: com 4 encaixes no bloco, o normal (o 5º) é recusado. 15/11 (blocos): o bloco
+     * das 10h está em andamento às 10:00 e ainda aceita agendamento, se houver vaga.
+     */
+    public function test_agendamento_normal_nao_cai_em_cima_de_encaixes_alem_do_limite_da_clinica(): void
     {
-        $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:00', 'fim' => '2026-11-10 11:00', 'origem' => 'encaixe_emergencia']), self::T);
+        foreach (range(1, 4) as $i) {
+            $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 10:00', 'origem' => 'encaixe_emergencia']), self::T);
+        }
 
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 10:30', 'fim' => '2026-11-10 11:30']), self::T),
-            'já tem um agendamento');
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 10:00']), self::T),
+            'não tem vaga no bloco das 10:00');
     }
 
     public function test_encaixe_de_emergencia_e_so_da_clinica(): void
@@ -137,11 +152,12 @@ class AgendaServiceTest extends TestCase
         $this->assertSame(2, Agendamento::count());
     }
 
+    /** 15/11: o fim não é mais entrada (o servidor calcula e ignora o informado), então "fim antes do início" saiu. */
     public function test_produto_nao_e_agendado_e_fim_precisa_ser_depois_do_inicio(): void
     {
         $this->recusa(fn () => $this->agenda->agendar($this->dados(['catalogo_item_id' => $this->produto()->id]), self::T), 'é um produto');
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['fim' => '2026-11-11 14:00']), self::T), 'O fim precisa ser depois do início.');
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => 'amanhã cedo']), self::T), 'Informe o início e o fim');
+        $this->assertSame('2026-11-11 15:00', $this->agenda->agendar($this->dados(['fim' => '2026-11-11 14:00']), self::T)->fim->format('Y-m-d H:i'), 'o fim informado é ignorado');
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => 'amanhã cedo']), self::T), 'Informe o início com data e hora');
     }
 
     public function test_referencias_de_outro_tenant_sao_tratadas_como_inexistentes(): void
@@ -171,29 +187,26 @@ class AgendaServiceTest extends TestCase
         $this->assertSame(1, Agendamento::count());
     }
 
+    /** 15/11: o fim é calculado (um bloco de 60 min na consulta); o máximo da configuração continua valendo sobre ele. */
     public function test_duracao_maxima_vem_da_configuracao_e_vale_tambem_no_encaixe(): void
     {
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 08:00', 'fim' => '2026-11-11 16:01']), self::T),
-            'dura no máximo 8 h');
-        $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 08:00', 'fim' => '2026-11-11 16:00']), self::T);
+        $this->agenda->agendar($this->dados(['inicio' => '2026-11-11 08:00']), self::T); // 60 min, dentro das 8 h
 
         // O limite não é número fixo no código: mudou a configuração, mudou a regra.
         config(['sentinel.agenda_duracao_maxima_minutos' => 45]);
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-12 08:00', 'fim' => '2026-11-12 08:46']), self::T),
-            'dura no máximo 45 min');
-        $this->agenda->agendar($this->dados(['inicio' => '2026-11-12 08:00', 'fim' => '2026-11-12 08:45']), self::T);
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-12 08:00']), self::T), 'dura no máximo 45 min');
 
-        // Encaixe de emergência não confere conflito, mas também não pode virar o dia inteiro do veterinário.
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:00', 'fim' => '2026-11-10 10:00', 'origem' => 'encaixe_emergencia']), self::T),
+        // Encaixe de emergência não confere conflito, mas também não passa do máximo.
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10 09:00', 'origem' => 'encaixe_emergencia']), self::T),
             'dura no máximo 45 min');
-        $this->assertSame(2, Agendamento::count());
+        $this->assertSame(1, Agendamento::count());
     }
 
     public function test_sem_duracao_configurada_o_servidor_recusa(): void
     {
         config(['sentinel.agenda_duracao_maxima_minutos' => null]);
 
-        $this->recusa(fn () => $this->agenda->agendar($this->dados(), self::T), 'dura no máximo');
+        $this->recusa(fn () => $this->agenda->agendar($this->dados(), self::T), 'o limite de duração da agenda não está configurado');
         $this->assertSame(0, Agendamento::count());
     }
 
@@ -201,7 +214,7 @@ class AgendaServiceTest extends TestCase
     public function test_data_em_formato_solto_ou_com_fuso_e_recusada(string $inicio): void
     {
         $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => $inicio, 'fim' => '2026-11-12 18:00']), self::T),
-            'Informe o início e o fim com data e hora');
+            'Informe o início com data e hora'); // 15/11: o fim não é mais pedido
         $this->assertSame(0, Agendamento::count());
     }
 
@@ -224,7 +237,7 @@ class AgendaServiceTest extends TestCase
     {
         // 13:00Z são 10:00 em São Paulo, mas a frase com fuso é recusada: nunca vira "13:00 local" no futuro.
         $this->recusa(fn () => $this->agenda->agendar($this->dados(['inicio' => '2026-11-10T13:00:00Z', 'fim' => '2026-11-10T13:30:00Z', 'origem' => 'encaixe_emergencia']), self::T),
-            'Informe o início e o fim com data e hora');
+            'Informe o início com data e hora');
         $this->assertSame(0, Agendamento::count());
 
         $this->agenda->agendar($this->dados(['inicio' => '2026-11-10T09:00', 'fim' => '2026-11-10 09:30:00', 'origem' => 'encaixe_emergencia']), self::T);
