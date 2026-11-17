@@ -2,15 +2,12 @@ import * as THREE from 'three';
 import { createLighthouseModel, createLighting } from './model';
 import { sceneQuality } from './quality';
 
-export const TOWER_SECONDS_PER_TURN = 84;
 export const LANTERN_SECONDS_PER_TURN = 15;
 const TAU = Math.PI * 2;
 
-// Separate world-space rotations: the lantern does not inherit the tower's speed.
-export function loginAngles(seconds) {
-    const tower = TAU * (seconds % TOWER_SECONDS_PER_TURN) / TOWER_SECONDS_PER_TURN;
-    const lantern = .9 + TAU * (seconds % LANTERN_SECONDS_PER_TURN) / LANTERN_SECONDS_PER_TURN;
-    return { tower, lantern: lantern - tower };
+// Same rule as the vitrine: only the lamp group turns; tower and dome stay still.
+export function loginLanternAngle(seconds) {
+    return .9 + TAU * (seconds % LANTERN_SECONDS_PER_TURN) / LANTERN_SECONDS_PER_TURN;
 }
 
 export function mountLoginLighthouse() {
@@ -91,9 +88,7 @@ export function mountLoginLighthouse() {
             previous = now;
             if (now - lastRender < 1000 / sceneQuality().fps) return;
             lastRender = now;
-            const angles = loginAngles(elapsed);
-            model.root.rotation.y = angles.tower;
-            model.rotating.rotation.y = angles.lantern;
+            model.rotating.rotation.y = loginLanternAngle(elapsed);
             try { renderer.render(scene, camera); } catch { fallback(); }
         }
         function sync() {
@@ -135,7 +130,7 @@ export function mountLoginLighthouse() {
             resize();
             if (disposed) return;
             panel.classList.add('is-3d-ready');
-            status.textContent = 'Farol 3D com rotação automática da estrutura e da luz.';
+            status.textContent = 'Farol 3D com rotação automática da luz.';
             sync();
         } catch { fallback(); }
     }
