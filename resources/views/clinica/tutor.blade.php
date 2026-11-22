@@ -8,6 +8,9 @@
 
 {{-- 15/11: ficha do tutor, só leitura. Os pets dele com link para a ficha de cada um; o cadastro continua em Cadastros. --}}
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'tutor'])
+@else
     <header class="page-header">
         <p class="eyebrow">Ficha do tutor</p>
         <h1>{{ $tutor->nome }}</h1>
@@ -57,4 +60,5 @@
     </div>
 
     @include('clinica._acoes')
+@endif
 @endsection

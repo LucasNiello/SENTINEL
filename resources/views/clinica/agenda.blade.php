@@ -18,6 +18,9 @@
 @endphp
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'agenda'])
+@else
     <header class="page-header">
         <p class="eyebrow">{{ $soUmSetor ? 'Banho e tosa' : 'Clínica e banho e tosa' }}</p>
         <h1>Agenda</h1>
@@ -103,4 +106,5 @@
     @endforeach
 
     @include('clinica._acoes')
+@endif
 @endsection

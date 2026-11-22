@@ -25,6 +25,9 @@
 @endphp
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'resultados'])
+@else
     <header class="page-header">
         <p class="eyebrow">Resultados</p>
         <h1>Resultados da clínica e do petshop</h1>
@@ -101,4 +104,5 @@
             @endif
         </section>
     </div>
+@endif
 @endsection

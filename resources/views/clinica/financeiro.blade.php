@@ -18,6 +18,9 @@
 @endphp
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'financeiro'])
+@else
     <header class="page-header">
         <p class="eyebrow">Financeiro</p>
         <h1>{{ $titulo }}</h1>
@@ -100,4 +103,5 @@
     @endif
 
     @include('clinica._acoes')
+@endif
 @endsection

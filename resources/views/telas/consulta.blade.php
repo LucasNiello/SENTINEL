@@ -5,6 +5,9 @@
 
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'consulta'])
+@else
     <header class="page-header">
         <p class="eyebrow">{{ $titulo === 'Lixeira' ? 'Gestão de registros' : 'Organização' }}</p>
         <h1>{{ $titulo }}</h1>
@@ -162,4 +165,5 @@
         montarFiltros();
         formConsulta.requestSubmit();
     </script>
+@endif
 @endsection

@@ -22,6 +22,9 @@
 @endpush
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'supervisao'])
+@else
     <header class="page-header">
         <p class="eyebrow">Gestão da equipe</p>
         <h1>Supervisão</h1>
@@ -266,4 +269,5 @@
             carregar();
         })();
     </script>
+@endif
 @endsection
