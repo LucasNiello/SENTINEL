@@ -522,3 +522,15 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
 @media (max-width:599px) {.ficha-passo {padding:12px}.ficha-mes,.ficha-busca,.ficha-profissional {max-width:none}}
 /* REDUCED MOTION */
 @media (prefers-reduced-motion:reduce) {*,*::before,*::after {scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Dados de leitura da clínica e do petshop. */
+.workspace main .tabela-empilha td,
+.workspace main .tabela-empilha :is(.mono, .link-linha),
+#tabela-supervisores :is(td, label),
+.dia-agenda h2 .mono,
+.ficha .mono,
+.kpi :is(p, dd.kpi-note),
+.workspace main .supervisao-secao > p {font-size:1rem}
+@media (max-width:599px) {
+    main:has(.barra-periodo, .kpis, .ficha-grade, .supervisao-secao) .intro {font-size:1rem}
+}

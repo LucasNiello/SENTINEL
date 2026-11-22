@@ -14,6 +14,7 @@
         .msg--sucesso {background:var(--color-sucesso-faixa);color:var(--color-sucesso)}
         .supervisao-secao td .campo {min-width:140px}
         .supervisao-secao select {font-size:16px}
+        .supervisao-secao .campo label.sr-only {position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;clip-path:none;white-space:normal}
         .gerar-pin-para {flex-basis:100%;margin:0}
         .pin-gerado {margin:0 0 24px;padding:16px;border:2px solid var(--color-aviso);border-radius:var(--radius);background:var(--color-aviso-faixa);color:var(--color-tinta)}
         .pin-gerado p {margin:0 0 8px}
