@@ -16,6 +16,14 @@
     $estornado = fn ($c) => (int) $c->estornado_centavos > 0 ? (int) $c->estornado_centavos : (int) ($c->estorno_valor_centavos ?? 0);
 @endphp
 
+@push('estilos')
+    <style>
+        @media (max-width:767px) {
+            .ficha-do-pet {grid-template-columns:minmax(0,1fr)}
+        }
+    </style>
+@endpush
+
 @section('conteudo')
 @if (request()->query('amostra') === 'estados')
     @include('amostras.estados', ['tipoAmostra' => 'pet'])
@@ -33,19 +41,7 @@
         @endif
     </p>
 
-    <div class="ficha-grade">
-        <section class="bloco" aria-labelledby="titulo-dados">
-            <h2 id="titulo-dados">Dados</h2>
-            <dl class="ficha">
-                <dt>Espécie</dt><dd>{{ $especies[$pet->especie] ?? $pet->especie }}</dd>
-                <dt>Raça</dt><dd>{{ $pet->raca ?: '—' }}</dd>
-                <dt>Sexo</dt><dd>{{ $sexos[$pet->sexo] ?? '—' }}</dd>
-                <dt>Nascimento</dt><dd>{{ $pet->data_nascimento ? $pet->data_nascimento->format('d/m/Y').' ('.$textoIdade.')' : '—' }}</dd>
-                <dt>Peso</dt><dd>{{ $peso ?? '—' }}</dd>
-                <dt>Microchip</dt><dd class="mono">{{ $pet->microchip ?: '—' }}</dd>
-            </dl>
-        </section>
-
+    <div class="ficha-grade ficha-do-pet">
         @if ($verTutor)
         <section class="bloco" aria-labelledby="titulo-tutor">
             <h2 id="titulo-tutor">Tutor</h2>
@@ -60,6 +56,18 @@
             @endif
         </section>
         @endif
+
+        <section class="bloco" aria-labelledby="titulo-dados">
+            <h2 id="titulo-dados">Dados</h2>
+            <dl class="ficha">
+                <dt>Espécie</dt><dd>{{ $especies[$pet->especie] ?? $pet->especie }}</dd>
+                <dt>Raça</dt><dd>{{ $pet->raca ?: '—' }}</dd>
+                <dt>Sexo</dt><dd>{{ $sexos[$pet->sexo] ?? '—' }}</dd>
+                <dt>Nascimento</dt><dd>{{ $pet->data_nascimento ? $pet->data_nascimento->format('d/m/Y').' ('.$textoIdade.')' : '—' }}</dd>
+                <dt>Peso</dt><dd>{{ $peso ?? '—' }}</dd>
+                <dt>Microchip</dt><dd class="mono">{{ $pet->microchip ?: '—' }}</dd>
+            </dl>
+        </section>
     </div>
 
     <section class="bloco" aria-labelledby="titulo-alertas">

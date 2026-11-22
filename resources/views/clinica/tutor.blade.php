@@ -7,6 +7,15 @@
 @endphp
 
 {{-- 15/11: ficha do tutor, só leitura. Os pets dele com link para a ficha de cada um; o cadastro continua em Cadastros. --}}
+@push('estilos')
+    <style>
+        .pets-do-tutor {list-style:none;padding:0;margin:0;display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+        @media (min-width:768px) {
+            .pets-do-tutor {grid-template-columns:repeat(2,minmax(0,1fr))}
+        }
+    </style>
+@endpush
+
 @section('conteudo')
 @if (request()->query('amostra') === 'estados')
     @include('amostras.estados', ['tipoAmostra' => 'tutor'])
@@ -33,31 +42,28 @@
                 <dt>Endereço</dt><dd>{{ $tutor->endereco ?: '—' }}</dd>
             </dl>
         </section>
+    </div>
 
-        @if ($pets !== null)
+    @if ($pets !== null)
         <section class="bloco" aria-labelledby="titulo-pets">
             <h2 id="titulo-pets">Pets</h2>
             @if ($pets->isEmpty())
                 <p class="vazio">Nenhum pet cadastrado.</p>
             @else
-                <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="Pets do tutor">
-                    <table>
-                        <thead><tr><th scope="col">Nome</th><th scope="col">Espécie</th><th scope="col">Raça</th></tr></thead>
-                        <tbody>
-                            @foreach ($pets as $p)
-                                <tr>
-                                    <td data-rotulo="Nome"><a href="/pets/{{ $p->id }}">{{ $p->nome }}</a></td>
-                                    <td data-rotulo="Espécie">{{ $especies[$p->especie] ?? $p->especie }}</td>
-                                    <td data-rotulo="Raça">{{ $p->raca ?: '—' }}</td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
+                <ul class="pets-do-tutor" role="list">
+                    @foreach ($pets as $pet)
+                        <li>
+                            <dl class="ficha">
+                                <dt>Nome</dt><dd><a href="/pets/{{ $pet->id }}">{{ $pet->nome }}</a></dd>
+                                <dt>Espécie</dt><dd>{{ $especies[$pet->especie] ?? $pet->especie }}</dd>
+                                <dt>Raça</dt><dd>{{ $pet->raca ?: '—' }}</dd>
+                            </dl>
+                        </li>
+                    @endforeach
+                </ul>
             @endif
         </section>
-        @endif
-    </div>
+    @endif
 
     @include('clinica._acoes')
 @endif
