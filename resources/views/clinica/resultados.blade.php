@@ -1,5 +1,12 @@
 @extends('layouts.app')
 
+@push('estilos')
+    <style>
+        .resultados-mobile td {overflow-wrap:anywhere;min-width:0}
+    </style>
+@endpush
+
+
 @section('titulo', 'Resultados')
 
 @php
@@ -53,7 +60,7 @@
     <div class="blocos">
         <section class="bloco" aria-labelledby="titulo-setores">
             <h2 id="titulo-setores">Por setor</h2>
-            <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="Resultados por setor">
+            <div class="tabela-rolagem tabela-empilha resultados-mobile" tabindex="0" role="region" aria-label="Resultados por setor">
                 <table>
                     <thead><tr><th scope="col">Setor</th><th scope="col" class="num">Faturamento</th><th scope="col">Parte</th><th scope="col" class="num">Estornado</th><th scope="col" class="num">Líquido</th><th scope="col" class="num">Ticket médio</th></tr></thead>
                     <tbody>
@@ -77,7 +84,7 @@
             @if ($r['top_itens'] === [])
                 <p class="vazio">Nenhum pagamento no período.</p>
             @else
-                <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="Itens que mais faturaram">
+                <div class="tabela-rolagem tabela-empilha resultados-mobile" tabindex="0" role="region" aria-label="Itens que mais faturaram">
                     <table>
                         <thead><tr><th scope="col">Item</th><th scope="col" class="num">Quantidade</th><th scope="col" class="num">Total</th></tr></thead>
                         <tbody>

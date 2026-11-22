@@ -1,5 +1,12 @@
 @extends('layouts.app')
 
+@push('estilos')
+    <style>
+        .agenda-mobile td {overflow-wrap:anywhere;min-width:0}
+    </style>
+@endpush
+
+
 @section('titulo', 'Agenda')
 
 @php
@@ -66,7 +73,7 @@
             @if ($bloco['linhas'] === [])
                 <p class="vazio">Nenhum horário neste dia.</p>
             @else
-                <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="Agenda de {{ $rotulo }}">
+                <div class="tabela-rolagem tabela-empilha agenda-mobile" tabindex="0" role="region" aria-label="Agenda de {{ $rotulo }}">
                     <table>
                         <thead><tr><th scope="col">Horário</th><th scope="col">Pet</th><th scope="col">Tutor</th><th scope="col">Serviço</th><th scope="col">Profissional</th><th scope="col">Setor</th><th scope="col">Situação</th>@if ($podeMudarStatus)<th scope="col">Ação</th>@endif</tr></thead>
                         <tbody>

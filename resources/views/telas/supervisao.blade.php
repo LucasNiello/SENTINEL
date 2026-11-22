@@ -13,6 +13,7 @@
         .supervisao-aviso:empty {display:none}
         .msg--sucesso {background:var(--color-sucesso-faixa);color:var(--color-sucesso)}
         .supervisao-secao td .campo {min-width:140px}
+        .supervisao-secao select {font-size:16px}
         .gerar-pin-para {flex-basis:100%;margin:0}
         .pin-gerado {margin:0 0 24px;padding:16px;border:2px solid var(--color-aviso);border-radius:var(--radius);background:var(--color-aviso-faixa);color:var(--color-tinta)}
         .pin-gerado p {margin:0 0 8px}

@@ -1,5 +1,12 @@
 @extends('layouts.app')
 
+@push('estilos')
+    <style>
+        .financeiro-mobile td {overflow-wrap:anywhere;min-width:0}
+    </style>
+@endpush
+
+
 @section('titulo', $titulo)
 
 @php
@@ -56,7 +63,7 @@
     @if ($linhas === [])
         @unless ($erro) <p class="vazio">Nenhum registro com estes filtros.</p> @endunless
     @else
-        <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="{{ $titulo }}">
+        <div class="tabela-rolagem tabela-empilha financeiro-mobile" tabindex="0" role="region" aria-label="{{ $titulo }}">
             <table>
                 <thead><tr>
                     @foreach ($colunas as $chave => $rotulo)
