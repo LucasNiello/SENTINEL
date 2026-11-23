@@ -27,6 +27,8 @@
 @section('conteudo')
 @if (request()->query('amostra') === 'estados')
     @include('amostras.estados', ['tipoAmostra' => 'resultados'])
+@elseif (request()->query('amostra') === 'painel-dono')
+    @include('amostras.painel-dono')
 @else
     <header class="page-header">
         <p class="eyebrow">Resultados</p>
