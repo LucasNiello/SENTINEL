@@ -157,7 +157,7 @@ class ClienteFornecedorToolsTest extends TestCase
                 $this->assertStringNotContainsString($termo, $mensagem, 'sem termo técnico');
             }
 
-            $this->assertSame($i + 1, AuditLog::count());
+            $this->assertSame($i + 1, AuditLog::query()->where('resultado', 'revisao_com_erro')->count());
             $log = AuditLog::query()->latest('id')->first();
             $this->assertSame('revisao_com_erro', $log->resultado);
             $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');

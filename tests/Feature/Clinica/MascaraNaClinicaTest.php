@@ -169,8 +169,10 @@ class MascaraNaClinicaTest extends TestCase
 
         // A proposta vai ao front mascarada: nem o telefone nem o CPF completos saem do servidor.
         $resposta->assertJsonPath('argumentos.telefone', self::FONE_MASCARADO)->assertJsonPath('argumentos.documento', '529.***.**7-25');
-        $this->assertStringNotContainsString('98765', $resposta->getContent());
-        $this->assertStringNotContainsString('982', $resposta->getContent());
+        // Só os argumentos: o UUID da proposta é aleatório e pode conter qualquer sequência de dígitos.
+        $argumentos = json_encode($resposta->json('argumentos'));
+        $this->assertStringNotContainsString('98765', $argumentos);
+        $this->assertStringNotContainsString('982', $argumentos);
 
         return (string) $resposta->json('proposta');
     }

@@ -313,7 +313,8 @@ class ConfirmacoesPendentes
             $encerradas[$proposta] = true;
 
             if ($this->concluir($proposta)) {
-                $retiradas[] = $pendente;
+                // O id da proposta acompanha a pendência (o rascunho não o guarda): o histórico da conversa marca o desfecho nela.
+                $retiradas[] = [...$pendente, 'proposta_id' => $proposta];
             }
         }
 

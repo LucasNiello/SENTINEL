@@ -274,7 +274,9 @@ class ConfirmacaoDesfechoTest extends TestCase
         $token = $this->propor(self::LANCAMENTO);
         $this->travel(240)->seconds(); // decisão B: válida até os 5 min da proposta, muito além dos antigos 12 s
 
-        $this->comando('consultar_lancamentos')->assertOk();
+        // Consulta manual (/agente/consultar): passa pela varredura, mas não é um novo pedido ao agente. Um pedido novo
+        // (/agente/comando) descartaria a proposta (23/11), coberto em CicloDaPendenciaTest.
+        $this->postJson('/agente/consultar', ['tool' => 'consultar_lancamentos'])->assertOk();
 
         $this->assertNotNull(session("confirmacoes.{$token}"));
         $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
@@ -472,7 +474,8 @@ class ConfirmacaoDesfechoTest extends TestCase
             ->assertOk()
             ->assertSee("fetch('/agente/cancelar'", false)
             ->assertSee('Você soltou antes do fim. Nada foi gravado.')
-            ->assertSee("fechar.textContent = 'Fechar'", false)
+            // 23/11: o aviso virou toast; o botão de fechar é o "×" com aria-label (antes, o botão "Fechar" do modal de erro).
+            ->assertSee("setAttribute('aria-label', 'Fechar aviso')", false)
             ->assertDontSee('transition: opacity', false);
     }
 }

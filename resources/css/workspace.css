@@ -150,7 +150,7 @@ td:first-child,.mono,.num {font-family:var(--fonte-mono);font-size:15px;font-var
 .paginacao {display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:24px 0}
 #pagina-texto {font:12px var(--fonte-mono);color:var(--sentinel-ink-muted)}
 #historico {display:flex;flex-direction:column;gap:16px;min-width:0}
-#historico>.tabela-rolagem {width:100%} #historico>.btn-exportar {align-self:flex-end}
+#historico>.tabela-rolagem {width:100%} #historico>.tabela-acoes {display:flex;flex-wrap:wrap;gap:8px;align-self:flex-end}
 /* COMMAND WORKSPACE / STRUCTURE, COMMAND, CONTEXT */
 .agent-hero {position:relative;isolation:isolate;max-width:none;padding:8px 0 12px;margin-bottom:28px}
 .agent-hero h1 {font-size:clamp(34px,2.8vw,44px);font-weight:300;line-height:1.2;max-width:850px;margin-bottom:16px}
@@ -243,11 +243,16 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
 .card-lote tr.item-erro td {background:var(--color-erro-faixa)}
 .card-lote .item-erro-texto {display:block;color:var(--color-erro);font-size:15px}
 .card-expirado-texto {margin-top:16px;color:var(--sentinel-ink-muted)}
-#overlay-popup {position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:24px;background:rgb(10 14 19 / .32)}
-#popup {display:flex;flex-wrap:wrap;align-items:center;gap:16px;max-width:480px;width:100%;max-height:calc(100svh - 48px);overflow:auto;padding:24px;background:var(--sentinel-paper);border-radius:var(--radius);border:1px solid var(--sentinel-border);border-left:3px solid var(--sentinel-ink-muted);box-shadow:0 16px 48px rgb(10 14 19 / .12);overflow-wrap:anywhere}
-#popup.sucesso {color:var(--color-sucesso);border-left-color:var(--color-sucesso)}
-#popup.erro {color:var(--color-erro);border-left-color:var(--color-erro)}
-#popup .popup-fechar {margin-left:auto}
+/* TOAST (23/11): resultado da operação no canto inferior direito; sem fundo escurecido, não bloqueia cliques (só o toast os recebe), sem animação. */
+#toasts {position:fixed;right:16px;bottom:16px;z-index:80;display:flex;flex-direction:column;gap:8px;width:max-content;max-width:min(420px,calc(100vw - 32px));pointer-events:none}
+#toasts>div:empty {display:none}
+.toast {pointer-events:auto;display:flex;align-items:flex-start;gap:8px;padding:8px 4px 8px 16px;background:var(--sentinel-paper);color:var(--sentinel-ink);border:1px solid var(--sentinel-border);border-left:4px solid var(--sentinel-ink-muted);border-radius:var(--radius);box-shadow:0 8px 24px rgb(10 14 19 / .14);overflow-wrap:anywhere}
+.toast--sucesso {color:var(--color-sucesso);border-left-color:var(--color-sucesso)}
+.toast--erro {color:var(--color-erro);border-left-color:var(--color-erro)}
+.toast__texto {flex:1;min-width:0;padding:11px 0}
+.toast__fechar {flex:none;width:44px;min-width:44px;padding:0;border:0;background:none;color:inherit;font-size:24px;line-height:1}
+.toast__fechar:hover {background:var(--sentinel-cream-alt)}
+@media (max-width:599px) {#toasts {left:16px;width:auto;max-width:none}}
 /* AUDIT */
 #lista {min-width:0}
 #lista td:first-child {white-space:nowrap}
