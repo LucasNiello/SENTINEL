@@ -440,10 +440,26 @@ try {
     # .env recem-criado recebe os valores seguros (o .env.example traz APP_DEBUG=true); existente nunca e sobrescrito.
     $seguros=@{APP_DEBUG='false'; SESSION_ENCRYPT='true'}
     if ($envNovo) { Set-Env $seguros }
-    else { foreach ($key in $seguros.Keys) { if ($cfg[$key] -ne $seguros[$key]) { Aviso "$key=$($cfg[$key]) no .env existente; para a apresentacao use $key=$($seguros[$key]). O instalador nao alterou o .env." } } }
+    else {
+        foreach ($key in $seguros.Keys) {
+            if ($cfg[$key] -eq $seguros[$key]) { continue }
+            if ($key -eq 'APP_DEBUG' -and !$env:SENTINEL_NONINTERACTIVE) {
+                Write-Host "[AVISO] APP_DEBUG=$($cfg[$key]) no .env existente: erros detalhados ficam visiveis na apresentacao." -ForegroundColor Yellow
+                if ((Read-Host 'Trocar APP_DEBUG para false agora? (S/N)') -match '^\s*[sS]') { Set-Env @{APP_DEBUG='false'}; Ok 'APP_DEBUG=false'; continue }
+            }
+            Aviso "$key=$($cfg[$key]) no .env existente; para a apresentacao use $key=$($seguros[$key]). O instalador nao alterou o .env."
+        }
+    }
     if (!$cfg.ANTHROPIC_API_KEY -or $cfg.ANTHROPIC_API_KEY -match '^(your_|sua_|<|changeme)') {
         $key=$env:SENTINEL_ANTHROPIC_API_KEY; if (!$key) { $key=Secret-Input 'Anthropic API key (entrada oculta, salva somente no .env)' }
         if (!$key) { throw 'Anthropic API key nao informada.' }; Set-Env @{ANTHROPIC_API_KEY=$key}
+    }
+    # DEMO_SENHA (senha das contas da clinica): so e exigida quando o seed vai rodar. Vem do .env, da variavel de ambiente
+    # DEMO_SENHA ou de entrada oculta; e gravada so no .env local (nunca neste arquivo, no .env.example nem no log).
+    if ($state.seedPending -and !$cfg.DEMO_SENHA) {
+        $demo=$env:DEMO_SENHA; if ($demo) { $secrets.Add($demo) } else { $demo=Secret-Input 'DEMO_SENHA - senha das contas da clinica (entrada oculta, salva somente no .env)' }
+        if (!$demo) { throw 'DEMO_SENHA nao informada. Defina a variavel de ambiente DEMO_SENHA ou digite a senha; sem ela o seed nao cria as contas da clinica.' }
+        Set-Env @{DEMO_SENHA=$demo}
     }
     # Inherited application variables must not redirect migrations to another database.
     foreach ($key in $cfg.Keys) { [Environment]::SetEnvironmentVariable($key,$null,'Process') }

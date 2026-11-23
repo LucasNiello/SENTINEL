@@ -17,9 +17,10 @@
     $rotuloPeriodo = match ($periodo) {
         'dia' => $dia->format('d/m/Y'),
         'semana' => $inicio->format('d/m').' a '.$fim->format('d/m/Y'),
+        'ano' => (string) $dia->year,
         default => $meses[$dia->month - 1].' de '.$dia->year,
     };
-    $nomes = ['dia' => ['Dia anterior', 'Próximo dia'], 'semana' => ['Semana anterior', 'Próxima semana'], 'mes' => ['Mês anterior', 'Próximo mês']][$periodo];
+    $nomes = ['dia' => ['Dia anterior', 'Próximo dia'], 'semana' => ['Semana anterior', 'Próxima semana'], 'mes' => ['Mês anterior', 'Próximo mês'], 'ano' => ['Ano anterior', 'Próximo ano']][$periodo];
     // Barra de proporção por setor (largura = parte do faturamento); o número está sempre ao lado.
     $parte = fn (int $valor) => $r['faturamento'] > 0 ? (int) round($valor * 100 / $r['faturamento']) : 0;
 @endphp

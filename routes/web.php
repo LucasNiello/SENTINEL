@@ -4,6 +4,7 @@ use App\Http\Controllers\AgenteController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
 use App\Http\Controllers\ClinicaTelasController;
+use App\Http\Controllers\PainelDonoController;
 use App\Http\Controllers\SupervisaoController;
 use App\Http\Controllers\TelasController;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
@@ -51,6 +52,9 @@ Route::middleware('auth')->group(function () {
         // Até 18 dígitos: número maior não cabe em inteiro e daria erro em vez de 404.
         Route::get('/pets/{id}', [ClinicaTelasController::class, 'pet'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,telas-clinica');
         Route::get('/resultados', [ClinicaTelasController::class, 'resultados'])->middleware('throttle:60,1,telas-clinica');
+        // 23/11: painel do dono. Só o dono (o controller confere papel e tenant); só a aba Clínica grava, e com teto próprio.
+        Route::get('/painel', [PainelDonoController::class, 'mostrar'])->middleware('throttle:60,1,telas-clinica');
+        Route::post('/painel/clinica', [PainelDonoController::class, 'salvarClinica'])->middleware('throttle:20,1,painel-dono');
         // 15/11: ficha do tutor (só leitura, com os pets dele) e o calendário da ficha de agendamento (JSON, só mostra:
         // a vaga é conferida de novo na gravação). O calendário tem balde próprio (120/min por usuário): uma ficha faz várias
         // leituras (mês, dia, troca de profissional) e não pode gastar o Revisar nem o Cancelar do balde 'agente-sem-ia'.
