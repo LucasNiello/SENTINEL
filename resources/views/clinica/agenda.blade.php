@@ -2,6 +2,9 @@
 
 @push('estilos')
     <style>
+        .agenda-petshop {display:grid;gap:16px;list-style:none;padding:0;margin:0}
+        .agenda-petshop h3 {margin:0 0 8px;overflow-wrap:anywhere}
+        .agenda-petshop button {margin-top:8px}
         .agenda-mobile td {overflow-wrap:anywhere;min-width:0}
     </style>
 @endpush
@@ -77,6 +80,23 @@
             <h2 id="dia-{{ $loop->index }}">{{ $diasDaSemana[$bloco['data']->dayOfWeek] }} <span class="mono">{{ $rotulo }}</span></h2>
             @if ($bloco['linhas'] === [])
                 <p class="vazio">Nenhum horário neste dia.</p>
+            @elseif ($setor === 'petshop')
+                <ol class="agenda-petshop" aria-label="Atendimentos de banho e tosa">
+                    @foreach ($bloco['linhas'] as $l)
+                        <li>
+                            <h3>{{ $l['hora'] }} · {{ $l['servico'] }}</h3>
+                            <dl class="ficha">
+                                <dt>Pet</dt><dd>{{ $l['pet'] }}</dd>
+                                <dt>Tutor</dt><dd>{{ $l['tutor'] }}</dd>
+                                <dt>Profissional</dt><dd>{{ $l['profissional'] }}</dd>
+                                <dt>Situação</dt><dd><span class="status-badge {{ $selos[$l['status']][1] ?? '' }}">{{ $selos[$l['status']][0] ?? $l['status'] }}</span></dd>
+                            </dl>
+                            @if ($podeMudarStatus && in_array($l['status'], ['agendado', 'confirmado'], true))
+                                <button type="button" class="btn-editar-linha" data-tool="alterar_status_agendamento" data-id="{{ $l['id'] }}" aria-label="Mudar o status do horário de {{ $l['pet'] }}, {{ $l['hora'] }}">Mudar status</button>
+                            @endif
+                        </li>
+                    @endforeach
+                </ol>
             @else
                 <div class="tabela-rolagem tabela-empilha agenda-mobile" tabindex="0" role="region" aria-label="Agenda de {{ $rotulo }}">
                     <table>
