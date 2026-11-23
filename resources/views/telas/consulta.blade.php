@@ -4,7 +4,36 @@
 
 
 
+@if (isset($entidades['catalogo']))
+    @push('estilos')
+        <style>
+            /* A consulta fornece as colunas na ordem de consultar_catalogo, inclusive o preço em centavos. */
+            #form-consulta:has(#filtro-setor option[value="petshop"]):not(:has(#filtro-setor option[value="clinica"]:checked)) ~ #historico > .tabela-rolagem {
+                & .linha--aviso td:nth-child(7) {color:var(--color-erro);background:var(--sentinel-paper);font-weight:600}
+                & .linha--aviso td:nth-child(7)::after {content:"Saldo do sistema";display:block;font-weight:400}
+                @media (max-width:767px) {
+                    border:0;background:transparent;
+                    & table {display:block;width:100%;min-width:0}
+                    & thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+                    & tbody {display:grid;gap:16px}
+                    & tr {display:block;min-width:0;padding:12px 16px;background:var(--sentinel-paper);border:1px solid var(--sentinel-border);border-radius:var(--radius)}
+                    & td {display:block;padding:4px 0;border:0;background:transparent;overflow-wrap:anywhere;white-space:normal;font-size:1rem}
+                    & td::before {color:var(--sentinel-ink-muted)}
+                    @foreach (['ID', 'Nome', 'Setor', 'Categoria', 'Tipo', 'Preço (centavos)', 'Estoque', 'Controla estoque', 'Exige receita', 'Alerta'] as $coluna)
+                        & td:nth-child({{ $loop->iteration }})::before {content:"{{ $coluna }}: "}
+                    @endforeach
+                    & td:empty:not(:nth-child(7)) {display:none}
+                    & td:nth-child(7):empty::after {content:"—"}
+                }
+            }
+        </style>
+    @endpush
+@endif
+
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'consulta'])
+@else
     <header class="page-header">
         <p class="eyebrow">{{ $titulo === 'Lixeira' ? 'Gestão de registros' : 'Organização' }}</p>
         <h1>{{ $titulo }}</h1>
@@ -162,4 +191,5 @@
         montarFiltros();
         formConsulta.requestSubmit();
     </script>
+@endif
 @endsection
