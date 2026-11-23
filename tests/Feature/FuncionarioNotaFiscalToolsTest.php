@@ -47,7 +47,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
     /** Propõe, confirma e exige: recusa 422 com a frase esperada, sem termo técnico, auditada como 'revisao_com_erro' (não-final). */
     private function recusar(string $tool, array $argumentos, string $esperada): void
     {
-        $antes = AuditLog::count();
+        $antes = AuditLog::query()->where('resultado', 'revisao_com_erro')->count();
         $token = $this->propor($argumentos, $tool);
 
         $mensagem = $this->confirmar($token)
@@ -60,7 +60,7 @@ class FuncionarioNotaFiscalToolsTest extends TestCase
             $this->assertStringNotContainsString($termo, $mensagem, 'sem termo técnico');
         }
 
-        $this->assertSame($antes + 1, AuditLog::count());
+        $this->assertSame($antes + 1, AuditLog::query()->where('resultado', 'revisao_com_erro')->count());
         $log = AuditLog::query()->latest('id')->first();
         $this->assertSame('revisao_com_erro', $log->resultado);
         $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');

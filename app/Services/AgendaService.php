@@ -269,9 +269,9 @@ class AgendaService
         return $dia !== false && $dia->format('Y-m-d') === $valor ? $dia : null;
     }
 
-    private function grade(): GradeDaAgenda
+    private function grade(int $tenantId): GradeDaAgenda
     {
-        return GradeDaAgenda::daConfiguracao();
+        return GradeDaAgenda::daConfiguracao($tenantId);
     }
 
     /** @return array{servico: CatalogoItem, inicio: CarbonImmutable, fim: CarbonImmutable, origem: string} */
@@ -291,7 +291,7 @@ class AgendaService
             throw new RegraDeNegocioException('Informe o início com data e hora.');
         }
         // O fim não é pedido na tela nem à IA: o servidor calcula pelo modelo do setor (o "fim" dos dados é ignorado).
-        $fim = $this->grade()->fim($servico->setor, $servico->categoria, $inicio);
+        $fim = $this->grade($tenantId)->fim($servico->setor, $servico->categoria, $inicio);
         $this->conferirDuracaoMaxima($inicio, $fim, 'agendamento');
 
         if ($origem === 'encaixe_emergencia') {
@@ -303,7 +303,7 @@ class AgendaService
             }
         } else {
             $this->conferirRestrito($servico, null, (int) $dados['profissional_id'], $autorizacao, $tenantId);
-            $this->conferirNaoPassou($servico->setor, $inicio, 'agendar');
+            $this->conferirNaoPassou($servico->setor, $inicio, 'agendar', $tenantId);
             $this->conferirHorario($servico, (int) $dados['profissional_id'], $inicio, $tenantId);
         }
 
@@ -338,9 +338,9 @@ class AgendaService
     }
 
     /** Clínica: bloco encerrado fica fechado (em andamento, ainda aceita). Petshop: início antes de agora é recusado. */
-    private function conferirNaoPassou(string $setor, CarbonImmutable $inicio, string $verbo): void
+    private function conferirNaoPassou(string $setor, CarbonImmutable $inicio, string $verbo, int $tenantId): void
     {
-        if (! $this->grade()->jaPassou($setor, $inicio, CarbonImmutable::now($inicio->getTimezone()))) {
+        if (! $this->grade($tenantId)->jaPassou($setor, $inicio, CarbonImmutable::now($inicio->getTimezone()))) {
             return;
         }
         $para = $verbo === 'agendar' ? 'agendar no passado' : $verbo.' para um horário que já passou';
@@ -357,12 +357,12 @@ class AgendaService
      */
     private function conferirHorario(CatalogoItem $servico, int $profissionalId, CarbonImmutable $inicio, int $tenantId, ?int $ignorarId = null): void
     {
-        if ($servico->setor === 'clinica' && $this->grade()->foraDaAgenda($servico->categoria)) {
+        if ($servico->setor === 'clinica' && $this->grade($tenantId)->foraDaAgenda($servico->categoria)) {
             return; // internação: registrada com a data de entrada, sem ocupar a agenda do veterinário
         }
         $dia = $inicio->startOfDay();
         $ocupados = $this->ocupados([$profissionalId], $dia, $dia->addDay(), $tenantId, $ignorarId, travar: true)[$profissionalId] ?? [];
-        $grade = $this->grade();
+        $grade = $this->grade($tenantId);
         $motivo = $grade->motivo($servico->setor, $servico->categoria, $inicio, $ocupados);
 
         if ($motivo !== null) {
@@ -455,7 +455,7 @@ class AgendaService
 
         $categorias = CatalogoItem::query()->where('tenant_id', $tenantId)
             ->whereIn('id', $linhas->pluck('catalogo_item_id')->unique()->all())->pluck('categoria', 'id');
-        $grade = $this->grade();
+        $grade = $this->grade($tenantId);
         $porProfissional = [];
         foreach ($linhas as $linha) {
             if ($grade->foraDaAgenda($categorias[$linha->catalogo_item_id] ?? null)) {
@@ -541,14 +541,14 @@ class AgendaService
         if ($novoInicio === null) {
             throw new RegraDeNegocioException('Informe o novo início com data e hora (AAAA-MM-DD HH:MM).');
         }
-        $this->conferirNaoPassou($setor, $novoInicio, 'remarcar');
+        $this->conferirNaoPassou($setor, $novoInicio, 'remarcar', $tenantId);
         if ($novoInicio->equalTo($this->momento($agendamento->inicio)) && $profissional === (int) $agendamento->profissional_id) {
             throw new RegraDeNegocioException('O agendamento já está nesse horário.');
         }
 
         $servico = $this->servicoDoTenant($agendamento->catalogo_item_id, $tenantId);
         $this->conferirRestrito($servico, $agendamento, $profissional, $autorizacao, $tenantId);
-        $novoFim = $this->grade()->fim($setor, $servico->categoria, $novoInicio);
+        $novoFim = $this->grade($tenantId)->fim($setor, $servico->categoria, $novoInicio);
         $this->conferirDuracaoMaxima($novoInicio, $novoFim, 'novo horário');
         $this->conferirHorario($servico, $profissional, $novoInicio, $tenantId, (int) $agendamento->id);
 
@@ -634,8 +634,8 @@ class AgendaService
         if ($novoInicio === null) {
             throw new RegraDeNegocioException('Informe o início com data e hora (AAAA-MM-DD HH:MM).');
         }
-        $this->conferirNaoPassou($servico->setor, $novoInicio, 'trocar o serviço');
-        $novoFim = $this->grade()->fim($servico->setor, $servico->categoria, $novoInicio);
+        $this->conferirNaoPassou($servico->setor, $novoInicio, 'trocar o serviço', $tenantId);
+        $novoFim = $this->grade($tenantId)->fim($servico->setor, $servico->categoria, $novoInicio);
         $this->conferirDuracaoMaxima($novoInicio, $novoFim, 'agendamento');
         $this->conferirHorario($servico, $profissional, $novoInicio, $tenantId, (int) $agendamento->id);
 
@@ -719,7 +719,7 @@ class AgendaService
             throw new RegraDeNegocioException('Informe o dia no formato AAAA-MM-DD.');
         }
 
-        $grade = $this->grade();
+        $grade = $this->grade($tenantId);
         $agora = CarbonImmutable::now((string) config('app.timezone'));
         $ocupados = $this->ocupados($escolhidos, $data, $data->addDay(), $tenantId, $ignorar, travar: false);
         $porHora = [];
@@ -756,7 +756,7 @@ class AgendaService
             throw new RegraDeNegocioException('Informe o mês no formato AAAA-MM.');
         }
 
-        $grade = $this->grade();
+        $grade = $this->grade($tenantId);
         $agora = CarbonImmutable::now((string) config('app.timezone'));
         $depois = $primeiro->addMonth();
         $ocupados = $this->ocupados($escolhidos, $primeiro, $depois, $tenantId, $ignorar, travar: false);

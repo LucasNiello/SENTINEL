@@ -5,6 +5,9 @@
 
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'auditoria'])
+@else
     <header class="page-header">
     <p class="eyebrow">Rastreabilidade</p>
     <h1>Auditoria</h1>
@@ -285,4 +288,5 @@
 
         carregar(1);
     </script>
+@endif
 @endsection

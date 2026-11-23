@@ -56,7 +56,7 @@ class AtualizarTest extends TestCase
         $campos = $this->campos($resposta);
         $this->assertSame('Mercado Central', $campos['nome']['valor'], 'valor atual');
         $this->assertSame('novo@exemplo.com', $campos['email']['valor'], 'o que a IA mudou');
-        $this->assertSame('***.***.789-01', $campos['documento']['valor'], 'sensível continua mascarado');
+        $this->assertSame('123.***.**9-01', $campos['documento']['valor'], 'sensível continua mascarado');
         $this->assertArrayNotHasKey('id', $campos->all(), 'o id não é campo do formulário');
 
         $this->confirmar($this->propor(['busca' => 'mercado', 'email' => 'novo@exemplo.com'], 'atualizar_cliente'))

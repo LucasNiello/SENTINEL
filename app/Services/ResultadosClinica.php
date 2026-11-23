@@ -23,7 +23,7 @@ use Carbon\CarbonImmutable;
  */
 class ResultadosClinica
 {
-    public const PERIODOS = ['dia' => 'Dia', 'semana' => 'Semana', 'mes' => 'Mês'];
+    public const PERIODOS = ['dia' => 'Dia', 'semana' => 'Semana', 'mes' => 'Mês', 'ano' => 'Ano'];
 
     private const SETORES = ['clinica' => 'Clínica', 'petshop' => 'Petshop'];
 
@@ -33,6 +33,7 @@ class ResultadosClinica
         return match ($periodo) {
             'semana' => [$data->startOfWeek(CarbonImmutable::MONDAY), $data->endOfWeek(CarbonImmutable::SUNDAY)],
             'mes' => [$data->startOfMonth(), $data->endOfMonth()],
+            'ano' => [$data->startOfYear(), $data->endOfYear()],
             default => [$data->startOfDay(), $data->endOfDay()],
         };
     }

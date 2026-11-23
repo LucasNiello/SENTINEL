@@ -40,6 +40,7 @@
         if ($podeTool('consultar_cobrancas')) $daClinica[] = ['cobrancas', 'Cobranças', 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6m-6 4h6'];
         if ($podeTool('consultar_vendas')) $daClinica[] = ['vendas', 'Vendas', 'M4 6h2l2 10h10l2-7H8m1 11h.01M17 20h.01'];
         if (rescue(fn () => app(\App\Services\ContextoUsuario::class)->ehDono(), false, false)) $daClinica[] = ['resultados', 'Resultados', 'M5 20V10m7 10V4m7 16v-7'];
+        if (rescue(fn () => app(\App\Services\ContextoUsuario::class)->ehDono(), false, false)) $daClinica[] = ['painel', 'Painel', 'M4 4h7v7H4zm9 0h7v4h-7zM4 13h7v7H4zm9-3h7v10h-7z'];
         // Agente, Agenda, Cadastros e o resto: a agenda logo depois do agente, que é o que a recepção mais abre.
         array_splice($itens, 1, 0, array_slice($daClinica, 0, 1));
         array_push($itens, ...array_slice($daClinica, 1));

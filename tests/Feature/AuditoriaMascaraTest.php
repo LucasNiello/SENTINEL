@@ -41,7 +41,7 @@ class AuditoriaMascaraTest extends TestCase
     {
         $log = $this->registrar(['nome' => 'Ana', 'cpf' => '111.222.333-44', 'salario' => 3200.5]);
 
-        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros['cpf']);
         $this->assertSame('[redigido]', $log->parametros['salario']);
     }
 
@@ -63,13 +63,13 @@ class AuditoriaMascaraTest extends TestCase
 
     public function test_cpf_sem_pontuacao_sai_no_mesmo_formato_mascarado(): void
     {
-        $this->assertSame('***.***.333-44', $this->registrar(['cpf' => '11122233344'])->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $this->registrar(['cpf' => '11122233344'])->parametros['cpf']);
     }
 
     public function test_cpf_nunca_sai_em_claro_mesmo_com_tipo_ou_formato_inesperado(): void
     {
         // O modelo pode mandar número, lista ou lixo: nada disso pode ir bruto para o log.
-        $this->assertSame('***.***.333-44', $this->registrar(['cpf' => 11122233344])->parametros['cpf'], 'número');
+        $this->assertSame('111.***.**3-44', $this->registrar(['cpf' => 11122233344])->parametros['cpf'], 'número');
         $this->assertSame('[redigido]', $this->registrar(['cpf' => ['111.222.333-44']])->parametros['cpf'], 'lista');
         $this->assertSame('[redigido]', $this->registrar(['cpf' => '123'])->parametros['cpf'], 'curto demais');
         $this->assertSame('[redigido]', $this->registrar(['cpf' => 'abc'])->parametros['cpf'], 'sem dígitos');
@@ -82,7 +82,7 @@ class AuditoriaMascaraTest extends TestCase
         $this->assertNull($log->parametros['cpf']);
         $this->assertNull($log->parametros['salario']);
 
-        $this->assertSame('***.***.333-44', $this->registrar(['cpf' => '***.***.333-44'])->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $this->registrar(['cpf' => '111.***.**3-44'])->parametros['cpf']);
     }
 
     public function test_salario_zero_tambem_e_redigido(): void
@@ -92,14 +92,14 @@ class AuditoriaMascaraTest extends TestCase
 
     public function test_documento_com_cpf_e_mascarado_e_cnpj_passa_intacto(): void
     {
-        $this->assertSame('***.***.789-00', $this->registrar(['documento' => '123.456.789-00'])->parametros['documento'], 'CPF formatado');
-        $this->assertSame('***.***.789-00', $this->registrar(['documento' => '12345678900'])->parametros['documento'], 'CPF sem pontuação');
+        $this->assertSame('123.***.**9-00', $this->registrar(['documento' => '123.456.789-00'])->parametros['documento'], 'CPF formatado');
+        $this->assertSame('123.***.**9-00', $this->registrar(['documento' => '12345678900'])->parametros['documento'], 'CPF sem pontuação');
         $this->assertSame('12.345.678/0001-90', $this->registrar(['documento' => '12.345.678/0001-90'])->parametros['documento'], 'CNPJ fica visível');
         $this->assertNull($this->registrar(['documento' => null])->parametros['documento']);
         $this->assertSame('[redigido]', $this->registrar(['documento' => ['123.456.789-00']])->parametros['documento'], 'não-escalar nunca sai bruto');
 
         // O mesmo método alimenta o Log::error do AiAgentService.
-        $this->assertSame(['documento' => '***.***.789-00'], AuditoriaService::mascararCamposSensiveis(['documento' => '123.456.789-00']));
+        $this->assertSame(['documento' => '123.***.**9-00'], AuditoriaService::mascararCamposSensiveis(['documento' => '123.456.789-00']));
     }
 
     public function test_criar_cliente_com_cpf_no_documento_grava_log_mascarado_e_o_registro_real_fica_intacto(): void
@@ -110,7 +110,7 @@ class AuditoriaMascaraTest extends TestCase
         $this->assertSame('123.456.789-00', Cliente::query()->sole()->documento, 'o dado real fica na tabela da entidade');
 
         $log = AuditLog::query()->sole();
-        $this->assertSame('***.***.789-00', $log->parametros['documento']);
+        $this->assertSame('123.***.**9-00', $log->parametros['documento']);
         $this->assertStringNotContainsString('123.456', json_encode($log->getAttributes(), JSON_UNESCAPED_UNICODE));
     }
 
@@ -132,7 +132,7 @@ class AuditoriaMascaraTest extends TestCase
 
         $log = AuditLog::query()->sole();
         $this->assertSame('sucesso', $log->resultado);
-        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros['cpf']);
         $this->assertSame('[redigido]', $log->parametros['salario']);
         $this->assertSame('Ana Souza', $log->parametros['nome']);
         $this->assertSame($funcionario->id, $log->entidade_id);
@@ -146,7 +146,7 @@ class AuditoriaMascaraTest extends TestCase
 
         $log = AuditLog::query()->sole();
         $this->assertSame('negado', $log->resultado);
-        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros['cpf']);
         $this->assertSame('[redigido]', $log->parametros['salario']);
     }
 
@@ -157,7 +157,7 @@ class AuditoriaMascaraTest extends TestCase
 
         $log = AuditLog::query()->sole();
         $this->assertSame('revisao_com_erro', $log->resultado);
-        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros['cpf']);
         $this->assertSame('[redigido]', $log->parametros['salario']);
     }
 
@@ -165,7 +165,7 @@ class AuditoriaMascaraTest extends TestCase
     {
         // Método público/estático: usado também pelo Log::error do AiAgentService.
         $this->assertSame(
-            ['nome' => 'Ana', 'cpf' => '***.***.333-44', 'salario' => '[redigido]', 'cargo' => 'Analista'],
+            ['nome' => 'Ana', 'cpf' => '111.***.**3-44', 'salario' => '[redigido]', 'cargo' => 'Analista'],
             AuditoriaService::mascararCamposSensiveis(['nome' => 'Ana', 'cpf' => '111.222.333-44', 'salario' => 3200.5, 'cargo' => 'Analista']),
         );
         $this->assertSame([], AuditoriaService::mascararCamposSensiveis([]));
@@ -215,7 +215,7 @@ class AuditoriaMascaraTest extends TestCase
         foreach (['111.222.333-44', '3200.5', 'insert into', 'SQL:'] as $termo) {
             $this->assertStringNotContainsString($termo, $linha);
         }
-        $this->assertSame('***.***.333-44', $log->parametros['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros['cpf']);
 
         // Log de arquivo: registrou a falha (o teste não é vazio), sem argumentos nem a mensagem da exceção.
         Log::shouldHaveReceived('error')->once()->withArgs(function ($mensagem, $contexto) {

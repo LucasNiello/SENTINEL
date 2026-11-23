@@ -84,6 +84,10 @@ class AiAgentService
         'fornecedor_id.prohibited_if' => 'Nota fiscal de saída não leva fornecedor — informe o cliente.',
         'data_demissao.after_or_equal' => 'A data de demissão não pode ser anterior à data de admissão.',
         'valor.gt' => 'O valor deve ser maior que zero.',
+        // Dinheiro do catálogo: o card fala em reais; as regras seguem em centavos inteiros.
+        'preco_centavos.integer' => 'Informe o preço em reais, com no máximo 2 casas (ex.: 45,90).',
+        'preco_centavos.min' => 'O preço não pode ser negativo.',
+        'preco_centavos.max' => 'O preço passa do limite de R$ 1.000.000,00 por item.',
     ];
 
     /** Como cada campo aparece nas frases acima. */
@@ -121,7 +125,7 @@ class AiAgentService
         'setor' => 'o setor',
         'categoria' => 'a categoria',
         'nome_comercial' => 'o nome comercial',
-        'preco_centavos' => 'o preço em centavos',
+        'preco_centavos' => 'o preço',
         'cobranca_por' => 'a forma de cobrança',
         'controla_estoque' => 'o controle de estoque',
         'estoque' => 'o estoque',
@@ -580,6 +584,17 @@ class AiAgentService
                     ? "Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):\n".$conteudo
                     : $conteudo;
             } elseif ($papel === 'user' || $papel === 'assistant') {
+                // Rede de segurança (23/11): dois turnos seguidos do mesmo papel viram UMA mensagem na API, e o modelo atende
+                // o primeiro pedido. O último vale (é o pedido atual); o anterior é descartado, nunca fundido. Se isto
+                // disparar, o histórico perdeu um fechamento de turno: é sinal de outro bug (ver o log).
+                if ($mensagens !== [] && $mensagens[array_key_last($mensagens)]['role'] === $papel) {
+                    array_pop($mensagens);
+                    Log::warning('AiAgentService: histórico com dois turnos seguidos do mesmo papel (o anterior foi descartado)', [
+                        'correlation_id' => (string) Str::uuid(),
+                        'categoria' => 'history_alternation_error',
+                        'papel' => $papel,
+                    ]);
+                }
                 $mensagens[] = ['role' => $papel, 'content' => $conteudo];
                 $houveConversa = true;
             }
@@ -860,6 +875,9 @@ class AiAgentService
             ];
         }
 
+        // Máscara não é dado: a IA (que só lê valores mascarados) ou o card podem devolver "(19) 9****-*321" ou
+        // "123.***.**9-00"; isso nunca é gravado. O campo some e vale o atual (atualizar) ou vazio (criar).
+        $argumentos = AuditoriaService::semValoresMascarados($argumentos);
         $argumentos['tenant_id'] = $this->contexto->tenantId();
 
         try {
@@ -1542,11 +1560,21 @@ class AiAgentService
 
             $vazio = $valores[$campo] === null || $valores[$campo] === '';
 
-            if ($vazio && in_array($campo, AuditoriaService::camposSensiveis(), true)) {
+            $sensivel = in_array($campo, AuditoriaService::camposSensiveis(), true);
+
+            // Vazio ou a própria máscara que o card mostrou: "manter" o valor da proposta.
+            if ($sensivel && ($vazio || \App\Support\Mascara::mascarado($valores[$campo]))) {
                 continue;
             }
 
-            $proposta[$campo] = $vazio ? null : $valores[$campo];
+            // Dinheiro: o card trabalha em reais ("80,00"); a proposta e as regras, em centavos inteiros. Texto que não
+            // é dinheiro continua como veio, e a validação responde com a frase do campo.
+            $novo = $vazio ? null : $valores[$campo];
+            if (is_string($novo) && str_ends_with($campo, '_centavos')) {
+                $novo = \App\Support\Dinheiro::paraCentavos($novo) ?? $novo;
+            }
+
+            $proposta[$campo] = $novo;
         }
 
         return $proposta;

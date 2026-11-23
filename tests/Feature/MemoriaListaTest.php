@@ -45,7 +45,7 @@ class MemoriaListaTest extends TestCase
 
         $this->comando('atualizar_cliente', ['posicao' => 2, 'telefone' => '19 3441-2200'])
             ->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente')->assertJsonPath('argumentos.id', $ids[1])
-            ->assertJsonPath('argumentos.telefone', '19 3441-2200');
+            ->assertJsonPath('argumentos.telefone', '(19) 3***-*200'); // a proposta vai ao front mascarada (LGPD)
 
         // O que foi para a IA no 2º pedido: a frase com a quantidade, sem id nem nome das linhas.
         $corpo = (string) Http::recorded()->last()[0]->body();

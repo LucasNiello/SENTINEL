@@ -92,6 +92,10 @@ class AgenteController extends Controller
                 'mensagem' => 'O Administrador só gera e revoga os PINs, na tela Supervisão.'], 403);
         }
 
+        // Ciclo de vida (23/11): uma pendência nunca sobrevive a um novo pedido. A anterior é descartada, auditada como
+        // cancelada e marcada no histórico (fala do servidor) ANTES de a IA ver a conversa.
+        $this->descartarPendencias($request);
+
         try {
             $resposta = $this->aiAgentService->processar($mensagem, $this->conversa->ler($request->session()), $this->conversa->lerLista($request->session()));
         } catch (\Illuminate\Auth\AuthenticationException $e) {
@@ -117,6 +121,7 @@ class AgenteController extends Controller
             // A sessão guarda a proposta crua; o front só vê CPF/salário/documento mascarados (LGPD).
             $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null,
                 tempoIaMs: $resposta['tempo_ia_ms'] ?? null, loteIds: $resposta['lote_ids'] ?? null);
+            $this->conversa->vincularProposta($request->session(), $resposta['proposta']);
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
             unset($resposta['propostos'], $resposta['tempo_ia_ms'], $resposta['lote_ids']);
         }
@@ -126,6 +131,24 @@ class AgenteController extends Controller
             'erro' => 422,
             default => 200,
         });
+    }
+
+    /**
+     * Descarta as propostas ainda abertas (rascunho ou token) quando chega um novo pedido: auditadas como "cancelado"
+     * (motivo: substituída por novo pedido) e marcadas no histórico da conversa. O card antigo que ainda estiver na tela
+     * recebe "Confirmação inválida ou já utilizada" se alguém clicar. A que expirou já sai como "expirado".
+     */
+    private function descartarPendencias(Request $request): void
+    {
+        foreach ($this->pendentes->retirarTodas($request->session()) as $pendente) {
+            $expirou = $this->pendentes->expirou($pendente);
+            $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $expirou ? 'expirado' : 'cancelado',
+                $expirou ? 'A confirmação expirou sem resposta. Nada foi gravado.' : 'Substituída por novo pedido. Nada foi gravado.',
+                ConfirmacoesPendentes::origem($pendente), entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
+            if (isset($pendente['proposta_id'])) {
+                $this->conversa->marcarProposta($request->session(), $pendente['proposta_id'], $expirou ? 'expirada' : 'substituida');
+            }
+        }
     }
 
     /**
@@ -314,6 +337,7 @@ class AgenteController extends Controller
         }
 
         // O agente passa a saber que a escrita aconteceu: só a frase fixa do servidor, sem valores.
+        $this->conversa->marcarProposta($request->session(), $proposta, ($resultado['tipo'] ?? null) === 'resultado_escrita' ? 'confirmada' : 'falhou');
         if (($resultado['tipo'] ?? null) === 'resultado_escrita') {
             $this->conversa->registrarResultado($request->session(), $resultado['mensagem'], $this->idGravado($resultado));
         }
@@ -396,6 +420,7 @@ class AgenteController extends Controller
         [$desfecho, $motivo] = $expirou
             ? ['expirado', 'A confirmação expirou sem resposta. Nada foi gravado.']
             : ['cancelado', 'Cancelado pelo usuário. Nada foi gravado.'];
+        $this->conversa->marcarProposta($request->session(), $proposta, $expirou ? 'expirada' : 'cancelada');
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
             entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
