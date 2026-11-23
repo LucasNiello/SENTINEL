@@ -20,6 +20,8 @@
 @section('conteudo')
 @if (request()->query('amostra') === 'estados')
     @include('amostras.estados', ['tipoAmostra' => 'agenda'])
+@elseif (request()->query('amostra') === 'remarcacao')
+    @include('amostras.remarcacao')
 @else
     <header class="page-header">
         <p class="eyebrow">{{ $soUmSetor ? 'Banho e tosa' : 'Clínica e banho e tosa' }}</p>
