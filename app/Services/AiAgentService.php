@@ -860,6 +860,9 @@ class AiAgentService
             ];
         }
 
+        // Máscara não é dado: a IA (que só lê valores mascarados) ou o card podem devolver "(19) 9****-*321" ou
+        // "123.***.**9-00"; isso nunca é gravado. O campo some e vale o atual (atualizar) ou vazio (criar).
+        $argumentos = AuditoriaService::semValoresMascarados($argumentos);
         $argumentos['tenant_id'] = $this->contexto->tenantId();
 
         try {
@@ -1542,7 +1545,10 @@ class AiAgentService
 
             $vazio = $valores[$campo] === null || $valores[$campo] === '';
 
-            if ($vazio && in_array($campo, AuditoriaService::camposSensiveis(), true)) {
+            $sensivel = in_array($campo, AuditoriaService::camposSensiveis(), true);
+
+            // Vazio ou a própria máscara que o card mostrou: "manter" o valor da proposta.
+            if ($sensivel && ($vazio || \App\Support\Mascara::mascarado($valores[$campo]))) {
                 continue;
             }
 

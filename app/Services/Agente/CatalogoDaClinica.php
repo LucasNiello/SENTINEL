@@ -758,7 +758,7 @@ trait CatalogoDaClinica
             $cabecalho[] = ['rotulo' => 'Pet', 'valor' => $pet->nome, 'href' => '/pets/'.$pet->id];
             $tutor = $pet->tutor !== null && (int) $pet->tutor->tenant_id === $tenantId ? $pet->tutor : null;
             if ($tutor !== null) {
-                $cabecalho[] = ['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id];
+                $cabecalho[] = ['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.\App\Support\Mascara::telefone($tutor->telefone) : ''), 'href' => '/tutores/'.$tutor->id];
             }
         }
         if ($ag !== null) {
@@ -861,7 +861,7 @@ trait CatalogoDaClinica
         $pet = $petId >= 1 && $this->podeExecutar('consultar_tutores') ? Pet::query()->where('tenant_id', $tenantId)->find($petId) : null;
         $tutor = $pet === null ? null : Tutor::query()->where('tenant_id', $tenantId)->find($pet->tutor_id);
 
-        return $tutor === null ? [] : [['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id]];
+        return $tutor === null ? [] : [['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.\App\Support\Mascara::telefone($tutor->telefone) : ''), 'href' => '/tutores/'.$tutor->id]];
     }
 
     /**

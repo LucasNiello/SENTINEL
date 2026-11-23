@@ -64,7 +64,7 @@ class ClienteFornecedorToolsTest extends TestCase
 
         $documentos = collect($this->comando($consultar)->assertOk()->json('resultado'))->pluck('documento', 'nome');
 
-        $this->assertSame('***.***.789-00', $documentos['Pessoa Física'], 'CPF sai mascarado (LGPD: a consulta é aberta ao papel leitura)');
+        $this->assertSame('123.***.**9-00', $documentos['Pessoa Física'], 'CPF sai mascarado (LGPD: a consulta é aberta ao papel leitura)');
         $this->assertSame('12.345.678/0001-90', $documentos['Empresa Ltda'], 'CNPJ continua visível');
         $this->assertSame('123.456.789-00', $model::query()->where('nome', 'Pessoa Física')->value('documento'), 'o dado real fica na tabela');
     }

@@ -10,10 +10,14 @@ use App\Models\Mensagem;
 use App\Models\Pet;
 use App\Models\Tutor;
 use App\Models\User;
+use App\Models\Venda;
+use App\Models\VendaItem;
 use App\Services\AgendaService;
 use App\Services\CatalogoService;
 use App\Services\CobrancaService;
+use App\Services\ConfiguracaoDaAgenda;
 use App\Services\ContextoUsuario;
+use App\Services\GradeDaAgenda;
 use App\Services\PetService;
 use App\Services\ProntuarioService;
 use App\Services\TutorService;
@@ -359,39 +363,116 @@ class ClinicaSeeder extends Seeder
         });
     }
 
-    /** Hoje e os próximos 6 dias: consultas e banhos agendados (alguns confirmados). */
+    /**
+     * Hoje e os próximos 6 dias: consultas e banhos agendados (alguns confirmados), espalhados pela semana.
+     * 23/11: o seed nunca cai no intervalo (almoço) do expediente (config do tenant, GradeDaAgenda::intervalo), e deixa dois
+     * blocos prontos para a bateria do agente: um bloco da clínica com as 4 vagas de um veterinário ocupadas (pedido 20) e um
+     * horário do petshop com a atendente ocupada (pedido 26). Tudo relativo a hoje; o que a grade recusar é pulado, nunca
+     * derruba o seed.
+     */
     private function agendaDaSemana(): void
     {
         $agenda = app(AgendaService::class);
+        $inicioDoBloco = $this->blocoDeHoje();
+
         $semana = [
             [0, '17:00', 'amora', 'veterinario', 'retorno', 'confirmado'],
             [0, '17:00', 'bidu', 'atendente', 'banho_p', 'confirmado'],
             [1, '09:00', 'nina', 'dono', 'consulta', 'confirmado'],
             [1, '09:00', 'thor', 'atendente', 'banho_g', 'agendado'],
             [1, '10:00', 'bidu', 'veterinario', 'consulta', 'agendado'],
+            [1, '11:00', 'amora', 'dono', 'consulta', 'confirmado'],
+            [1, '14:00', 'rex', 'atendente', 'tosa_c', 'agendado'],
+            [2, '09:00', 'thor', 'veterinario', 'retorno', 'agendado'],
+            [2, '10:00', 'rex', 'dono', 'consulta', 'agendado'],
+            [2, '11:00', 'bidu', 'atendente', 'banho_p', 'confirmado'],
             [2, '14:00', 'nina', 'dono', 'consulta', 'agendado'],
             [2, '15:00', 'amora', 'atendente', 'tosa_c', 'agendado'],
             [3, '09:00', 'rex', 'veterinario', 'consulta', 'agendado'],
             [3, '11:00', 'rex', 'dono', 'retorno', 'agendado'],
+            [3, '14:00', 'amora', 'veterinario', 'consulta', 'agendado'],
+            [3, '15:00', 'nina', 'atendente', 'banho_p', 'agendado'],
+            [4, '09:00', 'amora', 'dono', 'retorno', 'agendado'],
             [4, '10:00', 'thor', 'veterinario', 'consulta', 'agendado'],
             [4, '13:00', 'rex', 'atendente', 'banho_g', 'agendado'],
+            [4, '15:00', 'bidu', 'veterinario', 'consulta', 'agendado'],
             [5, '09:00', 'bidu', 'dono', 'consulta', 'agendado'],
             [5, '10:00', 'thor', 'atendente', 'banho_g', 'agendado'],
+            [5, '14:00', 'rex', 'veterinario', 'consulta', 'agendado'],
+            [5, '16:00', 'amora', 'atendente', 'banho_p', 'agendado'],
+            [6, '09:00', 'nina', 'atendente', 'banho_p', 'agendado'],
             [6, '11:00', 'thor', 'veterinario', 'consulta', 'agendado'],
+            [6, '14:00', 'rex', 'dono', 'consulta', 'agendado'],
         ];
 
         // Relógio na meia-noite de hoje: agendar no passado é recusado, e o horário de hoje pode já ter passado.
-        $this->em($this->dia(0, '00:00'), function () use ($semana, $agenda) {
-            foreach ($semana as [$dias, $hora, $pet, $quem, $servico, $status]) {
-                $inicio = $this->diaDaAgenda(-$dias, $hora);
-                $agendamento = $agenda->agendar(['pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios[$quem]->id,
-                    'catalogo_item_id' => $this->itens[$servico]->id, 'inicio' => $inicio,
-                    'fim' => $inicio->copy()->addMinutes($quem === 'atendente' ? 60 : 30)], self::TENANT);
+        $this->em($this->dia(0, '00:00'), function () use ($semana, $agenda, $inicioDoBloco) {
+            $gravar = function (Carbon $inicio, string $pet, string $quem, string $servico, string $status) use ($agenda) {
+                $minutos = $quem === 'atendente' ? 60 : 30;
+                $inicio = $this->foraDoIntervalo($inicio, $quem === 'atendente' ? 15 : 60);
+                $dados = ['pet_id' => $this->pets[$pet]->id, 'profissional_id' => $this->usuarios[$quem]->id,
+                    'catalogo_item_id' => $this->itens[$servico]->id, 'inicio' => $inicio, 'fim' => $inicio->copy()->addMinutes($minutos)];
+                if ($agenda->motivoParaNaoAgendar($dados, self::TENANT) !== null) {
+                    return; // fora do expediente, vaga ocupada ou intervalo: a demo segue sem esse horário
+                }
+                $agendamento = $agenda->agendar($dados, self::TENANT);
                 if ($status === 'confirmado') {
                     $agenda->alterarStatus($agendamento->id, 'confirmado', self::TENANT);
                 }
+            };
+
+            // Pedido 20: as 4 vagas do bloco do vet2 ocupadas (4 pets diferentes). Pedido 26: a atendente ocupada no mesmo horário.
+            // (o número de vagas é o do tenant: o dono pode ter mudado no painel; com 5 pets o bloco enche até 5 vagas)
+            $vagas = (int) (app(ConfiguracaoDaAgenda::class)->agendaDoTenant(self::TENANT)['clinica']['vagas'] ?? 4);
+            foreach (array_slice(['rex', 'nina', 'thor', 'bidu', 'amora'], 0, max(1, $vagas)) as $pet) {
+                $gravar($inicioDoBloco->copy(), $pet, 'veterinario', 'consulta', 'agendado');
+            }
+            $gravar($inicioDoBloco->copy(), 'amora', 'atendente', 'banho_p', 'agendado');
+
+            foreach ($semana as [$dias, $hora, $pet, $quem, $servico, $status]) {
+                $gravar($this->diaDaAgenda(-$dias, $hora), $pet, $quem, $servico, $status);
             }
         });
+    }
+
+    /**
+     * O bloco da bateria: hoje, na primeira hora cheia (9h às 16h) que ainda não passou e não toca o intervalo; se hoje já
+     * acabou ou não abre, o primeiro dia útil seguinte às 10h. Relativo ao relógio de quem roda o seed.
+     */
+    private function blocoDeHoje(): Carbon
+    {
+        $agora = Carbon::now();
+        $abre = array_map('intval', (array) config('sentinel.agenda.expediente.dias', []));
+
+        for ($d = 0; $d <= 7; $d++) {
+            if (! in_array($this->dia(-$d, '00:00')->dayOfWeekIso, $abre, true)) {
+                continue;
+            }
+            foreach ($d === 0 ? range(9, 16) : [10] as $hora) {
+                $candidato = $this->dia(-$d, sprintf('%02d:00', $hora));
+                if ($candidato->gt($agora) && $this->foraDoIntervalo($candidato, 60)->equalTo($candidato)) {
+                    return $candidato;
+                }
+            }
+        }
+
+        return $this->diaDaAgenda(-1, '10:00');
+    }
+
+    /** Se [início, início + 1 passo) toca o intervalo (almoço) do dia, anda de passo em passo até sair dele. */
+    private function foraDoIntervalo(Carbon $inicio, int $passoMinutos): Carbon
+    {
+        $grade = GradeDaAgenda::daConfiguracao(self::TENANT);
+        for ($i = 0; $i < 48; $i++) {
+            $intervalo = $grade->intervalo($inicio);
+            $fim = $inicio->copy()->addMinutes($passoMinutos);
+            if ($intervalo === null || ! ($inicio->lt($intervalo[1]) && $fim->gt($intervalo[0]))) {
+                return $inicio;
+            }
+            $inicio = $inicio->copy()->addMinutes($passoMinutos);
+        }
+
+        return $inicio;
     }
 
     /**
@@ -432,6 +513,46 @@ class ClinicaSeeder extends Seeder
             $data = in_array($dias, [18, 29, 10, 1, 9], true) ? $this->dia($dias, '08:00') : $this->diaDaAgenda($dias, '08:00');
             Lancamento::create(['descricao' => $descricao, 'valor' => $valor, 'data' => $data->toDateString(), 'status' => $status,
                 'categoria_lancamento_id' => $c[$cat]->id, 'fornecedor_id' => $fornecedorId, 'tenant_id' => self::TENANT]);
+        }
+
+        $this->mesesAnteriores($c, $fornecedor->id);
+    }
+
+    /**
+     * 23/11: o ano inteiro para o B.I. por ano. Nos 8 meses antes do último mês do seed (mês atual − 2 em diante), três
+     * despesas por mês (aluguel, energia, compras de estoque, todas conciliadas) e, no MESMO dia de cada uma, uma venda de
+     * balcão paga de 1,8× o valor, gravada direto (sem baixar estoque: é histórico). Assim nenhum dia, semana ou mês fica
+     * negativo, como no resto da demo. Datas relativas a hoje.
+     *
+     * @param  array<string, CategoriaLancamento>  $c
+     */
+    private function mesesAnteriores(array $c, int $fornecedorId): void
+    {
+        $racao = $this->itens['racao'];
+        $modelo = [
+            [5, 'Aluguel', 900.00, 'aluguel', null],
+            [12, 'Conta de energia', 280.00, 'energia', null],
+            [18, 'Compra de ração e petiscos', 560.00, 'compras', $fornecedorId],
+        ];
+
+        for ($atras = 2; $atras <= 9; $atras++) {
+            foreach ($modelo as $i => [$dia, $descricao, $base, $cat, $fornecedorDaDespesa]) {
+                // Valor um pouco diferente a cada mês (a série não fica chapada), sempre em centavos exatos.
+                $valor = round($base * (1 + (($atras * 3 + $i * 5) % 7) / 20), 2);
+                $data = Carbon::now()->startOfMonth()->subMonthsNoOverflow($atras)->setDay($dia)->setTime(8, 0);
+                Lancamento::create(['descricao' => $descricao.' ('.$data->format('m/Y').')', 'valor' => number_format($valor, 2, '.', ''),
+                    'data' => $data->toDateString(), 'status' => 'conciliado', 'categoria_lancamento_id' => $c[$cat]->id,
+                    'fornecedor_id' => $fornecedorDaDespesa, 'tenant_id' => self::TENANT]);
+
+                $total = (int) round($valor * 100 * 1.8);
+                $this->em($data->copy()->setTime(15, 0), function () use ($total, $racao) {
+                    $venda = Venda::create(['setor' => 'petshop', 'vendedor_id' => $this->usuarios['vendedor']->id, 'status' => 'paga',
+                        'total_centavos' => $total, 'forma_pagamento' => 'pix', 'pago_em' => now(), 'tenant_id' => self::TENANT]);
+                    VendaItem::create(['venda_id' => $venda->id, 'catalogo_item_id' => $racao->id, 'descricao' => $racao->nome_comercial,
+                        'preco_unitario_centavos' => $total, 'quantidade' => 1, 'subtotal_centavos' => $total, 'baixou_estoque' => false,
+                        'tenant_id' => self::TENANT]);
+                });
+            }
         }
     }
 

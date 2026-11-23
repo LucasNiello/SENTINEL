@@ -427,7 +427,7 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->cancelar($token)->assertOk();
 
         $log = AuditLog::query()->sole();
-        $this->assertSame('***.***.333-44', $log->parametros_propostos['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros_propostos['cpf']);
         $this->assertSame('[redigido]', $log->parametros_propostos['salario']);
 
         $bruto = (string) DB::table('audit_logs')->value('parametros_propostos');
