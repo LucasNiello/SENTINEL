@@ -71,6 +71,9 @@ class ClinicaSeeder extends Seeder
             throw new \RuntimeException('O tenant '.self::TENANT.' não está em SENTINEL_TENANTS_CLINICA. Nada foi gravado.');
         }
 
+        // O seed agenda e confirma dezenas de atendimentos pelo AgendaService: sem e-mail para cada um (nem espera de SMTP).
+        config(['sentinel.notificar_agendamento' => false]);
+
         $this->criarUsuarios(self::lerDemoSenha());
 
         if (Tutor::where('tenant_id', self::TENANT)->exists()) {

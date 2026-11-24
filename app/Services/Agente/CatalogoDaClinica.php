@@ -667,7 +667,9 @@ trait CatalogoDaClinica
 
                     return $lista->map(fn (Mensagem $m) => [
                         'id' => (int) $m->id,
-                        'de' => $m->getAttribute('tutor') ?? $m->remetente ?? '—',
+                        // E-mail (origem_id): o "De" é livre (sem SPF/DKIM), então mostra SEMPRE o remetente de verdade, marcado como não
+                        // verificado, e nunca só o nome do tutor vinculado (um remetente forjado pareceria o próprio tutor).
+                        'de' => $m->origem_id !== null ? ($m->remetente ?? '—').' (remetente não verificado)' : ($m->getAttribute('tutor') ?? $m->remetente ?? '—'),
                         'mensagem' => $m->texto,
                         'recebida_em' => $m->created_at?->format('d/m/Y H:i'),
                         'status' => $m->status,
@@ -735,9 +737,23 @@ trait CatalogoDaClinica
             default => 'tutor #'.$tutorId.'; pets: '.implode(', ', array_map(fn (array $p) => $p['nome'].' = pet #'.$p['id'], $pets)),
         };
         // O texto vai como string JSON (aspas e quebras escapadas): quem escreveu não fecha a aspa para forjar o contexto.
-        $pedido = 'Mensagem da caixa de entrada ('.$contexto.'): '.json_encode((string) $mensagem->texto, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        $prefixo = 'Mensagem da caixa de entrada ('.$contexto.'): ';
+        $codificar = fn (string $t) => $prefixo.json_encode($t, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        $texto = (string) $mensagem->texto;
+        $pedido = $codificar($texto);
 
-        return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : (string) $mensagem->texto;
+        // E-mail (texto de fora): NUNCA cai no texto cru (que viraria o próprio comando, sem o enquadramento). Se não cabe,
+        // corta o TEXTO até caber, sempre com o prefixo e as aspas. Mensagem do seed mantém o comportamento antigo.
+        if ($mensagem->origem_id !== null) {
+            while (mb_strlen($pedido) > self::LIMITE_DO_PEDIDO && $texto !== '') {
+                $texto = mb_substr($texto, 0, max(0, mb_strlen($texto) - max(10, intdiv(mb_strlen($pedido) - self::LIMITE_DO_PEDIDO, 2) + 1)));
+                $pedido = $codificar($texto);
+            }
+
+            return $pedido;
+        }
+
+        return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : $texto;
     }
 
     /**

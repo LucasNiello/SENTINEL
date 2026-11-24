@@ -78,11 +78,21 @@
 
         // P-B5: "Pedir ao agente" numa mensagem da caixa de entrada põe o texto dela (com o tutor e os pets) no campo do
         // pedido, sem enviar: o usuário vê o que vai para o agente, ajusta se quiser e envia (pendência "sem prévia", 13/11).
-        window.pedirAoAgente = (texto) => {
-            if (campoMensagem.disabled) return;
+        // 24/11: com `enviar`, o painel lateral manda uma LEITURA (sem Revisar) direto; o submit passa pelo mesmo fluxo do botão.
+        // Enviar um pedido novo descarta a proposta aberta (AgenteController::comando). Por isso o envio direto NÃO acontece com
+        // um card aberto (expirado não conta) nem por cima do que a pessoa está digitando: devolve o motivo e não mexe em nada.
+        // Retorno: null = feito; texto = motivo de não ter feito.
+        window.pedirAoAgente = (texto, enviar = false) => {
+            if (campoMensagem.disabled) return 'Aguarde a resposta do agente.';
+            if (enviar) {
+                if (document.querySelector('.card-confirmacao:not(.card--expirado)')) return 'Conclua ou cancele a ação proposta antes.';
+                if (campoMensagem.value.trim() !== '') return 'Envie ou apague o que você está digitando antes.';
+            }
             campoMensagem.value = String(texto).slice(0, 1000);
             campoMensagem.focus();
             campoMensagem.setSelectionRange(campoMensagem.value.length, campoMensagem.value.length);
+            if (enviar) form.requestSubmit();
+            return null;
         };
 
         form.addEventListener('submit', async (e) => {
