@@ -194,7 +194,7 @@ class ConfirmarEmUmPassoTest extends TestCase
     {
         $this->logarComo('admin', 1);
         $proposta = $this->proporLancamento();
-        $this->logarComo('leitor', 1); // o papel mudou depois da proposta; RBAC é conferido de novo, no servidor
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitor'])->save(); // o papel mudou depois da proposta; RBAC é conferido de novo, no servidor
 
         $this->postJson('/agente/confirmar', ['proposta' => $proposta])->assertStatus(403);
 
@@ -266,7 +266,7 @@ class ConfirmarEmUmPassoTest extends TestCase
     {
         $this->logarComo('admin', 1);
         $proposta = $this->proporLancamento();
-        $this->logarComo('leitor', 1);
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitor'])->save();
 
         $this->postJson('/agente/revisar?previa=1', ['proposta' => $proposta, 'valores' => []])->assertStatus(403)->assertJsonPath('codigo', 'AI_FORBIDDEN');
         $this->assertSame(0, AuditLog::query()->where('resultado', 'negado')->count(), 'a prévia não audita');
@@ -552,7 +552,7 @@ class ConfirmarEmUmPassoTest extends TestCase
         $cliente->delete();
         $cliente->arquivar();
         $proposta = (string) $this->comando('excluir_definitivo_cliente', ['id' => $cliente->id])->assertOk()->json('proposta');
-        $this->logarComo('leitor', 1); // o papel mudou depois da proposta
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitor'])->save(); // o papel mudou depois da proposta
         $this->semConferirCredenciais();
 
         $resposta = $this->postJson('/agente/confirmar', ['proposta' => $proposta, 'email_admin' => 'supervisor@sentinel.local', 'senha_admin' => 'errada-123'])
@@ -580,7 +580,7 @@ class ConfirmarEmUmPassoTest extends TestCase
         $this->logarComo('recepcao', self::T);
         $cobranca = $this->paga();
         $proposta = (string) $this->comando('estornar_cobranca', ['id' => $cobranca->id, 'motivo' => 'Erro.', 'modo' => 'tudo'])->assertOk()->json('proposta');
-        $this->logarComo('leitor', self::T); // o papel mudou depois da proposta
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitor'])->save(); // o papel mudou depois da proposta
         $this->semConferirCredenciais();
 
         $resposta = $this->postJson('/agente/confirmar', ['proposta' => $proposta, 'email_admin' => $supervisor->email, 'senha_admin' => self::PIN])->assertStatus(403);

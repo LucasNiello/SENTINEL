@@ -161,7 +161,7 @@ class AgenteController extends Controller
      * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
      * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
      * revisados ficam na sessão e sai o token de confirmação (uso único, até o fim
-     * dos 5 min da proposta), e o /confirmar só usa estes valores. "segurar" diz à
+     * dos 5 min da proposta), e o /confirmar com {token} só usa estes valores (no passo único, o Confirmar revalida os do card). "segurar" diz à
      * tela se o Confirmar pede o gesto de 2 s (ações destrutivas; decisão B, 13/11).
      *
      * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.
@@ -459,7 +459,7 @@ class AgenteController extends Controller
 
     /**
      * A segunda metade do Confirmar, comum aos dois contratos: dá o desfecho único da proposta (o duplo clique perde: 409),
-     * confere prazo, senha de admin / PIN / CRMV e executa com os valores da pendência (nunca os do navegador).
+     * confere prazo, senha de admin / PIN / CRMV e executa com os valores da pendência: no passo único, os do card já revalidados nesta requisição; no {token}, os revisados guardados na sessão.
      */
     private function executarPendente(Request $request, string $proposta, array $pendente)
     {
@@ -471,7 +471,7 @@ class AgenteController extends Controller
         $this->pendentes->encerrar($request->session(), $proposta);
 
         // Decisão B (13/11): não há espera mínima nem validade de 12 s; só os 5 min absolutos da proposta. O segurar
-        // de 2 s é gesto visual (ações destrutivas); o que o servidor garante é token único e valores da sessão.
+        // de 2 s é gesto visual (ações destrutivas); o que o servidor garante é consumo único, rascunho do dono e valores revalidados aqui (nunca confiados).
         if ($this->pendentes->expirou($pendente)) {
             $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'expirado',
                 'Confirmação recebida fora do prazo. Nada foi gravado.', ConfirmacoesPendentes::origem($pendente),
@@ -548,7 +548,8 @@ class AgenteController extends Controller
     {
         $validador = Validator::make($request->all(), ['token' => 'required|string|uuid']);
         $token = $validador->fails() ? null : $validador->validated()['token'];
-        $pendente = $token === null ? null : $request->session()->get("confirmacoes.{$token}");
+        // R5: só o dono enxerga a pendência (nem o "expirou" vaza a existência do token).
+        $pendente = $token === null ? null : $this->pendentes->doUsuario($request->session(), $token);
 
         // Token já vencido: a proposta expirou. Fica para a varredura (depois desta ação) dar o "expirado";
         // o Editar não pode apagar esse desfecho nem devolver a proposta ao formulário.

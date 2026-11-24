@@ -38,7 +38,7 @@ não é exercitada.
 6. Isolamento por tenant em todo método de service e tool: o tenant vem do
    `ContextoUsuario` e filtra toda leitura, alteração, exclusão e restauração;
    registro de outro tenant é tratado como inexistente.
-7. Confirmação conferida no servidor (prazo de 5 min da proposta, consumo único, valores só da sessão; sem janela de 2 a 12 s desde a decisão B de 13/11),
+7. Confirmação conferida no servidor, no fluxo de um passo (prazo de 5 min da proposta, consumo único; os valores recebidos do card são revalidados e escopados por tenant no servidor, e segredos ficam fora de `valores`; rascunho só do dono — usuário e tenant que o abriram —, com a mesma resposta de "indisponível" para quem não é; sem janela de 2 a 12 s desde a decisão B de 13/11),
    nunca só na interface.
 8. CPF e salário mascarados nas respostas das tools e na auditoria
    (`audit_logs` e log de arquivo).

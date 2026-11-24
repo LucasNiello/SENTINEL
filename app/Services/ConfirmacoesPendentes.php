@@ -58,6 +58,9 @@ class ConfirmacoesPendentes
             ...($tempoIaMs === null ? [] : ['tempo_ia_ms' => $tempoIaMs]),
             // RF03: os ids que o servidor resolveu do filtro do lote, congelados; o Confirmar executa só eles.
             ...($loteIds === null ? [] : ['lote_ids' => array_values(array_map('intval', $loteIds))]),
+            // R5 (24/11): o rascunho é de quem o abriu. Usuário e tenant do ContextoUsuario, na hora; nunca do navegador.
+            'dono_user_id' => (int) app(ContextoUsuario::class)->usuario()->getKey(),
+            'dono_tenant_id' => app(ContextoUsuario::class)->tenantId(),
             'criado_em' => self::agora(),
         ]);
 
@@ -69,7 +72,29 @@ class ConfirmacoesPendentes
     {
         $pendente = $sessao->get(self::CHAVE.".{$proposta}");
 
-        return is_array($pendente) && ($pendente['estado'] ?? null) === 'rascunho' ? $pendente : null;
+        return is_array($pendente) && ($pendente['estado'] ?? null) === 'rascunho' && $this->pertenceAoUsuario($pendente) ? $pendente : null;
+    }
+
+    /** R5: a pendência da chave (rascunho ou token) só se for do usuário e tenant logados; leitura, sem tirar da sessão. */
+    public function doUsuario(Session $sessao, string $chave): ?array
+    {
+        $pendente = $sessao->get(self::CHAVE.".{$chave}");
+
+        return is_array($pendente) && $this->pertenceAoUsuario($pendente) ? $pendente : null;
+    }
+
+    /**
+     * R5: a pendência é do usuário e do tenant logados? Exige os dois campos gravados e iguais (int estrito). Sem eles
+     * (rascunho legado ou malformado) é falso: falha fechada. Quem chama trata falso como "não existe", sem distinguir
+     * de uma proposta que nunca houve, para não revelar que ela existe.
+     */
+    private function pertenceAoUsuario(array $pendente): bool
+    {
+        $contexto = app(ContextoUsuario::class);
+
+        return is_int($pendente['dono_user_id'] ?? null) && is_int($pendente['dono_tenant_id'] ?? null)
+            && $pendente['dono_user_id'] === (int) $contexto->usuario()->getKey()
+            && $pendente['dono_tenant_id'] === $contexto->tenantId();
     }
 
     /**
@@ -102,6 +127,9 @@ class ConfirmacoesPendentes
             // Vem do rascunho (servidor), nunca dos valores revisados que o navegador mandou.
             ...(self::loteIds($rascunho) === null ? [] : ['lote_ids' => self::loteIds($rascunho)]),
             'proposta' => $proposta,
+            // R5: o token é do mesmo dono do rascunho (copiado do servidor, nunca do navegador).
+            'dono_user_id' => $rascunho['dono_user_id'] ?? null,
+            'dono_tenant_id' => $rascunho['dono_tenant_id'] ?? null,
             'origem' => self::origem($rascunho),
             // Os 5 min do rascunho são absolutos: o token também vence quando eles acabam (expirou()).
             'proposta_criada_em' => $rascunho['criado_em'],
@@ -141,7 +169,7 @@ class ConfirmacoesPendentes
     {
         $pendente = $sessao->get(self::CHAVE.".{$token}");
 
-        if (! is_array($pendente) || ($pendente['estado'] ?? null) !== 'revisada') {
+        if (! is_array($pendente) || ($pendente['estado'] ?? null) !== 'revisada' || ! $this->pertenceAoUsuario($pendente)) {
             return null;
         }
 
@@ -155,7 +183,8 @@ class ConfirmacoesPendentes
     {
         $pendente = $sessao->get(self::CHAVE.".{$token}");
 
-        if (! is_array($pendente) || ($pendente['estado'] ?? 'revisada') !== 'revisada') {
+        // R5: a conferência do dono vem antes do forget: quem não é o dono não consome o token de ninguém.
+        if (! is_array($pendente) || ($pendente['estado'] ?? 'revisada') !== 'revisada' || ! $this->pertenceAoUsuario($pendente)) {
             return null;
         }
 
@@ -167,9 +196,16 @@ class ConfirmacoesPendentes
     /** Tira da sessão a pendência da chave, rascunho ou revisada (o cancelar aceita as duas). */
     public function retirar(Session $sessao, string $chave): ?array
     {
-        $pendente = $sessao->pull(self::CHAVE.".{$chave}");
+        $atual = $sessao->get(self::CHAVE.".{$chave}");
 
-        return is_array($pendente) ? $pendente : null;
+        // R5: só o dono encerra a proposta; a conferência vem antes de tirar da sessão.
+        if (! is_array($atual) || ! $this->pertenceAoUsuario($atual)) {
+            return null;
+        }
+
+        $sessao->forget(self::CHAVE.".{$chave}");
+
+        return $atual;
     }
 
     /** Desfecho da proposta: o rascunho e todos os tokens dela saem da sessão (R3). */
