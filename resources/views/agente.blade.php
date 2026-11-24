@@ -3,16 +3,13 @@
 @section('titulo', 'Agente')
 
 @section('conteudo')
-    <header class="page-header agent-hero">
-        <p class="eyebrow">Workspace / Inteligência assistida</p>
-        <h1>Converse com seus dados.<br><span>Decida com contexto.</span></h1>
-        <p class="intro">Consulte informações e prepare operações em linguagem natural.</p>
-    <div class="agent-orbit" aria-hidden="true"><span></span><x-lighthouse /></div>
-    </header>
     <div class="command-layout">
     <section class="agent-workspace" aria-label="Conversa com o Sentinel">
 
-    <header class="deck-header"><div><span class="eyebrow">SENTINEL AGENT</span><p>Consulta e operações assistidas</p></div><span class="deck-badge">REVISÃO HUMANA</span></header>
+    <header class="deck-header"><div><button type="button" id="painel-alternar" class="painel-alternar" aria-controls="painel-agente" aria-expanded="false" aria-label="Abrir painel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><x-lighthouse class="deck-logo" /><p>Agente</p></div></header>
+    <div class="agent-corpo">
+    @include('partials.painel-agente')
+    <div class="agent-conversa">
     <div id="historico" aria-live="polite" tabindex="0">
         <div class="agent-empty">
             <p class="eyebrow">SEU PRÓXIMO MOVIMENTO</p>
@@ -51,26 +48,14 @@
     <div class="agent-composer">
     <form id="form-comando">
         <label for="campo-mensagem" class="sr-only">Seu pedido ao agente</label>
-        <span class="composer-mark" aria-hidden="true">⌘</span>
         <input type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required>
-        <kbd class="composer-key" aria-hidden="true">ENTER ↵</kbd>
-        <button type="submit" id="botao-enviar">Enviar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button>
+        <button type="submit" id="botao-enviar" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6"/></svg></button>
     </form>
     <p class="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
     </div>
+    </div>
+    </div>
     </section>
-    <aside class="context-rail" aria-label="Contexto da sessão">
-        <section class="session-context">
-            <p class="eyebrow">CONTEXTO ATUAL</p>
-            <h2>Seu espaço de decisão.</h2>
-            <dl><dt>CONTA</dt><dd>{{ auth()->user()->name }}</dd><dt>PERFIL</dt><dd>{{ config('sentinel.rotulos_papeis')[auth()->user()->papel] ?? auth()->user()->papel }}</dd><dt>MÓDULO</dt><dd>Agente</dd></dl>
-        </section>
-        <section class="decision-flow" aria-label="Fluxo de decisão">
-            <p class="eyebrow">DO PEDIDO À DECISÃO</p>
-            <ol><li><span>01</span><div><h3>Peça</h3><p>Descreva o que precisa em linguagem natural.</p></div></li><li><span>02</span><div><h3>Revise</h3><p>Confira os dados e ajuste antes de prosseguir.</p></div></li><li><span>03</span><div><h3>Confirme</h3><p>Uma gravação exige sua confirmação deliberada.</p></div></li></ol>
-        </section>
-        <p class="context-protection"><span aria-hidden="true">◇</span> Dados isolados por organização.<br>Operações registradas em auditoria.</p>
-    </aside>
     </div>
 
 

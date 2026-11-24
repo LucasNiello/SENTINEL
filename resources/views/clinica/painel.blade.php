@@ -14,6 +14,7 @@
     .painel-card header {display:flex;align-items:center;justify-content:space-between;color:var(--sentinel-blue)}
     .painel-card h3 {margin:12px 0 4px;font-size:1rem}
     .painel-card p {margin:0;font:1.5rem var(--fonte-mono)}
+    .painel-card small {display:block;margin-top:4px;font-size:1rem;color:var(--sentinel-ink-muted)}
     .painel-campos {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}
     .painel-campos input {width:100%;min-width:0;font-size:1rem}
     .painel-lista {list-style:none;margin:0;padding:0;display:grid;gap:8px}
@@ -46,6 +47,9 @@
                         </header>
                         <h3>{{ $card['titulo'] }}</h3>
                         <p>{{ $card['numero'] }}</p>
+                        @isset($card['nota'])
+                            <small>{{ $card['nota'] }}</small>
+                        @endisset
                     </a>
                 @endforeach
             </div>

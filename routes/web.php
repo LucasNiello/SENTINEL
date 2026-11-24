@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AgenteController;
+use App\Http\Controllers\AgentePainelController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
 use App\Http\Controllers\ClinicaTelasController;
@@ -35,6 +36,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/agente', function () {
             return app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica() ? redirect('/supervisao') : view('agente');
         });
+
+        // Painel lateral do /agente (24/11): só leitura (pendentes do negócio e ações recentes do próprio usuário).
+        Route::get('/agente/painel', [AgentePainelController::class, 'mostrar'])->middleware('throttle:120,1,painel-agente');
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
         Route::get('/cadastros', [TelasController::class, 'cadastros']);
