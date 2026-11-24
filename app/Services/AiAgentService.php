@@ -1610,6 +1610,14 @@ class AiAgentService
      *
      * @return array<string, array<string, mixed>>
      */
+    /** Título legível da tool (o mesmo dos cards), para telas de leitura que mostram ações sem expor o identificador interno. */
+    public function tituloDaTool(string $tool): ?string
+    {
+        $titulo = $this->catalogo()[$tool]['titulo'] ?? null;
+
+        return is_string($titulo) && $titulo !== '' ? $titulo : null;
+    }
+
     private function catalogo(): array
     {
         // O catálogo é o do domínio do tenant do usuário logado (config sentinel.tenants_clinica). Tenant fora da

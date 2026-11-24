@@ -70,6 +70,8 @@
     <script>
         // Configuração da tela (montada no servidor); RBAC, tenant e filtros são conferidos de novo no /agente/consultar.
         const ENTIDADES = @json($entidades);
+        // Cadastro pedido pela URL (?cadastro=), já validado pelo servidor contra o que o papel pode consultar.
+        const CADASTRO_INICIAL = @json($cadastroInicial ?? null);
         const formConsulta = document.getElementById('form-consulta');
         const seletorEntidade = document.getElementById('entidade');
         const areaFiltros = document.getElementById('filtros');
@@ -188,6 +190,7 @@
             });
         }
 
+        if (CADASTRO_INICIAL && seletorEntidade && ENTIDADES[CADASTRO_INICIAL]) seletorEntidade.value = CADASTRO_INICIAL;
         montarFiltros();
         formConsulta.requestSubmit();
     </script>
