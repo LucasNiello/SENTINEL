@@ -103,8 +103,7 @@ Notion, quando todas as fases/etapas do projeto estiverem concluídas.
   - mudança só de texto, doc, relatório ou CSV: nenhum teste;
   - em cada relatório, registrar quando foi a última suíte completa e o
     resultado.
-- Revisão pelo `reviewer`, 1 passada por bloco (2 se mexer em senha,
-  permissão ou exportação).
+- Revisão pelo `reviewer`: só CSS ou texto não chama. JS com comportamento novo: 1 passada. Mexeu em senha, PIN, CRMV, estorno, permissão, tenant, exportação ou auditoria: 2 passadas, a segunda só sobre as correções da primeira. Sempre com escopo: arquivos tocados + itens aplicáveis do checklist; o reviewer lê só isso e o que eles chamam. Passada completa só no fechamento de fase ou quando o Lucas pedir.
 - Mudança cirúrgica: tocar só o necessário para a tarefa pedida — nunca
   refatorar código que já funciona "já que estou aqui".
 - Se a solução ficou grande ou complexa, questionar antes de entregar: dava

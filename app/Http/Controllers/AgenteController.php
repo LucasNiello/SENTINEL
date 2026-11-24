@@ -9,7 +9,9 @@ use App\Services\ConsultasExportaveis;
 use App\Services\ConversaAgente;
 use App\Services\PlanilhaCsv;
 use App\Services\ReautenticacaoAdmin;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -17,6 +19,9 @@ use InvalidArgumentException;
 
 class AgenteController extends Controller
 {
+    /** Chaves que nunca valem como valor de formulário: senha, PIN e CRMV só vão nos campos próprios do Confirmar. */
+    private const CHAVES_SECRETAS = ['email_admin', 'senha_admin', 'senha', 'password', 'pin', 'crmv'];
+
     public function __construct(
         private AiAgentService $aiAgentService,
         private ConversaAgente $conversa,
@@ -156,12 +161,64 @@ class AgenteController extends Controller
      * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
      * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
      * revisados ficam na sessão e sai o token de confirmação (uso único, até o fim
-     * dos 5 min da proposta), e o /confirmar só usa estes valores. "segurar" diz à
+     * dos 5 min da proposta), e o /confirmar com {token} só usa estes valores (no passo único, o Confirmar revalida os do card). "segurar" diz à
      * tela se o Confirmar pede o gesto de 2 s (ações destrutivas; decisão B, 13/11).
      *
      * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.
      */
     public function revisar(Request $request)
+    {
+        $lido = $this->lerRascunho($request);
+
+        if ($lido instanceof JsonResponse) {
+            return $lido;
+        }
+
+        ['proposta' => $proposta, 'rascunho' => $rascunho, 'valores' => $valores] = $lido;
+        $tool = $rascunho['tool'];
+
+        // Prévia (23/11): avisos e plano para o card, sem token, sem auditoria, sem gravar. Ramo à parte, que nem chama o
+        // service->revisar (é lá que mora a auditoria); ver previa().
+        if ($request->boolean('previa')) {
+            return $this->previa($proposta, $rascunho, $valores);
+        }
+
+        $preparo = $this->prepararRevisao($tool, $rascunho, $valores);
+
+        if ($preparo instanceof JsonResponse) {
+            return $preparo;
+        }
+
+        if ($resposta = $this->respostaDaRecusa($request, $proposta, $rascunho, $preparo)) {
+            return $resposta;
+        }
+
+        $revisados = $preparo['revisados'];
+
+        // T2: no estorno por itens, o card mostra de novo o que vai ser estornado, com os valores REVISADOS (o humano pode
+        // ter mudado o modo ou as quantidades), antes do segurar.
+        // Só nas tools do estorno: nas outras, o resumo pode rodar uma prévia (transação desfeita) sem necessidade.
+        $refeito = $this->aiAgentService->tipoReautenticacao($tool) === 'estorno' || $this->aiAgentService->avisaNoRevisar($tool)
+            ? $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho)) : null;
+
+        return response()->json([
+            'tipo' => 'revisada',
+            'proposta' => $proposta,
+            'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
+            'risco' => $this->aiAgentService->risco($tool),
+            'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados),
+            'segurar_quando' => $this->aiAgentService->condicaoSegurar($tool),
+            // Agendar e remarcar: o aviso "já há N agendamentos neste horário" vale para o horário REVISADO, antes do confirmar.
+            ...($refeito !== null && (isset($refeito['itens_estorno']) || isset($refeito['avisos']) || $this->aiAgentService->avisaNoRevisar($tool)) ? ['formulario' => $refeito] : []),
+        ]);
+    }
+
+    /**
+     * Corpo comum do Revisar e do Confirmar em um passo: confere a proposta e acha o rascunho vivo (no prazo).
+     *
+     * @return JsonResponse|array{proposta: string, rascunho: array, valores: array}
+     */
+    private function lerRascunho(Request $request): JsonResponse|array
     {
         $validador = Validator::make($request->all(), ['proposta' => 'required|string|uuid']);
         $valores = $request->input('valores', []);
@@ -185,7 +242,18 @@ class AgenteController extends Controller
                 'http_status' => 422, 'mensagem' => 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.'], 422);
         }
 
-        $tool = $rascunho['tool'];
+        // R2 (24/11): segredo nunca entra em "valores" (não vai a 422, rascunho nem auditoria); a mesma lista vale para Revisar, prévia e Confirmar.
+        return ['proposta' => $proposta, 'rascunho' => $rascunho, 'valores' => Arr::except($valores, self::CHAVES_SECRETAS)];
+    }
+
+    /**
+     * Miolo comum do Revisar e do Confirmar em um passo: aplica os valores do card, confere (RBAC, tenant, Form Request,
+     * auditando revisao_com_erro / negado) e, sem recusa, congela o plano do estorno com ESTES valores. Não mexe na sessão.
+     *
+     * @return JsonResponse|array{revisados: array, recusa: ?array, formulario: ?array}
+     */
+    private function prepararRevisao(string $tool, array $rascunho, array $valores): JsonResponse|array
+    {
         // T2: as linhas do estorno só com item_id e quantidade (nada a mais do navegador vai para a sessão ou a auditoria).
         $revisados = $this->aiAgentService->limparLinhasDoEstorno($tool, $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores));
 
@@ -213,6 +281,19 @@ class AgenteController extends Controller
             return response()->json($erro, $erro['http_status']);
         }
 
+        return ['revisados' => $revisados, 'recusa' => $recusa, 'formulario' => $formulario];
+    }
+
+    /**
+     * A resposta de uma revisão recusada (ou null se passou). Negado: a proposta acaba. Recusa de validação: o rascunho
+     * guarda o que o humano editou, a proposta segue aberta e o formulário volta com a frase de cada campo.
+     *
+     * @param  array{revisados: array, recusa: ?array, formulario: ?array}  $preparo
+     */
+    private function respostaDaRecusa(Request $request, string $proposta, array $rascunho, array $preparo): ?JsonResponse
+    {
+        $recusa = $preparo['recusa'];
+
         if (($recusa['tipo'] ?? null) === 'negado') {
             // Sem permissão a proposta não tem mais futuro: a negação (já auditada) é o desfecho dela.
             $this->pendentes->concluir($proposta);
@@ -223,37 +304,136 @@ class AgenteController extends Controller
 
         if ($recusa !== null) {
             // O rascunho guarda o que já foi editado: na próxima revisão, sensível em branco mantém o editado.
-            $this->pendentes->atualizarRascunho($request->session(), $proposta, $rascunho, $revisados);
+            $this->pendentes->atualizarRascunho($request->session(), $proposta, $rascunho, $preparo['revisados']);
 
-            return response()->json([...$recusa, 'proposta' => $proposta, 'risco' => $this->aiAgentService->risco($tool),
-                'formulario' => $formulario], $recusa['http_status'] ?? 422);
+            return response()->json([...$recusa, 'proposta' => $proposta, 'risco' => $this->aiAgentService->risco($rascunho['tool']),
+                'segurar' => $this->aiAgentService->exigeSegurar($rascunho['tool'], $preparo['revisados']),
+                'segurar_quando' => $this->aiAgentService->condicaoSegurar($rascunho['tool']),
+                'formulario' => $preparo['formulario']], $recusa['http_status'] ?? 422);
         }
 
-        // T2: no estorno por itens, o card mostra de novo o que vai ser estornado, com os valores REVISADOS (o humano pode
-        // ter mudado o modo ou as quantidades), antes do segurar.
-        // Só nas tools do estorno: nas outras, o resumo pode rodar uma prévia (transação desfeita) sem necessidade.
-        $refeito = $this->aiAgentService->tipoReautenticacao($tool) === 'estorno' || $this->aiAgentService->avisaNoRevisar($tool)
-            ? $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho)) : null;
+        return null;
+    }
+
+    /**
+     * Prévia do Revisar (POST /agente/revisar?previa=1): o card refeito com os valores digitados (plano do estorno,
+     * agenda ocupada, estoque negativo, campos da cirurgia), para o front mostrar antes do Confirmar. Sem emitir token,
+     * sem auditar, sem tocar na sessão. Nunca lê senha, PIN nem CRMV: o corpo deles é ignorado e, por segurança,
+     * até as chaves com esses nomes saem de "valores". Não chama o service->revisar (onde estão as auditorias): "sem
+     * auditoria" vale por construção. O formulário() só lê; a prévia de cobrança/venda roda numa transação desfeita
+     * num finally (previaDaCobranca/previa).
+     */
+    private function previa(string $proposta, array $rascunho, array $valores): JsonResponse
+    {
+        $tool = $rascunho['tool'];
+
+        if (! $this->aiAgentService->podeExecutar($tool)) {
+            // Sem permissão: só a frase, sem auditar (a negação auditada é a do Revisar/Confirmar de verdade).
+            return response()->json(['tipo' => 'negado', 'categoria' => 'authorization_error', 'codigo' => 'AI_FORBIDDEN', 'http_status' => 403,
+                'mensagem' => 'Seu perfil não permite esta ação.'], 403);
+        }
+
+        try {
+            $revisados = $this->aiAgentService->limparLinhasDoEstorno($tool, $this->aiAgentService->aplicarValores($tool, $rascunho['argumentos'], $valores));
+            $formulario = $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho));
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $erro = $this->aiAgentService->erroTecnicoTool($e);
+
+            return response()->json($erro, $erro['http_status']);
+        }
 
         return response()->json([
-            'tipo' => 'revisada',
+            'tipo' => 'previa',
             'proposta' => $proposta,
-            'token' => $this->pendentes->emitirToken($request->session(), $proposta, $rascunho, $revisados),
+            // R1 (24/11): referência do plano de estorno mostrado; o front a devolve no Confirmar (opcional) para provar que o plano não mudou.
+            ...(($ref = $this->aiAgentService->referenciaDoPlano($tool, $revisados)) === null ? [] : ['plano_ref' => $ref]),
             'risco' => $this->aiAgentService->risco($tool),
             'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados),
-            // Agendar e remarcar: o aviso "já há N agendamentos neste horário" vale para o horário REVISADO, antes do confirmar.
-            ...($refeito !== null && (isset($refeito['itens_estorno']) || isset($refeito['avisos']) || $this->aiAgentService->avisaNoRevisar($tool)) ? ['formulario' => $refeito] : []),
+            'segurar_quando' => $this->aiAgentService->condicaoSegurar($tool),
+            'formulario' => $formulario,
         ]);
+    }
+
+    /**
+     * Confirmar em um passo (23/11, decisão do Lucas, opção B): faz o Revisar e o Confirmar na mesma requisição.
+     * Aplica os valores, confere, congela o estorno COM ESTES valores, confere senha/CRMV/PIN e executa. Recusa de
+     * validação: 422 com o formulário (valores preservados), auditada como revisao_com_erro, e a proposta segue em
+     * rascunho para tentar de novo. A proposta só é "concluída" depois da validação (o duplo clique perde aí: 409); a senha/PIN/CRMV vêm depois, e uma recusa deles encerra a proposta (como no contrato antigo).
+     *
+     * Contrato: { "proposta": "<uuid do /agente/comando>", "valores"?: {...}, "email_admin"?, "senha_admin"? }.
+     */
+    private function confirmarEmUmPasso(Request $request)
+    {
+        $lido = $this->lerRascunho($request);
+
+        if ($lido instanceof JsonResponse) {
+            return $lido;
+        }
+
+        ['proposta' => $proposta, 'rascunho' => $rascunho, 'valores' => $valores] = $lido;
+        $preparo = $this->prepararRevisao($rascunho['tool'], $rascunho, $valores);
+
+        if ($preparo instanceof JsonResponse) {
+            return $preparo;
+        }
+
+        if ($resposta = $this->respostaDaRecusa($request, $proposta, $rascunho, $preparo)) {
+            return $resposta;
+        }
+
+        // R1: com "plano_ref", o plano recalculado (com os valores recebidos) tem de ser o que a prévia mostrou. Sem ele, como antes.
+        $mudou = $this->planoMudou($request, $proposta, $rascunho, $preparo['revisados']);
+
+        return $mudou ?? $this->executarPendente($request, $proposta, ConfirmacoesPendentes::montarRevisada($proposta, $rascunho, $preparo['revisados']));
+    }
+
+    /**
+     * R1: 422 AI_PLAN_CHANGED se o Confirmar trouxe "plano_ref" e o plano de estorno recalculado é outro (ex.: alguém estornou
+     * uma linha depois da prévia). Auditado como revisao_com_erro; nada é gravado e a proposta continua em rascunho (o
+     * rascunho não é tocado). A resposta traz o formulário com o plano NOVO e o plano_ref novo, para a tela mostrar de novo.
+     * Sem plano_ref (ou tool sem plano) devolve null: nada a conferir.
+     */
+    private function planoMudou(Request $request, string $proposta, array $rascunho, array $revisados): ?JsonResponse
+    {
+        $enviada = $request->input('plano_ref');
+        $tool = $rascunho['tool'];
+
+        if ($enviada === null || $enviada === '') {
+            return null;
+        }
+
+        $atual = $this->aiAgentService->referenciaDoPlano($tool, $revisados);
+
+        if ($atual === null || (is_string($enviada) && hash_equals($atual, $enviada))) {
+            return null;
+        }
+
+        $mensagem = 'O plano mudou desde a prévia. Revise de novo.';
+        $this->aiAgentService->auditarDesfecho($tool, ConfirmacoesPendentes::propostos($rascunho), AuditoriaService::REVISAO_COM_ERRO, $mensagem,
+            ConfirmacoesPendentes::origem($rascunho), entidadeId: ConfirmacoesPendentes::entidadeId($rascunho), tempoIaMs: ConfirmacoesPendentes::tempoIa($rascunho));
+
+        return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PLAN_CHANGED', 'http_status' => 422,
+            'mensagem' => $mensagem, 'proposta' => $proposta, 'risco' => $this->aiAgentService->risco($tool),
+            'segurar' => $this->aiAgentService->exigeSegurar($tool, $revisados), 'segurar_quando' => $this->aiAgentService->condicaoSegurar($tool),
+            'plano_ref' => $atual,
+            'formulario' => $this->aiAgentService->formulario($tool, $revisados, [], ConfirmacoesPendentes::loteIds($rascunho))], 422);
     }
 
     /**
      * Executa uma tool após confirmação humana no front.
      *
-     * Contrato: { "token": "<uuid recebido no /agente/revisar>" }. Tool e valores vêm
-     * da proposta revisada na sessão, nunca do corpo (nem "valores" reenviados pelo navegador).
+     * Contrato novo (23/11): { "proposta", "valores"?, "email_admin"?, "senha_admin"? } em um passo (ver confirmarEmUmPasso).
+     * Contrato antigo (dívida técnica, sai depois da entrega): { "token": "<uuid recebido no /agente/revisar>" }. Nele,
+     * tool e valores vêm da proposta revisada na sessão, nunca do corpo (nem "valores" reenviados pelo navegador).
      */
     public function confirmar(Request $request)
     {
+        if (! $request->has('token') && $request->has('proposta')) {
+            return $this->confirmarEmUmPasso($request);
+        }
+
         // Só UUID: um token com ponto navegaria dentro da sessão (N2); array não vira 500 (B4).
         $validador = Validator::make($request->all(), ['token' => 'required|string|uuid']);
 
@@ -274,8 +454,15 @@ class AgenteController extends Controller
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação inválida ou já utilizada.'], 422);
         }
 
-        $proposta = ConfirmacoesPendentes::proposta($token, $pendente);
+        return $this->executarPendente($request, ConfirmacoesPendentes::proposta($token, $pendente), $pendente);
+    }
 
+    /**
+     * A segunda metade do Confirmar, comum aos dois contratos: dá o desfecho único da proposta (o duplo clique perde: 409),
+     * confere prazo, senha de admin / PIN / CRMV e executa com os valores da pendência: no passo único, os do card já revalidados nesta requisição; no {token}, os revisados guardados na sessão.
+     */
+    private function executarPendente(Request $request, string $proposta, array $pendente)
+    {
         if (! $this->pendentes->concluir($proposta)) {
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Esta confirmação já foi usada.'], 409);
         }
@@ -284,7 +471,7 @@ class AgenteController extends Controller
         $this->pendentes->encerrar($request->session(), $proposta);
 
         // Decisão B (13/11): não há espera mínima nem validade de 12 s; só os 5 min absolutos da proposta. O segurar
-        // de 2 s é gesto visual (ações destrutivas); o que o servidor garante é token único e valores da sessão.
+        // de 2 s é gesto visual (ações destrutivas); o que o servidor garante é consumo único, rascunho do dono e valores revalidados aqui (nunca confiados).
         if ($this->pendentes->expirou($pendente)) {
             $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'expirado',
                 'Confirmação recebida fora do prazo. Nada foi gravado.', ConfirmacoesPendentes::origem($pendente),
@@ -361,7 +548,8 @@ class AgenteController extends Controller
     {
         $validador = Validator::make($request->all(), ['token' => 'required|string|uuid']);
         $token = $validador->fails() ? null : $validador->validated()['token'];
-        $pendente = $token === null ? null : $request->session()->get("confirmacoes.{$token}");
+        // R5: só o dono enxerga a pendência (nem o "expirou" vaza a existência do token).
+        $pendente = $token === null ? null : $this->pendentes->doUsuario($request->session(), $token);
 
         // Token já vencido: a proposta expirou. Fica para a varredura (depois desta ação) dar o "expirado";
         // o Editar não pode apagar esse desfecho nem devolver a proposta ao formulário.

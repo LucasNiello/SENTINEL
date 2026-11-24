@@ -242,7 +242,7 @@ class FormularioAgenteTest extends TestCase
     {
         // Papel rebaixado entre propor e revisar: o Revisar nega, e a negação é o desfecho da proposta.
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
-        $this->logarComo('leitura', 1);
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitura'])->save();
         $this->revisar($proposta, ['nome' => 'Loja'])
             ->assertStatus(403)
             ->assertJsonPath('tipo', 'negado');
@@ -252,7 +252,7 @@ class FormularioAgenteTest extends TestCase
         $this->logarComo('operador', 1);
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
         $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
-        $this->logarComo('leitura', 1);
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitura'])->save();
         $this->travel(2)->seconds();
         $this->postJson('/agente/confirmar', ['token' => $token])
             ->assertStatus(403)
