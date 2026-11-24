@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePage } from '@inertiajs/react';
 import Workspace from '../Layouts/Workspace';
 import Farol from '../Components/Farol';
+import Confirmacao from '../Components/Confirmacao';
 
 const errosHttp = {
     403: 'Você não tem permissão para esta operação.',
@@ -87,7 +88,8 @@ export default function Agente({ historico = [] }) {
                     adicionar('A consulta retornou um resultado que ainda não pode ser exibido nesta tela.', 'msg--aviso');
                     break;
                 case 'confirmacao_pendente':
-                    adicionar('A proposta exige revisão e confirmação, ainda indisponíveis nesta tela. Nenhuma gravação foi confirmada.', 'msg--aviso');
+                    if (typeof dados.proposta !== 'string' || !dados.proposta) throw new Error('Proposta inválida. Peça novamente.');
+                    setMensagens((atuais) => [...atuais, { proposta: dados }]);
                     break;
                 default:
                     throw new Error('O servidor retornou uma resposta inválida. Tente novamente.');
@@ -122,7 +124,9 @@ export default function Agente({ historico = [] }) {
                             <h2>Por onde começamos?</h2>
                             <p>Uma pergunta abre caminhos. Uma ação começa pela sua revisão.</p>
                         </div>}
-                        {mensagens.map((mensagem, indice) => <div key={indice} className={`msg ${mensagem.classe}`}>
+                        {mensagens.map((mensagem, indice) => mensagem.proposta
+                            ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} />
+                            : <div key={indice} className={`msg ${mensagem.classe}`}>
                             <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : mensagem.classe === 'msg--erro' ? 'Atenção' : 'Sentinel'}</span>
                             <span>{mensagem.texto}</span>
                         </div>)}
