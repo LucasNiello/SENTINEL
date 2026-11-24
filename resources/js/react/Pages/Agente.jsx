@@ -39,6 +39,37 @@ export default function Agente({ historico = [] }) {
 
     const adicionar = (texto, classe) => setMensagens((atuais) => [...atuais, { texto, classe }]);
 
+    async function abrirFormulario(tool, id) {
+        if (requisicao.current) return;
+        const controller = new AbortController();
+        requisicao.current = controller;
+        interagiu.current = true;
+        setPensando(true);
+        const timeout = setTimeout(() => controller.abort(), 35000);
+        try {
+            const resposta = await fetch('/agente/formulario', {
+                method: 'POST', credentials: 'same-origin', signal: controller.signal,
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '' },
+                body: JSON.stringify({ tool, id }),
+            });
+            if (resposta.status === 401 || resposta.status === 419) { window.location.assign('/login'); return; }
+            const dados = await resposta.json().catch(() => null);
+            if (!montado.current) return;
+            if (!resposta.ok || dados?.tipo !== 'confirmacao_pendente' || typeof dados.proposta !== 'string') {
+                throw new Error(dados?.mensagem || 'Não foi possível abrir o formulário. Tente novamente.');
+            }
+            setMensagens((atuais) => [...atuais, { proposta: dados }]);
+        } catch (erro) {
+            if (montado.current) adicionar(erro.name === 'AbortError' || erro instanceof TypeError
+                ? 'Falha ao abrir o formulário. Tente novamente.' : erro.message, 'msg--erro');
+        } finally {
+            clearTimeout(timeout);
+            requisicao.current = null;
+            if (montado.current) setPensando(false);
+        }
+    }
+
     async function enviar(evento) {
         evento.preventDefault();
         const mensagem = texto.trim();
@@ -85,7 +116,14 @@ export default function Agente({ historico = [] }) {
                 case 'negado':
                     throw new Error(typeof dados.mensagem === 'string' ? dados.mensagem : 'Não foi possível processar o pedido.');
                 case 'resultado_leitura':
-                    adicionar('A consulta retornou um resultado que ainda não pode ser exibido nesta tela.', 'msg--aviso');
+                    {
+                        const formularios = (Array.isArray(dados.resultado) ? dados.resultado : [])
+                            .filter((linha) => linha && (linha.acao?.tool || dados.editar) && linha.id)
+                            .map((linha) => ({ id: linha.id, tool: linha.acao?.tool || dados.editar,
+                                rotulo: linha.acao?.rotulo || 'Editar', descricao: linha.nome || linha.descricao || `Registro #${linha.id}` }));
+                        if (formularios.length) setMensagens((atuais) => [...atuais, { formularios }]);
+                        else adicionar('A consulta retornou um resultado que ainda não pode ser exibido nesta tela.', 'msg--aviso');
+                    }
                     break;
                 case 'confirmacao_pendente':
                     if (typeof dados.proposta !== 'string' || !dados.proposta) throw new Error('Proposta inválida. Peça novamente.');
@@ -126,6 +164,14 @@ export default function Agente({ historico = [] }) {
                         </div>}
                         {mensagens.map((mensagem, indice) => mensagem.proposta
                             ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} />
+                            : mensagem.formularios ? <div key={indice} className="msg msg--agente">
+                                <span className="msg__speaker">Sentinel</span>
+                                <p>Registros disponíveis para formulário:</p>
+                                {mensagem.formularios.map((item, i) => <div key={i} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                                    <p>{item.descricao} · #{item.id}</p>
+                                    <button type="button" className="btn-editar-linha" disabled={pensando} onClick={() => abrirFormulario(item.tool, item.id)}>{item.rotulo} registro #{item.id}</button>
+                                </div>)}
+                            </div>
                             : <div key={indice} className={`msg ${mensagem.classe}`}>
                             <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : mensagem.classe === 'msg--erro' ? 'Atenção' : 'Sentinel'}</span>
                             <span>{mensagem.texto}</span>

@@ -58,4 +58,27 @@ class ChatReactConfirmacaoTest extends TestCase
         $this->postJson('/agente/cancelar', ['proposta' => $proposta])->assertOk()->assertJsonPath('tipo', 'cancelado');
         $this->assertDatabaseCount('clientes', 0);
     }
+
+    public function test_formulario_editado_exige_novo_token_e_preserva_documento_mascarado(): void
+    {
+        $cliente = Cliente::create(['nome' => 'Original', 'documento' => '123.456.789-01', 'tenant_id' => 1]);
+        $formulario = $this->postJson('/agente/formulario', ['tool' => 'atualizar_cliente', 'id' => $cliente->id])
+            ->assertOk()->assertJsonPath('tipo', 'confirmacao_pendente');
+        $proposta = $formulario->json('proposta');
+        $this->assertStringNotContainsString('123.456.789-01', $formulario->getContent());
+        $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => ['nome' => '', 'email' => 'invalido']])
+            ->assertStatus(422)->assertJsonMissingPath('token');
+        $token = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => ['nome' => 'Primeira revisão', 'email' => 'qa@example.test']])
+            ->assertOk()->json('token');
+        $this->assertSame('Original', $cliente->fresh()->nome);
+        $this->postJson('/agente/editar', ['token' => $token])->assertOk()->assertJsonPath('tipo', 'rascunho');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
+        $novoToken = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => ['nome' => 'Nome editado', 'email' => 'qa@example.test']])
+            ->assertOk()->json('token');
+        $this->assertNotSame($token, $novoToken);
+        $this->postJson('/agente/confirmar', ['token' => $novoToken])->assertOk()->assertJsonPath('tipo', 'resultado_escrita');
+        $this->assertSame('Nome editado', $cliente->fresh()->nome);
+        $this->assertSame('123.456.789-01', $cliente->fresh()->documento);
+        $this->assertSame('qa@example.test', $cliente->fresh()->email);
+    }
 }
