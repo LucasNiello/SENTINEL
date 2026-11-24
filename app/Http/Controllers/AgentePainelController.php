@@ -6,6 +6,8 @@ use App\Models\Agendamento;
 use App\Models\AuditLog;
 use App\Models\Cobranca;
 use App\Models\Mensagem;
+use App\Models\Pet;
+use App\Models\Tutor;
 use App\Services\AiAgentService;
 use App\Services\ContextoUsuario;
 use Carbon\CarbonImmutable;
@@ -13,7 +15,7 @@ use Illuminate\Http\JsonResponse;
 
 /**
  * Painel lateral do /agente (24/11): só leitura. "Pendentes agora" conta o que está em aberto no negócio (cobranças, mensagens
- * novas, agenda de hoje) e "Recentes" lista as últimas ações do PRÓPRIO usuário em audit_logs. Tudo sai do papel, do tenant e
+ * novas, agenda de hoje) e "Atividade" resume as ações do PRÓPRIO usuário em audit_logs. Tudo sai do papel, do tenant e
  * do usuário do ContextoUsuario, nunca da requisição. Cada contagem só aparece se o papel pode usar a tool de leitura da
  * tela correspondente (a mesma regra de /cobrancas e /agenda); sem permissão, o item simplesmente não existe. Nada de
  * payload, parâmetros, mensagem de auditoria nem dado de tutor: só rótulo da ação, resultado e horário.
@@ -21,9 +23,14 @@ use Illuminate\Http\JsonResponse;
  */
 class AgentePainelController extends Controller
 {
-    private const RECENTES = 10;
+    private const JANELA = 50;
 
-    private const RESULTADOS = ['sucesso' => 'Concluída', 'negado' => 'Negada', 'revisao_com_erro' => 'Revisão com erro', 'erro' => 'Com erro'];
+    private const COM_EFEITO = 5;
+
+    private const SEM_EFEITO = 8;
+
+    private const RESULTADOS = ['sucesso' => 'Concluída', 'negado' => 'Negada', 'revisao_com_erro' => 'Revisão com erro', 'erro' => 'Com erro',
+        'expirado' => 'Expirado', 'cancelado' => 'Cancelado', 'recusado' => 'Recusado'];
 
     public function __construct(private AiAgentService $agente, private ContextoUsuario $contexto)
     {
@@ -35,7 +42,7 @@ class AgentePainelController extends Controller
         abort_if($this->contexto->ehAdminDaClinica(), 403);
         $tenant = $this->contexto->tenantId();
 
-        return response()->json(['pendentes' => $this->pendentes($tenant), 'recentes' => $this->recentes($tenant)]);
+        return response()->json(['pendentes' => $this->pendentes($tenant), 'atividade' => $this->atividade($tenant)]);
     }
 
     /** @return list<array{chave:string,rotulo:string,total:int,href?:string,pedido?:string}> */
@@ -65,20 +72,77 @@ class AgentePainelController extends Controller
         return $itens;
     }
 
-    /** @return list<array{acao:string,resultado:string,quando:string}> */
-    private function recentes(int $tenant): array
+    /**
+     * Atividade do PRÓPRIO usuário (janela das últimas JANELA linhas de audit_logs, sem leituras). Repetições viram uma
+     * linha com quantidade; só o que teve efeito (resultado "sucesso") fica à vista, no máximo COM_EFEITO linhas; o resto
+     * é contado em "sem_efeito" (total de tentativas) e listado, agrupado, para o painel mostrar recolhido.
+     *
+     * @return array{com_efeito:list<array<string,mixed>>,sem_efeito:array{total:int,itens:list<array<string,mixed>>}}
+     */
+    private function atividade(int $tenant): array
     {
-        return AuditLog::query()
+        $linhas = AuditLog::query()
             ->where('tenant_id', $tenant)
             ->where('user_id', $this->contexto->usuario()->id)
-            ->where('acao', '!=', 'consultar')
+            ->whereNotIn('acao', ['consultar', 'exportar'])
             ->latest('id')
-            ->limit(self::RECENTES)
-            ->get(['tool', 'resultado', 'created_at'])
-            ->map(fn (AuditLog $l) => [
+            ->limit(self::JANELA)
+            ->get(['tool', 'acao', 'entidade_tipo', 'entidade_id', 'resultado', 'created_at']);
+
+        $abrem = $this->registrosQueAbrem($tenant, $linhas);
+        $grupos = ['efeito' => [], 'sem' => []];
+        $totalSemEfeito = 0;
+
+        foreach ($linhas as $l) {
+            $efeito = $l->resultado === 'sucesso';
+            $href = $efeito ? ($abrem[$l->entidade_tipo.':'.$l->entidade_id] ?? null) : null;
+            // Mesma tool, mesmo resultado e (no sucesso) o mesmo registro: uma linha só, com a hora da mais recente.
+            $chave = $l->tool.'|'.$l->resultado.'|'.($efeito ? $l->entidade_id : '');
+            $g = $efeito ? 'efeito' : 'sem';
+            $totalSemEfeito += $efeito ? 0 : 1;
+
+            if (isset($grupos[$g][$chave])) {
+                $grupos[$g][$chave]['quantidade']++;
+                continue;
+            }
+            $grupos[$g][$chave] = [
                 'acao' => $this->agente->tituloDaTool((string) $l->tool) ?? 'Ação registrada',
-                'resultado' => self::RESULTADOS[$l->resultado] ?? ucfirst(str_replace('_', ' ', (string) $l->resultado)),
+                'resultado' => self::RESULTADOS[$l->resultado] ?? 'Registrada',
+                'quantidade' => 1,
                 'quando' => $l->created_at?->toIso8601String() ?? '',
-            ])->all();
+                ...($href !== null ? ['href' => $href] : []),
+            ];
+        }
+
+        return [
+            'com_efeito' => array_slice(array_values($grupos['efeito']), 0, self::COM_EFEITO),
+            'sem_efeito' => ['total' => $totalSemEfeito, 'itens' => array_slice(array_values($grupos['sem']), 0, self::SEM_EFEITO)],
+        ];
+    }
+
+    /**
+     * Fichas que o item pode abrir: só tutor e pet (as únicas telas por registro), em criar/atualizar com sucesso, para quem
+     * pode consultá-los, e só se o registro AINDA existe neste tenant (excluído, de outro tenant ou inexistente: sem link).
+     *
+     * @param  \Illuminate\Support\Collection<int, AuditLog>  $linhas
+     * @return array<string, string> "Entidade:id" => href
+     */
+    private function registrosQueAbrem(int $tenant, $linhas): array
+    {
+        $fichas = ['Tutor' => ['/tutores/', Tutor::class, 'consultar_tutores'], 'Pet' => ['/pets/', Pet::class, 'consultar_pets']];
+        $abrem = [];
+
+        foreach ($fichas as $tipo => [$prefixo, $modelo, $tool]) {
+            $ids = $linhas->filter(fn (AuditLog $l) => $l->resultado === 'sucesso' && in_array($l->acao, ['criar', 'atualizar'], true)
+                && $l->entidade_tipo === $tipo && $l->entidade_id !== null)->pluck('entidade_id')->unique()->all();
+            if ($ids === [] || ! $this->agente->podeExecutar($tool)) {
+                continue;
+            }
+            foreach ($modelo::query()->where('tenant_id', $tenant)->whereIn('id', $ids)->pluck('id') as $id) {
+                $abrem[$tipo.':'.$id] = $prefixo.$id;
+            }
+        }
+
+        return $abrem;
     }
 }

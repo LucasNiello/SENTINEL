@@ -89,27 +89,30 @@ class AgentePainelTest extends TestCase
         $resposta = $this->getJson('/agente/painel')->assertOk();
 
         $this->assertSame(['cobrancas' => 0, 'mensagens' => 0, 'agenda' => 0], array_column($resposta->json('pendentes'), 'total', 'chave'));
-        $this->assertSame([], $resposta->json('recentes'));
+        $this->assertSame(['com_efeito' => [], 'sem_efeito' => ['total' => 0, 'itens' => []]], $resposta->json('atividade'));
     }
 
-    public function test_recentes_sao_so_do_proprio_usuario_sem_consultas_e_sem_payload(): void
+    public function test_atividade_e_so_do_proprio_usuario_sem_consultas_e_sem_payload(): void
     {
         $eu = $this->logarComo('recepcao', self::T);
         $outro = $this->usuarioClinica('recepcao');
         $this->log(self::T, $eu->id, 'criar_tutor', 'criar');
         $this->log(self::T, $eu->id, 'consultar_agenda', 'consultar');        // leitura: fica de fora
+        $this->log(self::T, $eu->id, 'consultar_tutores', 'exportar');        // exportação (CSV): também não é ação
         $this->log(self::T, $outro->id, 'criar_pet', 'criar');                // de outro usuário do mesmo tenant
         $this->log(self::OUTRO_TENANT, $eu->id, 'criar_pet', 'criar');        // mesmo user_id, outro tenant
         $this->log(self::T, $eu->id, 'agendar_atendimento', 'criar', 'negado');
 
         $resposta = $this->getJson('/agente/painel')->assertOk();
-
         $titulos = app(AiAgentService::class);
-        $this->assertSame([$titulos->tituloDaTool('agendar_atendimento'), $titulos->tituloDaTool('criar_tutor')], array_column($resposta->json('recentes'), 'acao'));
-        $this->assertStringNotContainsString('_', implode('', array_column($resposta->json('recentes'), 'acao')), 'nunca o identificador interno da tool');
-        $this->assertSame(['Negada', 'Concluída'], array_column($resposta->json('recentes'), 'resultado'));
-        foreach ($resposta->json('recentes') as $linha) {
-            $this->assertEqualsCanonicalizing(['acao', 'quando', 'resultado'], array_keys($linha));
+
+        $this->assertSame([$titulos->tituloDaTool('criar_tutor')], array_column($resposta->json('atividade.com_efeito'), 'acao'));
+        $this->assertSame(1, $resposta->json('atividade.sem_efeito.total'));
+        $this->assertSame([$titulos->tituloDaTool('agendar_atendimento')], array_column($resposta->json('atividade.sem_efeito.itens'), 'acao'));
+        $this->assertSame(['Negada'], array_column($resposta->json('atividade.sem_efeito.itens'), 'resultado'));
+        $this->assertStringNotContainsString('_', implode('', array_column($resposta->json('atividade.com_efeito'), 'acao')), 'nunca o identificador interno da tool');
+        foreach ([...$resposta->json('atividade.com_efeito'), ...$resposta->json('atividade.sem_efeito.itens')] as $linha) {
+            $this->assertEqualsCanonicalizing(['acao', 'quando', 'resultado', 'quantidade'], array_keys($linha));
         }
         $texto = $resposta->getContent();
         $this->assertStringNotContainsString('segredo do tutor', $texto);
@@ -117,14 +120,109 @@ class AgentePainelTest extends TestCase
         $this->assertStringNotContainsString('123.456', $texto);
     }
 
-    public function test_recentes_tem_teto_de_dez(): void
+    public function test_atividade_agrupa_repeticoes_e_so_mostra_o_que_teve_efeito_com_teto_de_cinco(): void
     {
         $eu = $this->logarComo('dono', self::T);
-        for ($i = 0; $i < 14; $i++) {
-            $this->log(self::T, $eu->id, 'criar_tutor', 'criar');
+        for ($i = 0; $i < 3; $i++) {
+            $this->log(self::T, $eu->id, 'agendar_atendimento', 'criar', 'expirado');
         }
+        $this->log(self::T, $eu->id, 'agendar_atendimento', 'criar', 'cancelado');
+        foreach (['criar_tutor', 'criar_pet', 'agendar_atendimento', 'registrar_venda', 'cobrar_atendimento', 'receber_cobranca', 'registrar_encaixe_emergencia'] as $tool) {
+            $this->log(self::T, $eu->id, $tool, 'criar');
+        }
+        $this->log(self::T, $eu->id, 'registrar_encaixe_emergencia', 'criar'); // repetição do sucesso: ×2, a mais recente
 
-        $this->assertCount(10, $this->getJson('/agente/painel')->json('recentes'));
+        $atividade = $this->getJson('/agente/painel')->assertOk()->json('atividade');
+
+        $this->assertCount(5, $atividade['com_efeito']);
+        $this->assertSame(2, $atividade['com_efeito'][0]['quantidade']);
+        $this->assertSame(['Concluída'], array_values(array_unique(array_column($atividade['com_efeito'], 'resultado'))));
+        $this->assertSame(4, $atividade['sem_efeito']['total']);
+        // Mais recente primeiro: o cancelado foi gravado depois dos três expirados.
+        $this->assertSame([['Cancelado', 1], ['Expirado', 3]],array_map(fn ($i) => [$i['resultado'], $i['quantidade']], $atividade['sem_efeito']['itens']));
+    }
+
+    private function logSucesso(int $user, string $tool, string $acao, string $tipo, int $id, string $papel = 'recepcao'): void
+    {
+        AuditLog::create(['user_id' => $user, 'tool' => $tool, 'acao' => $acao, 'entidade_tipo' => $tipo, 'entidade_id' => $id,
+            'parametros' => [], 'resultado' => 'sucesso', 'papel' => $papel, 'permitido' => true, 'tenant_id' => self::T]);
+    }
+
+    public function test_atividade_so_abre_ficha_de_tutor_e_pet_que_ainda_existem_no_tenant(): void
+    {
+        $eu = $this->logarComo('recepcao', self::T);
+        $tutor = $this->tutor();
+        $pet = $this->pet($tutor);
+        $excluido = $this->pet($tutor);
+        $excluido->delete();
+        $alheio = $this->pet($this->tutor(self::OUTRO_TENANT), self::OUTRO_TENANT);
+        $this->logSucesso($eu->id, 'criar_tutor', 'criar', 'Tutor', $tutor->id);
+        $this->logSucesso($eu->id, 'atualizar_pet', 'atualizar', 'Pet', $pet->id);
+        $this->logSucesso($eu->id, 'criar_pet', 'criar', 'Pet', $excluido->id);
+        $this->logSucesso($eu->id, 'agendar_atendimento', 'criar', 'Pet', $alheio->id); // id de outro tenant gravado no log
+
+        $itens = $this->getJson('/agente/painel')->assertOk()->json('atividade.com_efeito');
+
+        $this->assertEqualsCanonicalizing(['/tutores/'.$tutor->id, '/pets/'.$pet->id], array_column($itens, 'href'), 'excluído e de outro tenant não ganham link');
+        $this->assertCount(4, $itens, 'o item sem link continua na lista, só não abre');
+        $this->get('/pets/'.$pet->id)->assertOk();
+    }
+
+    public function test_atividade_nao_abre_ficha_onde_a_tool_de_consulta_nao_existe(): void
+    {
+        // Fora da clínica (tenant 1) não há consultar_tutores: mesmo com o registro existindo, o item não ganha link.
+        $eu = $this->logarComo('admin', 1);
+        $tutor = $this->tutor(1);
+        AuditLog::create(['user_id' => $eu->id, 'tool' => 'criar_tutor', 'acao' => 'criar', 'entidade_tipo' => 'Tutor', 'entidade_id' => $tutor->id,
+            'parametros' => [], 'resultado' => 'sucesso', 'papel' => 'admin', 'permitido' => true, 'tenant_id' => 1]);
+
+        $item = $this->getJson('/agente/painel')->assertOk()->json('atividade.com_efeito.0');
+
+        $this->assertNotNull($item);
+        $this->assertArrayNotHasKey('href', $item);
+    }
+
+    public function test_atividade_nao_abre_registro_de_acao_de_exclusao(): void
+    {
+        $eu = $this->logarComo('dono', self::T);
+        $this->logSucesso($eu->id, 'excluir_tutor', 'excluir', 'Tutor', $this->tutor()->id, 'dono');
+
+        $this->assertArrayNotHasKey('href', $this->getJson('/agente/painel')->assertOk()->json('atividade.com_efeito.0'));
+    }
+
+    public function test_sem_atividade_a_lista_fica_vazia_e_sem_tentativas(): void
+    {
+        $this->logarComo('dono', self::T);
+
+        $this->assertSame(['com_efeito' => [], 'sem_efeito' => ['total' => 0, 'itens' => []]], $this->getJson('/agente/painel')->json('atividade'));
+    }
+
+    /**
+     * Condição do Lucas para o clique virar pedido ao chat: o que a tool devolve tem que bater com o contador. Mensagens
+     * bate (a tool filtra status 'nova', o mesmo do contador). Cobranças e agenda NÃO batem (o contador soma aberta+fechada e
+     * a tool filtra um status só; a agenda do contador é só o dia, só agendado/confirmado): ficam com o link e sem `pedido`.
+     */
+    public function test_contador_de_mensagens_bate_com_a_tool_e_so_ela_envia_pedido(): void
+    {
+        $this->logarComo('dono', self::T);
+        $tutor = $this->tutor();
+        foreach (['nova', 'nova', 'tratada'] as $status) {
+            Mensagem::create(['tutor_id' => $tutor->id, 'remetente' => 'tutor', 'texto' => 'oi', 'status' => $status, 'tenant_id' => self::T]);
+        }
+        $ag = $this->agendamentoDoDia(self::T, '2026-11-10 14:00');
+        $this->cobranca(self::T, 'aberta', $ag);
+        $this->cobranca(self::T, 'fechada', $ag);
+
+        $pendentes = collect($this->getJson('/agente/painel')->assertOk()->json('pendentes'))->keyBy('chave');
+
+        $this->assertSame(app(\App\Services\MensagemService::class)->buscarPorFiltro('nova', self::T)->count(), $pendentes['mensagens']['total']);
+        $this->assertStringContainsString('novas', $pendentes['mensagens']['pedido']);
+
+        $this->assertNotSame($pendentes['cobrancas']['total'], app(\App\Services\CobrancaService::class)->buscarPorFiltro('fechada', null, self::T)->count(), 'a tool não soma aberta+fechada');
+        $this->assertSame('/cobrancas', $pendentes['cobrancas']['href']);
+        $this->assertArrayNotHasKey('pedido', $pendentes['cobrancas']);
+        $this->assertSame('/agenda', $pendentes['agenda']['href']);
+        $this->assertArrayNotHasKey('pedido', $pendentes['agenda']);
     }
 
     public function test_agenda_conta_agendado_e_confirmado_e_nao_conta_realizado_nem_faltou(): void
@@ -177,7 +275,7 @@ class AgentePainelTest extends TestCase
 
         $resposta = $this->getJson('/agente/painel')->assertOk();
         $this->assertSame([], $resposta->json('pendentes'));
-        $this->assertSame([app(AiAgentService::class)->tituloDaTool('criar_cliente')], array_column($resposta->json('recentes'), 'acao'));
+        $this->assertSame([app(AiAgentService::class)->tituloDaTool('criar_cliente')], array_column($resposta->json('atividade.com_efeito'), 'acao'));
     }
 
     public function test_so_responde_a_get(): void
