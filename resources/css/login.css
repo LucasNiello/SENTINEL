@@ -82,3 +82,5 @@
 .revelacao[data-fase=abrir] .revelacao-cima{animation:revelacao-cima 400ms cubic-bezier(.76,0,.24,1) forwards}.revelacao[data-fase=abrir] .revelacao-baixo{animation:revelacao-baixo 400ms cubic-bezier(.76,0,.24,1) forwards}
 @keyframes revelacao-cima{to{transform:translate3d(0,-100%,0)}}@keyframes revelacao-baixo{to{transform:translate3d(0,100%,0)}}@keyframes revelacao-seguranca{to{visibility:hidden}}
 @media(prefers-reduced-motion:reduce){.revelacao{display:none}}
+/* Volta de um POST com erro de validação: a página já foi vista, a cortina não repete. */
+html.sem-cortina .revelacao{display:none}

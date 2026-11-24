@@ -13,7 +13,7 @@
     <section class="agent-workspace" aria-label="Conversa com o Sentinel">
 
     <header class="deck-header"><div><span class="eyebrow">SENTINEL AGENT</span><p>Consulta e operações assistidas</p></div><span class="deck-badge">REVISÃO HUMANA</span></header>
-    <div id="historico" aria-live="polite">
+    <div id="historico" aria-live="polite" tabindex="0">
         <div class="agent-empty">
             <p class="eyebrow">SEU PRÓXIMO MOVIMENTO</p>
             <h2>Por onde começamos?</h2>
@@ -39,6 +39,9 @@
             </div>
         </div>
     </div>
+
+    {{-- Fora do #historico (o observador de rolagem só olha os filhos dele); altura 0, o botão flutua sobre o fim da conversa. --}}
+    <div class="novas-wrap"><button type="button" id="novas-mensagens" hidden aria-label="Novas mensagens abaixo. Ir para elas"><span aria-hidden="true">↓</span> Novas mensagens</button></div>
 
     <div id="carregando" class="carregando" hidden>
         <span>Consultando…</span>
@@ -166,5 +169,89 @@
                 if (!document.activeElement.closest('.card-confirmacao')) campoMensagem.focus();
             }
         });
+
+        // Rolagem da conversa (23/11): só o #historico rola; a barra de digitação fica sempre à vista.
+        //  - mensagem do usuário: vai ao fim;
+        //  - resposta ou card novo: vai ao INÍCIO do elemento novo (o título "Ação proposta" não é cortado);
+        //  - se a pessoa rolou para cima de propósito, não puxa de volta: mostra "↓ Novas mensagens".
+        // O observador olha só os filhos diretos (childList, sem subtree): o card que se atualiza por dentro não rola nada.
+        (() => {
+            const botaoNovas = document.getElementById('novas-mensagens');
+            const MARGEM_FIM_PX = 48;
+            let subiu = false;        // a pessoa rolou para cima por conta própria
+            let ultimoTopo = 0;
+            let ultimaAltura = 0;
+            let primeiroNaoLido = null;
+
+            // Sempre instantânea (23/11, Lucas): bancada sem movimento (skill sentinel-visual §1/§8).
+            const comportamento = () => 'auto';
+            const distanciaDoFim = () => historico.scrollHeight - historico.scrollTop - historico.clientHeight;
+            const memorizar = () => { ultimoTopo = historico.scrollTop; ultimaAltura = historico.scrollHeight; };
+
+            function esconderBotao() {
+                botaoNovas.hidden = true;
+                primeiroNaoLido = null;
+            }
+
+            function rolarAoFim() {
+                historico.scrollTo({ top: historico.scrollHeight, behavior: comportamento() });
+            }
+
+            function rolarAoInicioDe(elemento) {
+                const recuo = parseFloat(getComputedStyle(historico).paddingTop) || 0;
+                const topo = elemento.getBoundingClientRect().top - historico.getBoundingClientRect().top + historico.scrollTop - recuo;
+                historico.scrollTo({ top: Math.max(0, topo), behavior: comportamento() });
+            }
+
+            historico.addEventListener('scroll', () => {
+                const topo = historico.scrollTop;
+                // Conteúdo que encolheu (card fechado) também faz o topo baixar; isso não é a pessoa rolando para cima.
+                const encolheu = historico.scrollHeight < ultimaAltura;
+                if (!encolheu && topo < ultimoTopo - 1) subiu = true;
+                if (distanciaDoFim() <= MARGEM_FIM_PX) {
+                    subiu = false;
+                    esconderBotao();
+                }
+                memorizar();
+            }, { passive: true });
+
+            botaoNovas.addEventListener('click', () => {
+                const alvo = primeiroNaoLido;
+                subiu = false;
+                esconderBotao();
+                if (alvo && alvo.isConnected) rolarAoInicioDe(alvo); else rolarAoFim();
+                campoMensagem.focus({ preventScroll: true });
+            });
+
+            new MutationObserver((registros) => {
+                const novos = [];
+                for (const registro of registros) {
+                    for (const no of registro.addedNodes) if (no.nodeType === 1) novos.push(no);
+                }
+                if (novos.length) {
+                    const card = novos.find((no) => no.classList.contains('card-confirmacao'));
+                    if (novos.some((no) => no.classList.contains('msg--usuario'))) {
+                        subiu = false;
+                        esconderBotao();
+                        rolarAoFim();
+                    } else if (card) {
+                        // O card nasce de uma ação da própria pessoa (Editar, Novo, resposta ao pedido): sempre vai à vista.
+                        subiu = false;
+                        esconderBotao();
+                        rolarAoInicioDe(card);
+                    } else if (!subiu) {
+                        rolarAoInicioDe(novos[0]);
+                    } else {
+                        if (!primeiroNaoLido) primeiroNaoLido = novos[0];
+                        botaoNovas.hidden = false;
+                    }
+                }
+                memorizar();
+            }).observe(historico, { childList: true });
+
+            // "Recarregar abre no fim": a conversa não é restaurada, então basta começar rolado ao fim.
+            historico.scrollTop = historico.scrollHeight;
+            memorizar();
+        })();
     </script>
 @endsection

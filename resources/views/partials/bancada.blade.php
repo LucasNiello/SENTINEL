@@ -830,7 +830,9 @@
             // O alvo precisa estar no DOM para receber foco. Assim quem abre
             // Novo/Editar por teclado entra no formulário, sem voltar à tabela.
             const primeiroCampo = form.querySelector('input:not([type="hidden"]), select');
-            (primeiroCampo || btnRevisar).focus();
+            // No /agente (conversa com rolagem própria) quem leva o card à vista é a rolagem do histórico; nas outras telas
+            // não há essa rolagem, então o foco continua rolando a página até o card.
+            (primeiroCampo || btnRevisar).focus({ preventScroll: !!document.querySelector('.agent-workspace') });
 
             const pequeno = document.createElement('span');
             pequeno.className = 'pequeno';

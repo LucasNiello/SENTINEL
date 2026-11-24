@@ -62,6 +62,17 @@ Domínio clínica (aplicar quando o bloco tocar a clínica/petshop):
 17. Ler o log de decisões da sessão (`.claude/decisoes/`) e apontar decisão
     que contradiga a Documentação 1.2 ou o CLAUDE.md.
 
+# ESCOPO E ECONOMIA (23/11)
+- Leia só os arquivos listados no pedido e o que eles chamam diretamente; se
+  o pedido não trouxer a lista, devolva "informe os arquivos tocados" em vez
+  de explorar o projeto.
+- Aplique só os itens do checklist indicados no pedido.
+- Use Grep antes de Read. Não leia .docx.
+- Item 17: leia só o fim do log do dia (últimas 60 linhas).
+- Segunda passada: só as correções feitas depois da primeira, não o bloco
+  inteiro.
+- Relatório com no máximo 40 linhas.
+
 # FORMATO DO RELATÓRIO
 Liste os achados por severidade (bloqueador / importante / cosmético), cada um
 com: onde está, o que falta, e o cenário concreto que quebra (não descrição
