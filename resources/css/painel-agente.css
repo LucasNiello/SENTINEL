@@ -14,6 +14,8 @@
 .painel-agente__item {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:44px;padding:8px 12px;border:0;border-radius:8px;background:transparent;color:var(--sentinel-ink);font:15px var(--fonte-corpo);text-align:left;text-decoration:none}
 .painel-agente__item:hover,.painel-agente__item:focus-visible {background:var(--sentinel-cream-alt)}
 .painel-agente__item:focus-visible {outline-offset:-2px}
+.painel-agente__rotulo {display:grid;gap:2px;min-width:0}
+.painel-agente__rotulo small {font:12px var(--fonte-mono);color:var(--sentinel-ink-muted);overflow-wrap:anywhere}
 .painel-agente__total {font:15px var(--fonte-mono);font-variant-numeric:tabular-nums;color:var(--sentinel-blue)}
 .painel-agente__total--zero {color:var(--sentinel-ink-muted)}
 .painel-agente__aviso {margin:8px 0 0;padding:8px 12px;border-radius:8px;background:var(--color-aviso-faixa);color:var(--color-aviso);font-size:15px}

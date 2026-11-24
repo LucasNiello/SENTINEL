@@ -86,7 +86,7 @@ class AgendaService
 
             ['servico' => $servico, 'inicio' => $inicio, 'fim' => $fim, 'origem' => $origem] = $this->conferir($dados, $tenantId, $autorizacao);
 
-            return Agendamento::create([
+            $agendamento = Agendamento::create([
                 'pet_id' => (int) $dados['pet_id'],
                 'profissional_id' => (int) $dados['profissional_id'],
                 'setor' => $servico->setor,
@@ -97,7 +97,21 @@ class AgendaService
                 'origem' => $origem,
                 'tenant_id' => $tenantId,
             ]);
+            $this->avisarDepoisDoCommit($agendamento, 'criado');
+
+            return $agendamento;
         });
+    }
+
+    /**
+     * 24/11: e-mail ao tutor (criado, confirmado, cancelado) só DEPOIS do commit mais externo (o do agente, inclusive): se a
+     * transação desfaz, nada sai. A falha do e-mail nunca chega aqui (a NotificacaoDeAgendamento a engole).
+     */
+    private function avisarDepoisDoCommit(Agendamento $agendamento, string $evento): void
+    {
+        $id = (int) $agendamento->id;
+        $tenantId = (int) $agendamento->tenant_id;
+        DB::afterCommit(fn () => app(NotificacaoDeAgendamento::class)->avisar($id, $tenantId, $evento));
     }
 
     /** Só leitura (para o Revisar, antes do Confirmar): a frase do motivo de recusa, ou null. */
@@ -126,6 +140,9 @@ class AgendaService
             $this->conferirStatus($agendamento, $novoStatus);
 
             $agendamento->update(['status' => $novoStatus]);
+            if (in_array($novoStatus, ['confirmado', 'cancelado'], true)) {
+                $this->avisarDepoisDoCommit($agendamento, $novoStatus);
+            }
 
             return $agendamento;
         });

@@ -28,6 +28,7 @@
         const botao = document.getElementById('painel-alternar');
         const botaoFechar = document.getElementById('painel-fechar');
         const listaPendentes = document.getElementById('painel-pendentes');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
         const aviso = document.getElementById('painel-aviso');
         const listaAtividade = document.getElementById('painel-atividade');
         const blocoSemEfeito = document.getElementById('painel-sem-efeito');
@@ -83,13 +84,22 @@
             if (!zero && p.href) alvo.href = p.href; else if (!zero) alvo.type = 'button';
             alvo.className = 'painel-agente__item' + (zero ? ' painel-agente__item--zero' : '');
             const rotulo = document.createElement('span');
+            rotulo.className = 'painel-agente__rotulo';
             rotulo.textContent = p.rotulo;
+            // De onde vêm (ex.: o e-mail de contato da clínica): sem isso "Mensagens novas" parece uma caixa sem dono.
+            if (typeof p.origem === 'string' && p.origem !== '') {
+                const origem = document.createElement('small');
+                origem.textContent = p.origem;
+                rotulo.appendChild(origem);
+            }
             const total = document.createElement('span');
             total.className = 'painel-agente__total' + (zero ? ' painel-agente__total--zero' : '');
             total.textContent = String(p.total);
             alvo.append(rotulo, total);
             if (!zero && p.pedido) {
-                alvo.addEventListener('click', () => {
+                alvo.addEventListener('click', async () => {
+                    // Mensagens: traz o que chegou ao e-mail de contato antes de pedir, para a tabela vir atualizada.
+                    if (p.chave === 'mensagens') await importarCaixa();
                     const motivo = typeof window.pedirAoAgente === 'function' ? window.pedirAoAgente(p.pedido, true) : 'Chat indisponível.';
                     // Não enviou: o motivo fica à vista no painel (não some calado) e a gaveta continua aberta.
                     aviso.textContent = '';
@@ -143,10 +153,19 @@
             listaSemEfeito.replaceChildren(...semEfeito.itens.map(itemAtividade));
         }
 
+        // POST (grava mensagens novas vindas do Mailpit). Melhor esforço: o servidor tem trava de ~10 s e nunca falha por causa
+        // do Mailpit; aqui, qualquer erro é ignorado e o painel segue com o que já existe.
+        async function importarCaixa() {
+            try {
+                await fetch('/agente/caixa/importar', { method: 'POST', headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken }, credentials: 'same-origin' });
+            } catch (e) { /* sem rede: só não importa agora */ }
+        }
+
         async function carregar() {
             if (carregando) return;
             carregando = true;
             try {
+                await importarCaixa();
                 const resp = await fetch('/agente/painel', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' });
                 if (resp.status === 401 || resp.status === 419) { window.location.href = '/login'; return; }
                 if (!resp.ok) throw new Error('http ' + resp.status);

@@ -9,9 +9,11 @@ use App\Models\Mensagem;
 use App\Models\Pet;
 use App\Models\Tutor;
 use App\Services\AiAgentService;
+use App\Services\CaixaDeEntrada;
 use App\Services\ContextoUsuario;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Painel lateral do /agente (24/11): só leitura. "Pendentes agora" conta o que está em aberto no negócio (cobranças, mensagens
@@ -45,7 +47,26 @@ class AgentePainelController extends Controller
         return response()->json(['pendentes' => $this->pendentes($tenant), 'atividade' => $this->atividade($tenant)]);
     }
 
-    /** @return list<array{chave:string,rotulo:string,total:int,href?:string,pedido?:string}> */
+    /**
+     * POST (tem efeito colateral: grava mensagens), chamado pelo JS do painel. Só importa para quem está no tenant do contato
+     * e pode ler mensagens; no máximo uma importação a cada `intervalo_s` por tenant (Cache::add é atômico), mesmo que o
+     * Mailpit esteja fora do ar. Nunca falha por causa do Mailpit: o painel segue.
+     */
+    public function importar(CaixaDeEntrada $caixa): JsonResponse
+    {
+        abort_if($this->contexto->ehAdminDaClinica(), 403);
+        $tenant = $this->contexto->tenantId();
+
+        if ($this->contexto->dominio() !== 'clinica' || $tenant !== (int) config('sentinel.contato.tenant')
+            || ! $this->agente->podeExecutar('consultar_mensagens')
+            || ! Cache::add("caixa:importar:{$tenant}", true, now()->addSeconds((int) config('sentinel.contato.intervalo_s', 10)))) {
+            return response()->json(['importadas' => 0, 'pulado' => true]);
+        }
+
+        return response()->json(['importadas' => $caixa->importar(), 'pulado' => false]);
+    }
+
+    /** @return list<array{chave:string,rotulo:string,total:int,href?:string,pedido?:string,origem?:string}> */
     private function pendentes(int $tenant): array
     {
         if ($this->contexto->dominio() !== 'clinica') {
@@ -58,7 +79,9 @@ class AgentePainelController extends Controller
                 'total' => Cobranca::query()->where('tenant_id', $tenant)->whereIn('status', ['aberta', 'fechada'])->count()];
         }
         if ($this->agente->podeExecutar('consultar_mensagens')) {
-            $itens[] = ['chave' => 'mensagens', 'rotulo' => 'Mensagens novas', 'pedido' => 'mostre as mensagens novas da caixa de entrada',
+            // "origem": de onde elas vêm (o e-mail de contato, lido no Mailpit na demo); o painel a mostra sob o rótulo.
+            $itens[] = ['chave' => 'mensagens', 'rotulo' => 'Mensagens novas', 'origem' => (string) config('sentinel.contato.email'),
+                'pedido' => 'mostre as mensagens novas da caixa de entrada',
                 'total' => Mensagem::query()->where('tenant_id', $tenant)->where('status', 'nova')->count()];
         }
         $setores = $this->agente->podeExecutar('consultar_agenda') ? $this->agente->setoresDaAgenda() : [];

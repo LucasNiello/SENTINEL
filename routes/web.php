@@ -39,6 +39,8 @@ Route::middleware('auth')->group(function () {
 
         // Painel lateral do /agente (24/11): só leitura (pendentes do negócio e ações recentes do próprio usuário).
         Route::get('/agente/painel', [AgentePainelController::class, 'mostrar'])->middleware('throttle:120,1,painel-agente');
+        // 24/11: importa os e-mails novos do contato da clínica (Mailpit) para "Mensagens novas". POST de propósito (grava).
+        Route::post('/agente/caixa/importar', [AgentePainelController::class, 'importar'])->middleware('throttle:30,1,caixa-importar');
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
         Route::get('/cadastros', [TelasController::class, 'cadastros']);
