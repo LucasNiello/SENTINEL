@@ -36,9 +36,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
 
         // T1: o Administrador da clínica só gerencia PINs; a bancada do agente e os cadastros o levam à /supervisao.
-        Route::get('/agente', function () {
-            return app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica() ? redirect('/supervisao') : view('agente');
-        });
+        Route::get('/agente', [AgenteController::class, 'index'])->middleware(HandleInertiaRequests::class);
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
         Route::get('/cadastros', [TelasController::class, 'cadastros']);

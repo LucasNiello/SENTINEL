@@ -7,6 +7,7 @@ use App\Services\AuditoriaService;
 use App\Services\ConfirmacoesPendentes;
 use App\Services\ConsultasExportaveis;
 use App\Services\ConversaAgente;
+use App\Support\Front;
 use App\Services\PlanilhaCsv;
 use App\Services\ReautenticacaoAdmin;
 use Illuminate\Http\Request;
@@ -24,6 +25,17 @@ class AgenteController extends Controller
         private ReautenticacaoAdmin $reautenticacao,
         private ConsultasExportaveis $exportaveis,
     ) {
+    }
+
+    public function index(Request $request)
+    {
+        if (app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica()) {
+            return redirect('/supervisao');
+        }
+
+        return Front::tela('agente', 'Agente', Front::react()
+            ? ['historico' => $this->conversa->ler($request->session())]
+            : []);
     }
 
     /**
