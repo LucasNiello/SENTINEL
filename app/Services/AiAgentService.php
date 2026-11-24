@@ -492,6 +492,8 @@ class AiAgentService
                 'tipo' => 'confirmacao_pendente',
                 'tool' => $tool,
                 'risco' => $definicao['risco'],
+                'segurar' => $this->exigeSegurar($tool, $argumentos),
+                'segurar_quando' => $this->condicaoSegurar($tool),
                 'argumentos' => $argumentos,
                 'propostos' => $propostosPelaIa,
                 'formulario' => $this->formulario($tool, $argumentos, [], $loteIds),
@@ -1058,7 +1060,7 @@ class AiAgentService
             return ['resposta' => [
                 'tipo' => 'resultado_leitura',
                 'tool' => $tool,
-                'resultado' => $encontrados->map(fn (Model $m) => [...AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)), ...$acao])->values()->all(),
+                'resultado' => $encontrados->map(fn (Model $m) => [...AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)), ...$this->colunasCalculadasDaLista($m, $colunas), ...$acao])->values()->all(),
                 'colunas' => $colunas,
                 ...($acao === [] ? ['editar' => $tool] : []),
                 'aviso' => 'Encontrei mais de um registro com esse nome. Escolha um na lista ou peça de novo com o número.',
@@ -1066,6 +1068,30 @@ class AiAgentService
         }
 
         return ['argumentos' => $this->valoresDoFormulario($definicao, $encontrados->first(), $argumentos)];
+    }
+
+    /**
+     * 24/11 (R4): a lista de escolha de cobranças/vendas pagas distingue os candidatos com a data (pago em, ou criação) e o
+     * total, formatados. Só dado que o registro já tem; coluna que já é atributo do modelo (ex.: "data" do lançamento) não é sobrescrita.
+     *
+     * @param  string[]  $colunas
+     * @return array<string, string>
+     */
+    private function colunasCalculadasDaLista(Model $m, array $colunas): array
+    {
+        $extra = [];
+
+        if (in_array('data', $colunas, true) && ! array_key_exists('data', $m->getAttributes())) {
+            $quando = $m->getAttribute('pago_em') ?? $m->getAttribute('created_at');
+            if ($quando instanceof \DateTimeInterface) {
+                $extra['data'] = $quando->format('d/m/Y H:i');
+            }
+        }
+        if (in_array('total', $colunas, true) && ! array_key_exists('total', $m->getAttributes()) && is_numeric($m->getAttribute('total_centavos'))) {
+            $extra['total'] = ResultadosClinica::reais((int) $m->getAttribute('total_centavos'));
+        }
+
+        return $extra;
     }
 
     /**
@@ -1171,6 +1197,8 @@ class AiAgentService
             'tipo' => 'confirmacao_pendente',
             'tool' => $tool,
             'risco' => $definicao['risco'],
+            'segurar' => $this->exigeSegurar($tool, $argumentos),
+            'segurar_quando' => $this->condicaoSegurar($tool),
             'argumentos' => $argumentos,
             'propostos' => [], // sem IA: nada foi proposto, só os valores atuais
             'formulario' => $this->formulario($tool, $argumentos),
@@ -1379,9 +1407,25 @@ class AiAgentService
      */
     public function exigeSegurar(string $tool, array $argumentos): bool
     {
-        return $this->risco($tool) === 'exclusao'
-            || $tool === 'conciliar_lancamentos_em_lote'
-            || ($tool === 'alterar_status_agendamento' && ($argumentos['novo_status'] ?? null) === 'cancelado');
+        if ($this->risco($tool) === 'exclusao' || $tool === 'conciliar_lancamentos_em_lote') {
+            return true;
+        }
+
+        $condicao = $this->condicaoSegurar($tool);
+
+        return $condicao !== null && ($argumentos[$condicao['campo']] ?? null) === $condicao['valor'];
+    }
+
+    /**
+     * 23/11 (Confirmar em um passo): o card já abre sabendo se vai pedir o segurar. Quando isso depende de um campo
+     * que o humano pode mudar no card, a condição vai junto: { campo, valor } — segura quando o campo vale o valor.
+     * null = sem condição (o "segurar" booleano da abertura vale sozinho). Única fonte da regra condicional.
+     *
+     * @return array{campo: string, valor: string}|null
+     */
+    public function condicaoSegurar(string $tool): ?array
+    {
+        return $tool === 'alterar_status_agendamento' ? ['campo' => 'novo_status', 'valor' => 'cancelado'] : null;
     }
 
     /** Tools cujo Revisar devolve o card refeito com os avisos do que foi revisado (agendar/remarcar: quantos já ocupam o horário). */
@@ -2064,6 +2108,7 @@ class AiAgentService
             propriedades: [
                 'tipo' => ['type' => 'string', 'enum' => array_keys($lixeiras)],
                 'situacao' => ['type' => 'string', 'enum' => ['lixeira', 'arquivado']],
+                'nome' => ['type' => 'string', 'description' => 'Parte do nome (ou da descrição/número) do registro, quando o pedido cita um específico (ex.: "Fábio Rocha"). Sem isso, lista tudo.'],
             ],
             obrigatorios: [],
             executar: fn (array $a) => $this->itensDaLixeira($lixeiras, $a),
@@ -2175,6 +2220,7 @@ class AiAgentService
     {
         $tipo = $filtros['tipo'] ?? null;
         $situacao = $filtros['situacao'] ?? null;
+        $nome = is_string($filtros['nome'] ?? null) ? trim($filtros['nome']) : '';
 
         // Filtro fora da lista (a IA não segue o enum à risca): nada, como numa consulta com filtro que não casa.
         if (($tipo !== null && ! array_key_exists($tipo, $lixeiras)) || ! in_array($situacao, [null, 'lixeira', 'arquivado'], true)) {
@@ -2187,6 +2233,9 @@ class AiAgentService
         foreach ($tipo === null ? $lixeiras : [$tipo => $lixeiras[$tipo]] as $sufixo => $lixeira) {
             $registros = ($situacao === null ? $lixeira['modelo']::onlyTrashed() : $lixeira['modelo']::query()->naSituacao($situacao))
                 ->where('tenant_id', (int) $filtros['tenant_id'])
+                // 23/11: "a lixeira do Fábio Rocha" filtra pelo nome (coluna fixa da entidade; %, _ e ! escapados, como nos services).
+                ->when($nome !== '', fn ($consulta) => $consulta->whereRaw($lixeira['coluna_rotulo']." like ? escape '!'",
+                    ['%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $nome).'%']))
                 ->orderByDesc('deleted_at')
                 ->limit(self::LIMITE_LIXEIRA)
                 ->get();

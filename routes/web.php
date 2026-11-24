@@ -66,7 +66,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/agenda/disponibilidade', [ClinicaTelasController::class, 'disponibilidade'])->middleware('throttle:120,1,agenda-calendario');
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');
-        Route::post('/agente/confirmar', [AgenteController::class, 'confirmar']);
+        Route::post('/agente/confirmar', [AgenteController::class, 'confirmar'])->middleware('throttle:agente-confirmar');
         Route::post('/agente/revisar', [AgenteController::class, 'revisar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/cancelar', [AgenteController::class, 'cancelar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/editar', [AgenteController::class, 'editar'])->middleware('throttle:agente-sem-ia');

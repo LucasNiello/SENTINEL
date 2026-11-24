@@ -29,3 +29,6 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Local da sessao do Claude Code (PATH com o nome de usuario da maquina)
+.claude/settings.local.json

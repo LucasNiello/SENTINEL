@@ -48,7 +48,16 @@ class AppServiceProvider extends ServiceProvider
 
         // Ações do card que não chamam a IA (cancelar): teto folgado por usuário, só contra abuso.
         RateLimiter::for('agente-sem-ia', function (Request $request) {
-            return Limit::perMinute(30)->by((string) $request->user()->id)->response(
+            // 23/11: a prévia do Revisar (?previa=1) tem balde próprio, para a tela poder pedi-la sem gastar o Revisar/Cancelar.
+            return Limit::perMinute(30)->by(($request->is('agente/revisar') && $request->boolean('previa') ? 'previa:' : '').$request->user()->id)->response(
+                fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
+                    'http_status' => 429, 'mensagem' => 'Muitos pedidos em pouco tempo. Aguarde um minuto.'], 429, $headers),
+            );
+        });
+
+        // 23/11: o Confirmar em um passo faz o trabalho do Revisar (valida, audita revisao_com_erro); mesmo teto e balde próprio.
+        RateLimiter::for('agente-confirmar', function (Request $request) {
+            return Limit::perMinute(30)->by('confirmar:'.$request->user()->id)->response(
                 fn (Request $request, array $headers) => response()->json(['tipo' => 'erro', 'categoria' => 'rate_limit', 'codigo' => 'AI_RATE_LIMIT',
                     'http_status' => 429, 'mensagem' => 'Muitos pedidos em pouco tempo. Aguarde um minuto.'], 429, $headers),
             );
