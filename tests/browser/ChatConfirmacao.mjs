@@ -25,7 +25,7 @@ server.middlewares.use('/__chat-test', async (_req, res) => {
 });
 await server.listen();
 const browser = await chromium.launch({ headless: true, ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}) });
-const page = await browser.newPage({ viewport: { width: 360, height: 740 } });
+const page = await browser.newPage({ viewport: { width: 360, height: 740 }, timezoneId: 'America/Sao_Paulo' });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 const calls = [];
@@ -183,7 +183,101 @@ try {
     await action('Confirmar', 'confirmar');
     assert.deepEqual(calls.at(-1).body, { token: nextToken });
     assert.equal(await card().getByRole('button').count(), 0);
+    // Parte 4: availability is supplied exclusively by the existing GET API.
+    await page.clock.setFixedTime(new Date('2026-11-24T12:00:00-03:00'));
+    const availabilityCalls = [];
+    let availabilityFailure = false;
+    await page.route('**/agenda/disponibilidade?*', async (route) => {
+        const q = Object.fromEntries(new URL(route.request().url()).searchParams);
+        availabilityCalls.push(q);
+        if (availabilityFailure) { availabilityFailure = false; await route.fulfill({ status: 503, json: { mensagem: 'Disponibilidade temporariamente indisponível' } }); return; }
+        const professionals = [{ id: 8, nome: 'Dra. Ana' }, { id: 9, nome: 'Dr. Bruno' }];
+        if (q.mes) {
+            const days = Object.fromEntries(Array.from({ length: new Date(Number(q.mes.slice(0, 4)), Number(q.mes.slice(5)), 0).getDate() }, (_, i) => {
+                const date = `${q.mes}-${String(i + 1).padStart(2, '0')}`;
+                return [date, ['2026-11-24', '2026-11-25', '2026-11-26', '2026-12-02'].includes(date)];
+            }));
+            await route.fulfill({ json: { tipo: 'disponibilidade', setor: 'clinica', profissionais: professionals, dias: days } });
+        } else {
+            const available = q.profissional ? [{ id: Number(q.profissional), vagas: 1 }] : [{ id: 8, vagas: 1 }, { id: 9, vagas: 1 }];
+            await route.fulfill({ json: { tipo: 'disponibilidade', setor: 'clinica', modelo: 'blocos', mostra_vagas: true, profissionais: professionals,
+                horarios: [{ hora: '09:00', inicio: `${q.dia} 09:00`, vagas: 0, profissionais: [] },
+                    { hora: '10:00', inicio: `${q.dia} 10:00`, vagas: available.length, profissionais: available }] } });
+        }
+    });
+    const scheduleFields = [
+        { nome: 'pet_id', rotulo: 'Pet', tipo: 'referencia', valor: '3', obrigatorio: true, opcoes: [{ valor: 3, rotulo: 'Thor' }] },
+        { nome: 'catalogo_item_id', rotulo: 'Serviço', tipo: 'referencia', valor: '20', obrigatorio: true, opcoes: [{ valor: 20, rotulo: 'Consulta' }, { valor: 21, rotulo: 'Retorno' }] },
+        { nome: 'profissional_id', rotulo: 'Profissional', tipo: 'referencia', valor: '', obrigatorio: true, opcoes: [{ valor: 8, rotulo: 'Dra. Ana' }, { valor: 9, rotulo: 'Dr. Bruno' }] },
+        { nome: 'inicio', rotulo: 'Início', tipo: 'texto', valor: '', obrigatorio: true },
+    ];
+    formProposal = { ...proposal, formulario: { titulo: 'Agendar atendimento', campos: scheduleFields, ficha: { servico_id: 20, dia: '2026-11-24' } } };
+    commandResponse = formProposal;
+    await send();
+    const calendar = () => card().getByRole('group', { name: 'Calendário de agendamento', exact: true });
+    const slotsReady = () => until(async () => await calendar().getByRole('button', { name: '10:00 · 2 vaga(s)', exact: true }).count() > 0);
+    await slotsReady();
+    assert.equal(await calendar().getByRole('button', { name: '23 de novembro, sem vaga', exact: true }).isDisabled(), true);
+    assert.equal(await calendar().getByRole('button', { name: '09:00 · lotado', exact: true }).isDisabled(), true);
+    assert.equal(await calendar().getByRole('button', { name: 'Mês anterior' }).isDisabled(), true);
+    await calendar().getByRole('button', { name: 'Próximo mês' }).click();
+    await until(async () => await calendar().getByRole('button', { name: '2 de dezembro, com vaga' }).count() > 0);
+    await calendar().getByRole('button', { name: '2 de dezembro, com vaga' }).click();
+    await slotsReady();
+    assert.equal(availabilityCalls.at(-1).dia, '2026-12-02');
+    availabilityFailure = true;
+    await calendar().getByRole('button', { name: 'Mês anterior' }).click();
+    await calendar().getByRole('button', { name: 'Tentar novamente' }).waitFor();
+    assert.equal(await calendar().locator('.ficha-horario').count(), 0, 'failed request clears stale availability');
+    await calendar().getByRole('button', { name: 'Tentar novamente' }).click();
+    await until(async () => await calendar().getByRole('button', { name: '25 de novembro, com vaga' }).count() > 0);
+    await calendar().getByRole('button', { name: '25 de novembro, com vaga' }).click();
+    await slotsReady();
+    await calendar().getByLabel('Buscar profissional').fill('Ana');
+    assert.equal(await calendar().getByLabel('Profissional', { exact: true }).locator('option').count(), 2);
+    await calendar().getByLabel('Buscar profissional').fill('');
+    await calendar().getByRole('button', { name: '10:00 · 2 vaga(s)', exact: true }).click();
+    const beforeSchedule = calls.filter((c) => c.action === 'confirmar').length;
+    failure = { action: 'revisar' };
+    await action('Dra. Ana · 1 vaga(s)', 'revisar');
+    assert.equal(calls.at(-1).body.valores.inicio, '2026-11-25 10:00');
+    assert.equal(calls.at(-1).body.valores.profissional_id, '8');
+    assert.match(await calendar().innerText(), /Selecionado: 2026-11-25 10:00/);
+    assert.equal(await card().getByRole('button', { name: 'Confirmar', exact: true }).isDisabled(), true);
+    await calendar().getByRole('button', { name: '10:00 · 2 vaga(s)', exact: true }).click();
+    await action('Dra. Ana · 1 vaga(s)', 'revisar');
+    assert.equal(await calendar().getByRole('button', { name: 'Próximo mês' }).isDisabled(), true);
+    assert.equal(calls.filter((c) => c.action === 'confirmar').length, beforeSchedule, 'slot selection only reviews');
+    await action('Editar', 'editar');
+    assert.equal(await card().getByRole('button', { name: 'Confirmar', exact: true }).isDisabled(), true);
+    await calendar().getByRole('button', { name: '26 de novembro, com vaga' }).click();
+    await slotsReady();
+    nextToken = '44444444-4444-4444-8444-444444444444';
+    await calendar().getByRole('button', { name: '10:00 · 2 vaga(s)', exact: true }).click();
+    await action('Dr. Bruno · 1 vaga(s)', 'revisar');
+    assert.equal(calls.at(-1).body.valores.inicio, '2026-11-26 10:00');
+    await action('Confirmar', 'confirmar');
+    assert.deepEqual(calls.at(-1).body, { token: nextToken });
+    formProposal = { ...proposal, formulario: { titulo: 'Remarcar agendamento', campos: scheduleFields.map((f) => ({ ...f, valor: f.nome === 'profissional_id' ? '8' : f.nome === 'inicio' ? '2026-11-24 10:00' : f.valor })), ficha: { servico_id: 20, agendamento_id: 17, dia: '2026-11-24' } } };
+    commandResponse = formProposal; await send();
+    await until(async () => await calendar().getByRole('button', { name: '10:00 · 1 vaga(s)', exact: true }).count() > 0);
+    assert.equal(availabilityCalls.at(-1).ignorar, '17');
+    assert.equal(availabilityCalls.at(-1).profissional, '8');
+    await card().getByLabel('Serviço (obrigatório)', { exact: true }).selectOption('21');
+    await slotsReady();
+    assert.equal(availabilityCalls.at(-1).servico, '21');
+    assert.equal(availabilityCalls.at(-1).profissional, undefined);
+    assert.doesNotMatch(await calendar().innerText(), /Selecionado:/);
+    await calendar().getByLabel('Profissional', { exact: true }).selectOption('8');
+    await until(async () => await calendar().getByRole('button', { name: '10:00 · 1 vaga(s)', exact: true }).count() > 0);
+    await calendar().getByRole('button', { name: '25 de novembro, com vaga' }).click();
+    await until(async () => await calendar().getByRole('button', { name: '10:00 · 1 vaga(s)', exact: true }).count() > 0);
+    await action('10:00 · 1 vaga(s)', 'revisar');
+    assert.equal(calls.at(-1).body.valores.inicio, '2026-11-25 10:00');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    if (process.env.CHAT_SCREENSHOT) await card().screenshot({ path: process.env.CHAT_SCREENSHOT });
+    await action('Confirmar', 'confirmar');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
-    console.log('PASS: Partes 1/2/3, formulário, tipos, obrigatoriedade, valores preservados, edição, novo token, revisão explícita, erros, histórico, duplicação e 360x740.');
+    console.log('PASS: Partes 1/2/3/4, calendário, meses, disponibilidade, profissionais, agendamento, remarcação, token, revisão explícita, erros, histórico, duplicação e 360x740.');
 } finally { await browser.close(); await server.close(); }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import CamposProposta, { coletarValores, valoresIniciais } from './CamposProposta';
+import CalendarioAgendamento from './CalendarioAgendamento';
 
 const exibir = (valor) => valor == null || valor === '' ? 'Não informado' : typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
 
@@ -17,17 +18,19 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const montado = useRef(true);
     useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
 
-    async function executar(acao) {
+    async function executar(acao, alteracoes = null) {
         if (trava.current || encerrado || (acao === 'confirmar' && !token)
             || (acao === 'revisar' && (token || edicaoPendente))
             || (acao === 'editar' && !token && !tokenEdicao.current)) return;
+        const atuais = alteracoes ? { ...valores, ...alteracoes } : valores;
+        if (alteracoes) setValores(atuais);
         if (acao === 'revisar' && !form.current?.reportValidity()) return;
         const controller = new AbortController();
         trava.current = controller;
         setProcessando(true);
         definirOcupado(true);
         setErro('');
-        const corpo = acao === 'revisar' ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], valores) }
+        const corpo = acao === 'revisar' ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) }
             : acao === 'confirmar' ? { token } : acao === 'editar' ? { token: token || tokenEdicao.current } : { proposta: proposta.proposta };
         if (acao === 'editar') {
             tokenEdicao.current = corpo.token;
@@ -114,8 +117,10 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                 <div key={i} style={{ display: 'contents' }}><dt>{nome}</dt><dd>{exibir(valor)}</dd></div>)}
         </dl>
         <form ref={form} className="card-form" onSubmit={(evento) => { evento.preventDefault(); executar('revisar'); }}>
-            <CamposProposta campos={campos} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
-                alterar={(nome, valor) => { if (!token && !edicaoPendente && !ocupado && !encerrado) setValores((anteriores) => ({ ...anteriores, [nome]: valor })); }} />
+            <CamposProposta campos={formulario.ficha ? campos.filter((c) => !['profissional_id', 'inicio'].includes(c.nome)) : campos} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
+                alterar={(nome, valor) => { if (!token && !edicaoPendente && !ocupado && !encerrado) setValores((anteriores) => ({ ...anteriores, [nome]: valor, ...(formulario.ficha && nome === 'catalogo_item_id' ? { profissional_id: '', inicio: '' } : {}) })); }} />
+            {formulario.ficha && <CalendarioAgendamento ficha={formulario.ficha} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
+                selecionar={(selecao) => executar('revisar', selecao)} erros={[formulario.erro, ...campos.filter((c) => ['inicio', 'profissional_id'].includes(c.nome)).map((c) => c.erro)]} />}
         </form>
         {(formulario.avisos ?? []).map((aviso, i) => <p key={i} className="msg msg--aviso">{exibir(aviso)}</p>)}
         <p className="card-etapa" role="status">{processando ? 'Processando…' : etapa}</p>
