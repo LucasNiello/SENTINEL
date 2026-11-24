@@ -82,7 +82,18 @@ class ConfirmacoesPendentes
         $this->retirarTokens($sessao, $proposta);
         $token = (string) Str::uuid();
 
-        $sessao->put(self::CHAVE.".{$token}", [
+        $sessao->put(self::CHAVE.".{$token}", self::montarRevisada($proposta, $rascunho, $revisados));
+
+        return $token;
+    }
+
+    /**
+     * A pendência "revisada" (o que o confirmar executa), montada só em memória, sem sessão. O /agente/revisar a guarda
+     * com um token; o Confirmar em um passo (23/11) a monta e executa na mesma requisição, sem emitir token.
+     */
+    public static function montarRevisada(string $proposta, array $rascunho, array $revisados): array
+    {
+        return [
             'estado' => 'revisada',
             'tool' => $rascunho['tool'],
             'argumentos' => $revisados,
@@ -96,9 +107,7 @@ class ConfirmacoesPendentes
             'proposta_criada_em' => $rascunho['criado_em'],
             // Em segundos, com milissegundos (o prazo é o da proposta; ver expirou()).
             'emitido_em' => self::agora(),
-        ]);
-
-        return $token;
+        ];
     }
 
     /**
