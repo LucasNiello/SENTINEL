@@ -245,6 +245,34 @@ class CancelarEmLoteTest extends TestCase
         $this->assertArrayNotHasKey('versao', $linha);
     }
 
+    public function test_cancelar_pelo_nome_com_varios_iguais_mostra_a_lista_de_marcar_e_permite_cancelar_mais_de_um(): void
+    {
+        $a = $this->marcar('2026-11-11', '09:00', $this->thor);
+        $b = $this->marcar('2026-11-12', '10:00', $this->thor);
+
+        $resposta = $this->comando('alterar_status_agendamento', ['busca' => $this->thor->nome, 'novo_status' => 'cancelado'])->assertOk()
+            ->assertJsonPath('tipo', 'resultado_leitura')
+            ->assertJsonPath('selecao.url', '/agente/agenda/cancelar-lote')->assertJsonPath('selecao.segurar', true);
+        $this->assertEqualsCanonicalizing([$a->id, $b->id], array_column($resposta->json('resultado'), 'id'));
+        $this->assertArrayNotHasKey('versao', $resposta->json('resultado.0'));
+        $this->assertArrayNotHasKey('acao', $resposta->json('resultado.0'), 'sem botão "Escolher": a seleção é por caixa de marcar');
+        $this->assertSame('agendado', $a->fresh()->status, 'listar não cancela');
+
+        // Marcou os dois: o mesmo endpoint do lote grava, tudo ou nada.
+        $this->cancelar([$a->id, $b->id])->assertOk()->assertJsonPath('tipo', 'resultado_escrita');
+        $this->assertSame(['cancelado', 'cancelado'], [$a->fresh()->status, $b->fresh()->status]);
+    }
+
+    public function test_outros_status_com_varios_iguais_seguem_com_a_escolha_de_um_so(): void
+    {
+        $this->marcar('2026-11-11', '09:00', $this->thor);
+        $this->marcar('2026-11-12', '10:00', $this->thor);
+
+        $this->comando('alterar_status_agendamento', ['busca' => $this->thor->nome, 'novo_status' => 'faltou'])->assertOk()
+            ->assertJsonPath('tipo', 'resultado_leitura')->assertJsonMissingPath('selecao')
+            ->assertJsonPath('resultado.0.acao.rotulo', 'Escolher');
+    }
+
     public function test_a_lista_com_checkbox_vale_5_minutos_mas_a_tabela_segue_valendo_para_referencias(): void
     {
         $a = $this->marcar('2026-11-11');

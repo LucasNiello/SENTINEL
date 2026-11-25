@@ -238,8 +238,10 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
 .card-etapa {padding:14px 16px;border-radius:8px;background:var(--surface-muted);border:1px solid var(--border-soft);margin:24px 0 0;color:var(--sentinel-ink-muted);font-size:15px}
 .card-confirmacao .acoes {display:flex;flex-wrap:wrap;gap:8px;padding-top:16px;margin-top:16px;border-top:1px solid var(--sentinel-border)}
 .btn-revisar,.btn-confirmar,.btn-editar,.btn-cancelar {min-width:120px}
-.btn-confirmar {position:relative;overflow:hidden;min-height:54px;min-width:180px;border-radius:8px;border-color:var(--cor-risco);color:var(--cor-risco);background:var(--sentinel-paper)}
-.btn-confirmar__fill {position:absolute;inset:0;width:0%;background:var(--cor-risco-faixa);border-bottom:3px solid var(--cor-risco);z-index:0}
+.btn-confirmar {position:relative;overflow:hidden;min-height:54px;min-width:180px;border-radius:8px;border-color:var(--cor-risco);color:var(--cor-risco);background:var(--sentinel-paper);touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+/* O preenchimento é o próprio "carregando" do segurar: cor do risco a 35% (bem visível sobre o creme) e o texto passa para a tinta enquanto enche (contraste). */
+.btn-confirmar__fill {position:absolute;inset:0 auto 0 0;width:0%;background:color-mix(in srgb,var(--cor-risco) 35%,var(--sentinel-paper));border-right:3px solid var(--cor-risco);z-index:0}
+.btn-confirmar.segurando {color:var(--sentinel-ink)}
 .btn-confirmar__label {position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.2;pointer-events:none}
 .btn-confirmar__label .pequeno {font:12px var(--fonte-mono)}
 .btn-confirmar__label .grande {font:16px var(--fonte-mono);font-variant-numeric:tabular-nums}
@@ -264,7 +266,9 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
 .selecao-celula label {display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;cursor:pointer}
 .selecao-celula input {width:24px;height:24px;accent-color:var(--color-erro)}
 .selecao-celula input:disabled {cursor:not-allowed}
+.selecao-celula input.selecao-caixa--unica {accent-color:var(--color-aco)}
 .linha-bloqueada td {color:var(--sentinel-ink-muted)}
+.linha-escolhida td {background:var(--color-aviso-faixa)}
 .linha-cancelada td {color:var(--sentinel-ink-muted);text-decoration:line-through}
 .selecao-barra {display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin:8px 0 16px;--cor-risco:var(--color-erro);--cor-risco-faixa:var(--color-erro-faixa)}
 .selecao-aviso {flex:1 1 280px;margin:0;color:var(--sentinel-ink)}
