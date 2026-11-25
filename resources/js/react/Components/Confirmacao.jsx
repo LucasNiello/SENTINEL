@@ -3,6 +3,7 @@ import CamposProposta, { coletarValores, valoresIniciais } from './CamposPropost
 import CalendarioAgendamento from './CalendarioAgendamento';
 import Reautenticacao from './Reautenticacao';
 import ItensLote from './ItensLote';
+import ItensEstorno, { coletarLinhas, quantidadesIniciais } from './ItensEstorno';
 
 const exibir = (valor) => valor == null || valor === '' ? 'Não informado' : typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
 
@@ -10,6 +11,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const [dados, setDados] = useState(proposta);
     const [token, setToken] = useState(null);
     const [valores, setValores] = useState(() => valoresIniciais(proposta.formulario?.campos ?? []));
+    const [quantidades, setQuantidades] = useState(() => quantidadesIniciais(proposta.formulario?.itens_estorno));
     const [edicaoPendente, setEdicaoPendente] = useState(false);
     const tokenEdicao = useRef(null);
     const form = useRef(null);
@@ -39,6 +41,9 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         setErro('');
         const corpo = acao === 'revisar' ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) }
             : acao === 'confirmar' ? { token } : acao === 'editar' ? { token: token || tokenEdicao.current } : { proposta: proposta.proposta };
+        if (acao === 'revisar' && dados.formulario?.itens_estorno) {
+            corpo.valores.linhas = coletarLinhas(dados.formulario.itens_estorno, quantidades);
+        }
         if (acao === 'confirmar' && dados.formulario?.reautenticar) Object.assign(corpo, autorizacao.current.consumir());
         if (['editar', 'cancelar'].includes(acao)) autorizacao.current?.limpar();
         if (acao === 'editar') {
@@ -70,6 +75,10 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                 if (acao === 'revisar' && resultado?.formulario) {
                     setDados((anterior) => ({ ...anterior, formulario: resultado.formulario }));
                     setValores((anteriores) => ({ ...valoresIniciais(resultado.formulario.campos ?? []), ...anteriores }));
+                    if (resultado.formulario.itens_estorno) {
+                        setValores(valoresIniciais(resultado.formulario.campos ?? []));
+                        setQuantidades(quantidadesIniciais(resultado.formulario.itens_estorno));
+                    }
                     if ((resultado.formulario.itens ?? []).some((item) => item.erro)) {
                         setToken(null);
                         setEtapa('Peça de novo para montar outro plano, ou clique em Cancelar.');
@@ -93,6 +102,10 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                         campos: (formulario.campos ?? []).map(({ erro: _erro, ...campo }) => campo) } : formulario };
                 });
                 setToken(resultado.token);
+                if (resultado.formulario?.itens_estorno) {
+                    setValores(valoresIniciais(resultado.formulario.campos ?? []));
+                    setQuantidades(quantidadesIniciais(resultado.formulario.itens_estorno));
+                }
                 setEtapa('Revisão concluída. Confira os dados da proposta e clique em Confirmar para executar. Nada foi gravado ainda.');
             } else if (acao === 'editar') {
                 if (resultado.tipo !== 'rascunho' || resultado.proposta !== proposta.proposta) throw new Error('Não foi possível reabrir a proposta. Tente Editar novamente.');
@@ -130,6 +143,16 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const formulario = dados.formulario ?? {};
     const campos = formulario.campos ?? [];
     const risco = ['leitura', 'escrita', 'exclusao'].includes(dados.risco) ? dados.risco : 'exclusao';
+    const bloqueado = ocupado || !!token || edicaoPendente || encerrado;
+    function alterarCampo(nome, valor) {
+        if (bloqueado) return;
+        setValores((anteriores) => ({ ...anteriores, [nome]: valor,
+            ...(formulario.ficha && nome === 'catalogo_item_id' ? { profissional_id: '', inicio: '' } : {}) }));
+        if (nome === 'modo' && formulario.itens_estorno && valor !== 'itens') {
+            setQuantidades(Object.fromEntries(formulario.itens_estorno.map((item) => [item.item_id,
+                String(valor === 'tudo_menos_prontuario' && item.origem === 'Prontuário' ? 0 : item.restante)])));
+        }
+    }
     return <section className={`card-confirmacao card--risco-${risco}`} aria-label="Confirmação de ação" aria-busy={processando} style={{ overflowWrap: 'anywhere' }}>
         <div className="card-overline"><span>AÇÃO PROPOSTA</span><span className="card-risco">{risco}</span></div>
         <strong className="card-titulo">{formulario.titulo || 'Confirmar a ação'}</strong>
@@ -142,7 +165,10 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         <ItensLote itens={formulario.itens} />
         <form ref={form} className="card-form" onSubmit={(evento) => { evento.preventDefault(); executar('revisar'); }}>
             <CamposProposta campos={formulario.ficha ? campos.filter((c) => !['profissional_id', 'inicio'].includes(c.nome)) : campos} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
-                alterar={(nome, valor) => { if (!token && !edicaoPendente && !ocupado && !encerrado) setValores((anteriores) => ({ ...anteriores, [nome]: valor, ...(formulario.ficha && nome === 'catalogo_item_id' ? { profissional_id: '', inicio: '' } : {}) })); }} />
+                alterar={alterarCampo} />
+            {formulario.itens_estorno && <ItensEstorno itens={formulario.itens_estorno} quantidades={quantidades} bloqueado={bloqueado}
+                alterar={(id, quantidade) => { if (!bloqueado) { setQuantidades((anteriores) => ({ ...anteriores, [id]: quantidade })); setValores((anteriores) => ({ ...anteriores, modo: 'itens' })); } }} />}
+            {formulario.itens_estorno && formulario.erro && <p className="campo-erro" role="alert">{formulario.erro}</p>}
             {formulario.ficha && <CalendarioAgendamento ficha={formulario.ficha} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
                 selecionar={(selecao) => executar('revisar', selecao)} erros={[formulario.erro, ...campos.filter((c) => ['inicio', 'profissional_id'].includes(c.nome)).map((c) => c.erro)]} />}
         </form>
