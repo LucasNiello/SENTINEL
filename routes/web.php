@@ -38,9 +38,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
 
         // T1: o Administrador da clínica só gerencia PINs; a bancada do agente e os cadastros o levam à /supervisao.
-        Route::get('/agente', function () {
-            return app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica() ? redirect('/supervisao') : view('agente');
-        });
+        Route::get('/agente', [AgenteController::class, 'index'])->middleware(HandleInertiaRequests::class);
 
         // Painel lateral do /agente (24/11): só leitura (pendentes do negócio e ações recentes do próprio usuário).
         Route::get('/agente/painel', [AgentePainelController::class, 'mostrar'])->middleware('throttle:120,1,painel-agente');

@@ -1,0 +1,8 @@
+/* O React ainda usa o cabeçalho e o contexto anteriores ao novo layout Blade.
+   Mantém a decoração fora do fluxo e as duas colunas dentro da altura do chat. */
+.react-agent-hero {position:relative;isolation:isolate}
+.react-agent-hero .agent-orbit {position:absolute;z-index:-1;right:24px;top:0;width:220px;height:190px;overflow:hidden;pointer-events:none;opacity:.5}
+.react-agent-hero .lighthouse-symbol {position:absolute;width:48px;height:60px;left:86px;top:64px;color:var(--sentinel-blue)}
+@media (min-width:1280px) {
+    .command-layout.react-command-layout {grid-template-columns:minmax(0,1fr) 300px}
+}

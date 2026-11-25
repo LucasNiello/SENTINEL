@@ -65,4 +65,68 @@ class FrontAlternanciaTest extends TestCase
 
         $this->get('/cadastros')->assertOk()->assertSee('workspace-sidebar', false)->assertDontSee('data-page', false);
     }
+
+    public function test_agente_blade_preserva_a_tela_atual(): void
+    {
+        config(['sentinel.front' => 'blade']);
+        $this->logarComo('operador');
+
+        $this->get('/agente')->assertOk()->assertViewIs('agente')
+            ->assertSee('form-comando', false)->assertDontSee('data-page', false);
+    }
+
+    public function test_agente_react_recebe_historico_ordenado_da_sessao(): void
+    {
+        config(['sentinel.front' => 'react']);
+        $usuario = $this->logarComo('operador');
+        $mensagens = [
+            ['role' => 'user', 'content' => 'Olá'],
+            ['role' => 'assistant', 'content' => 'Como posso ajudar?'],
+        ];
+
+        $this->withSession(['agente_conversa' => [
+            'identidade' => $usuario->id.':1', 'mensagens' => $mensagens,
+        ]])->get('/agente')->assertOk()->assertInertia(fn (Assert $p) => $p
+            ->component('Agente')->where('historico', $mensagens)
+            ->where('usuario.papel', 'operador')->has('menu')->etc());
+    }
+
+    public function test_agente_react_nao_recebe_historico_de_outra_identidade(): void
+    {
+        config(['sentinel.front' => 'react']);
+        $this->logarComo('operador');
+
+        $this->withSession(['agente_conversa' => [
+            'identidade' => '999:999',
+            'mensagens' => [['role' => 'user', 'content' => 'Privado']],
+        ]])->get('/agente')->assertOk()->assertInertia(fn (Assert $p) => $p
+            ->component('Agente')->has('historico', 0)->etc());
+    }
+
+    public function test_agente_preserva_login_e_redirecionamento_do_admin_da_clinica(): void
+    {
+        config(['sentinel.front' => 'react', 'sentinel.tenants_clinica' => [3]]);
+        $this->get('/agente')->assertRedirect('/login');
+        $this->logarComo('admin', 3);
+        $this->get('/agente')->assertRedirect('/supervisao');
+        config(['sentinel.front' => 'blade']);
+        $this->get('/agente')->assertRedirect('/supervisao');
+    }
+
+    public function test_dois_comandos_textuais_mantem_o_historico_no_react(): void
+    {
+        config(['sentinel.front' => 'react']);
+        $this->logarComo('operador');
+        \Illuminate\Support\Facades\Http::fake(['*' => \Illuminate\Support\Facades\Http::response([
+            'choices' => [['message' => ['role' => 'assistant', 'content' => 'Olá, posso ajudar.']]],
+        ])]);
+
+        foreach (['Olá', 'Obrigado'] as $mensagem) {
+            $this->postJson('/agente/comando', ['mensagem' => $mensagem])->assertOk()
+                ->assertJsonPath('tipo', 'texto')->assertJsonPath('mensagem', 'Olá, posso ajudar.');
+        }
+        $this->get('/agente')->assertOk()->assertInertia(fn (Assert $p) => $p
+            ->component('Agente')->has('historico', 4)
+            ->where('historico.0.content', 'Olá')->where('historico.2.content', 'Obrigado')->etc());
+    }
 }
