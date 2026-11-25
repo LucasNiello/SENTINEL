@@ -39,6 +39,21 @@ return [
     'tenants_clinica' => array_values(array_filter(array_map('intval', explode(',', (string) env('SENTINEL_TENANTS_CLINICA', '3'))))),
 
     /*
+    | E-mail da clínica (24/11, SIMULAÇÃO com o Mailpit local; o fluxo futuro seria e-mail, WhatsApp etc.).
+    | - notificar_agendamento: o tutor recebe e-mail ao criar, confirmar e cancelar o agendamento (o seeder desliga).
+    | - contato: a caixa de entrada. E-mails PARA 'email' (lidos pela API do Mailpit) viram "Mensagens novas" do 'tenant'
+    |   (precisa estar em tenants_clinica). 'intervalo_s' é a trava entre duas importações; 'limite_texto', o teto do texto.
+    */
+    'notificar_agendamento' => (bool) env('SENTINEL_NOTIFICAR_AGENDAMENTO', true),
+    'contato' => [
+        'email' => strtolower((string) env('SENTINEL_EMAIL_CONTATO', 'contato@clinica.sentinel.br')),
+        'tenant' => (int) env('SENTINEL_CONTATO_TENANT', 3),
+        'mailpit_url' => rtrim((string) env('MAILPIT_API_URL', 'http://127.0.0.1:8025'), '/'),
+        'intervalo_s' => 10,
+        'limite_texto' => 600,
+    ],
+
+    /*
     | Agenda: duração máxima de um agendamento, em minutos (padrão 480 = 8 h). Acima disso o
     | servidor recusa — inclusive no encaixe de emergência, que não confere conflito de horário.
     */

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Support\Mascara;
 use Illuminate\Support\Str;
 
 /**
@@ -16,14 +17,14 @@ class AuditoriaService
      * leitura e o formulário do card (RF04, que só mostra a máscara) leem daqui.
      */
     private const MASCARAS = [
-        'cpf' => 'mascararCpf', 'salario' => 'redigir', 'documento' => 'mascararDocumento',
+        'cpf' => 'mascararCpf', 'salario' => 'redigir', 'documento' => 'mascararDocumento', 'telefone' => 'mascararTelefone',
         // Clínica vet: texto clínico do prontuário (e o texto livre do adendo e das mensagens) nunca fica em claro
         // na auditoria nem no CSV; só o fato de que o campo existiu.
         'anamnese' => 'redigir', 'exame_fisico' => 'redigir', 'diagnostico' => 'redigir', 'conduta' => 'redigir', 'texto' => 'redigir',
     ];
 
     /** O que fica no lugar de um valor que não pode aparecer nem em parte (ex.: salário). */
-    public const REDIGIDO = '[redigido]';
+    public const REDIGIDO = Mascara::REDIGIDO;
 
     /**
      * Resultado NÃO-FINAL: o /agente/revisar recusou os valores e a proposta continua em rascunho.
@@ -120,6 +121,27 @@ class AuditoriaService
         })->all();
     }
 
+    /**
+     * O inverso da máscara: tira de $dados todo campo sensível (cpf, documento, telefone, salário…) cujo valor é uma
+     * máscara ("(19) 9****-*321", "123.***.**9-00", "[redigido]"). Máscara nunca é dado: a chave some e o valor atual é
+     * mantido (atualizar) ou fica vazio (criar). Desce nas listas aninhadas, como a própria máscara.
+     *
+     * @param  array<string|int, mixed>  $dados
+     * @return array<string|int, mixed>
+     */
+    public static function semValoresMascarados(array $dados): array
+    {
+        $limpo = [];
+        foreach ($dados as $campo => $valor) {
+            if (is_string($campo) && isset(self::MASCARAS[$campo]) && Mascara::mascarado($valor)) {
+                continue;
+            }
+            $limpo[$campo] = is_array($valor) ? self::semValoresMascarados($valor) : $valor;
+        }
+
+        return $limpo;
+    }
+
     /** Salário: nem parte do valor fica. */
     private static function redigir(mixed $valor): mixed
     {
@@ -143,27 +165,15 @@ class AuditoriaService
         return strlen(preg_replace('/\D/', '', (string) $valor)) === 11 ? self::mascararCpf($valor) : $valor;
     }
 
-    /**
-     * Mantém só os 5 últimos dígitos (3 + os 2 verificadores): ***.***.333-44. Sempre no mesmo
-     * formato, com ou sem pontuação na entrada. Não numérico ou curto demais vira '[redigido]'
-     * (nunca devolve o valor bruto); idempotente se o valor já vier mascarado.
-     */
+    /** CPF: 3 primeiros e 3 últimos dígitos (123.***.**9-00); a regra é de App\Support\Mascara, a única do projeto. */
     private static function mascararCpf(mixed $valor): mixed
     {
-        if ($valor === null) {
-            return null;
-        }
+        return Mascara::cpf($valor);
+    }
 
-        if (! is_scalar($valor)) {
-            return self::REDIGIDO;
-        }
-
-        $digitos = preg_replace('/\D/', '', (string) $valor);
-
-        if (strlen($digitos) < 5) {
-            return self::REDIGIDO;
-        }
-
-        return '***.***.'.substr($digitos, -5, 3).'-'.substr($digitos, -2);
+    /** Telefone: (19) 9****-*321, pela mesma Mascara. */
+    private static function mascararTelefone(mixed $valor): mixed
+    {
+        return Mascara::telefone($valor);
     }
 }

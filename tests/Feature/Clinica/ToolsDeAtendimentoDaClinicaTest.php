@@ -261,7 +261,7 @@ class ToolsDeAtendimentoDaClinicaTest extends TestCase
     {
         $mascarado = \App\Services\AuditoriaService::mascararCamposSensiveis(['itens' => [['catalogo_item_id' => 1, 'cpf' => '123.456.789-00', 'documento' => '987.654.321-00']]]);
 
-        $this->assertSame(['catalogo_item_id' => 1, 'cpf' => '***.***.789-00', 'documento' => '***.***.321-00'], $mascarado['itens'][0]);
+        $this->assertSame(['catalogo_item_id' => 1, 'cpf' => '123.***.**9-00', 'documento' => '987.***.**1-00'], $mascarado['itens'][0]);
     }
 
     /** Revisão de 10/11 (achados 1, 2 e 7): o que o Confirmar recusaria, o Revisar já recusa (sem token de segurar). */

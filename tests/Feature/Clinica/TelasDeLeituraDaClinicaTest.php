@@ -264,6 +264,33 @@ class TelasDeLeituraDaClinicaTest extends TestCase
         $this->get('/resultados?periodo=seculo&dia=x')->assertOk();
     }
 
+    public function test_periodo_ano_inclui_lancamento_de_marco_e_o_mes_atual_nao(): void
+    {
+        CarbonImmutable::setTestNow('2026-11-23 10:00:00');
+        try {
+            $despesa = CategoriaLancamento::create(['nome' => 'Aluguel', 'tipo' => 'despesa', 'tenant_id' => self::T]);
+            Lancamento::create(['descricao' => 'Aluguel de março', 'valor' => '777.00', 'data' => '2026-03-10', 'status' => 'pendente',
+                'categoria_lancamento_id' => $despesa->id, 'tenant_id' => self::T]);
+            $servico = app(ResultadosClinica::class);
+            $hoje = CarbonImmutable::now();
+
+            [$inicioAno, $fimAno] = $servico->intervalo('ano', $hoje);
+            $this->assertSame(['2026-01-01', '2026-12-31'], [$inicioAno->toDateString(), $fimAno->toDateString()]);
+            $this->assertArrayHasKey('ano', ResultadosClinica::PERIODOS);
+
+            [$inicioMes, $fimMes] = $servico->intervalo('mes', $hoje);
+            $this->assertSame(77700, $servico->resumo(self::T, $inicioAno, $fimAno)['despesas']);
+            $this->assertSame(0, $servico->resumo(self::T, $inicioMes, $fimMes)['despesas']);
+
+            $this->logarComo('dono', self::T);
+            $this->get('/resultados?periodo=ano')->assertOk()->assertSee('R$ 777,00')->assertSee('2026');
+            $this->get('/resultados?periodo=mes')->assertOk()->assertDontSee('R$ 777,00');
+            $this->get('/resultados?periodo=ano&dia=2025-06-01')->assertOk()->assertDontSee('R$ 777,00');
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_estorno_de_cobranca_entra_uma_vez_so_e_o_estorno_antigo_so_pela_coluna(): void
     {
         $hoje = CarbonImmutable::now();

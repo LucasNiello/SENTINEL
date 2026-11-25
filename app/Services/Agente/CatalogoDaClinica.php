@@ -391,7 +391,7 @@ trait CatalogoDaClinica
             ), [
                 ['nome' => 'agendar_atendimento', 'origem' => 'normal', 'papeis' => self::PAPEIS_DA_AGENDA,
                     'titulo' => 'Agendar', 'sucesso' => 'Atendimento agendado',
-                    'descricao' => 'Agenda um NOVO atendimento da clínica ou do banho e tosa, de agora em diante. Informe só o início: o servidor calcula o fim. Para mudar o horário de um agendamento que já existe, use remarcar_agendamento; para trocar o serviço dele, alterar_servico_agendamento. Na clínica o horário é por bloco de 1 h (08:00 … 17:00): consultas dividem o bloco (até 4 por veterinário), os demais serviços ocupam o bloco inteiro e a cirurgia 2 blocos; cirurgia só o próprio veterinário com CRMV agenda, para si. No banho e tosa, 1 por vez.'],
+                    'descricao' => 'Agenda um NOVO atendimento da clínica ou do banho e tosa, de agora em diante. Informe só o início: o servidor calcula o fim. Para mudar o horário de um agendamento que já existe, use remarcar_agendamento; para trocar o serviço dele, alterar_servico_agendamento. Na clínica o horário é por bloco de 1 h (08:00 … 17:00): consultas dividem o bloco (até o limite de vagas por bloco configurado pelo dono, por veterinário), os demais serviços ocupam o bloco inteiro e a cirurgia 2 blocos; cirurgia só o próprio veterinário com CRMV agenda, para si. No banho e tosa, 1 por vez.'],
                 ['nome' => 'registrar_encaixe_emergencia', 'origem' => 'encaixe_emergencia', 'papeis' => ['recepcao', 'veterinario', 'dono'],
                     'titulo' => 'Registrar encaixe de emergência', 'sucesso' => 'Encaixe de emergência registrado',
                     'descricao' => 'Registra na agenda da clínica um atendimento de emergência que já começou (início agora ou antes); não confere vaga nem horário. Só da clínica.'],
@@ -531,6 +531,7 @@ trait CatalogoDaClinica
                 rotulo: 'a cobrança paga',
                 colunaRotulo: 'pet',
                 rotuloAcao: 'Estornar',
+                colunasLista: ['id', 'data', 'pet', 'total'], // 24/11: duas cobranças do mesmo pet se distinguem pela data e pelo total
                 campos: ['modo', 'motivo', 'linhas'],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDoEstorno(
                     $this->resumoDaCobranca((int) ($v['id'] ?? 0), $tenantId, comLinhas: false),
@@ -638,6 +639,7 @@ trait CatalogoDaClinica
                 buscaPor: 'nome do tutor ou do pet',
                 colunaRotulo: 'tutor',
                 rotuloAcao: 'Estornar',
+                colunasLista: ['id', 'data', 'tutor', 'pet', 'total'], // 24/11: idem
                 campos: ['modo', 'motivo', 'linhas'],
                 resumir: fn (array $v, int $tenantId) => $this->resumoDoEstorno(
                     $this->resumoDaVenda((int) ($v['id'] ?? 0), $tenantId),
@@ -665,7 +667,9 @@ trait CatalogoDaClinica
 
                     return $lista->map(fn (Mensagem $m) => [
                         'id' => (int) $m->id,
-                        'de' => $m->getAttribute('tutor') ?? $m->remetente ?? '—',
+                        // E-mail (origem_id): o "De" é livre (sem SPF/DKIM), então mostra SEMPRE o remetente de verdade, marcado como não
+                        // verificado, e nunca só o nome do tutor vinculado (um remetente forjado pareceria o próprio tutor).
+                        'de' => $m->origem_id !== null ? ($m->remetente ?? '—').' (remetente não verificado)' : ($m->getAttribute('tutor') ?? $m->remetente ?? '—'),
                         'mensagem' => $m->texto,
                         'recebida_em' => $m->created_at?->format('d/m/Y H:i'),
                         'status' => $m->status,
@@ -733,9 +737,23 @@ trait CatalogoDaClinica
             default => 'tutor #'.$tutorId.'; pets: '.implode(', ', array_map(fn (array $p) => $p['nome'].' = pet #'.$p['id'], $pets)),
         };
         // O texto vai como string JSON (aspas e quebras escapadas): quem escreveu não fecha a aspa para forjar o contexto.
-        $pedido = 'Mensagem da caixa de entrada ('.$contexto.'): '.json_encode((string) $mensagem->texto, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        $prefixo = 'Mensagem da caixa de entrada ('.$contexto.'): ';
+        $codificar = fn (string $t) => $prefixo.json_encode($t, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        $texto = (string) $mensagem->texto;
+        $pedido = $codificar($texto);
 
-        return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : (string) $mensagem->texto;
+        // E-mail (texto de fora): NUNCA cai no texto cru (que viraria o próprio comando, sem o enquadramento). Se não cabe,
+        // corta o TEXTO até caber, sempre com o prefixo e as aspas. Mensagem do seed mantém o comportamento antigo.
+        if ($mensagem->origem_id !== null) {
+            while (mb_strlen($pedido) > self::LIMITE_DO_PEDIDO && $texto !== '') {
+                $texto = mb_substr($texto, 0, max(0, mb_strlen($texto) - max(10, intdiv(mb_strlen($pedido) - self::LIMITE_DO_PEDIDO, 2) + 1)));
+                $pedido = $codificar($texto);
+            }
+
+            return $pedido;
+        }
+
+        return mb_strlen($pedido) <= self::LIMITE_DO_PEDIDO ? $pedido : $texto;
     }
 
     /**
@@ -758,7 +776,7 @@ trait CatalogoDaClinica
             $cabecalho[] = ['rotulo' => 'Pet', 'valor' => $pet->nome, 'href' => '/pets/'.$pet->id];
             $tutor = $pet->tutor !== null && (int) $pet->tutor->tenant_id === $tenantId ? $pet->tutor : null;
             if ($tutor !== null) {
-                $cabecalho[] = ['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id];
+                $cabecalho[] = ['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.\App\Support\Mascara::telefone($tutor->telefone) : ''), 'href' => '/tutores/'.$tutor->id];
             }
         }
         if ($ag !== null) {
@@ -861,7 +879,7 @@ trait CatalogoDaClinica
         $pet = $petId >= 1 && $this->podeExecutar('consultar_tutores') ? Pet::query()->where('tenant_id', $tenantId)->find($petId) : null;
         $tutor = $pet === null ? null : Tutor::query()->where('tenant_id', $tenantId)->find($pet->tutor_id);
 
-        return $tutor === null ? [] : [['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.$tutor->telefone : ''), 'href' => '/tutores/'.$tutor->id]];
+        return $tutor === null ? [] : [['rotulo' => 'Tutor', 'valor' => $tutor->nome.($tutor->telefone ? ' · '.\App\Support\Mascara::telefone($tutor->telefone) : ''), 'href' => '/tutores/'.$tutor->id]];
     }
 
     /**
@@ -1004,6 +1022,11 @@ trait CatalogoDaClinica
         if (in_array($tool, ['estornar_cobranca', 'estornar_venda'], true) && array_key_exists('linhas', $valores)) {
             $valores['linhas'] = $this->itensDoEstorno($valores['linhas']);
         }
+        // 24/11 (reviewer): idem na venda — só catalogo_item_id e quantidade de cada item (chave a mais, como um "pin", não vai para a sessão nem para a auditoria).
+        if ($tool === 'registrar_venda' && is_array($valores['itens'] ?? null)) {
+            // Só filtra as chaves (sem converter nada: "02" continua sendo recusado pela validação).
+            $valores['itens'] = array_map(fn ($linha) => is_array($linha) ? array_intersect_key($linha, array_flip(['catalogo_item_id', 'quantidade'])) : $linha, $valores['itens']);
+        }
 
         return $valores;
     }
@@ -1031,6 +1054,37 @@ trait CatalogoDaClinica
             fn (array $l) => ['item_id' => $l['item_id'], 'quantidade' => $l['quantidade']],
             array_filter($plano['linhas'], fn (array $l) => $l['quantidade'] >= 1),
         ))];
+    }
+
+    /**
+     * 24/11 (R1): referência do plano do estorno mostrado ao humano. Hash das linhas que serão estornadas (item_id,
+     * quantidade e valor de cada uma, em ordem) — qualquer linha a mais, a menos ou com outra quantidade/valor muda a
+     * referência, e o total decorre das linhas. Só leitura (mesmo cálculo do congelarEstorno). null: tool sem plano, ou
+     * plano recusado (a recusa já tem a própria frase). Não é segredo: o servidor sempre recalcula; serve para comparar.
+     */
+    public function referenciaDoPlano(string $tool, array $valores): ?string
+    {
+        $servico = match ($tool) {
+            'estornar_cobranca' => app(CobrancaService::class),
+            'estornar_venda' => app(VendaService::class),
+            default => null,
+        };
+        if ($servico === null) {
+            return null;
+        }
+
+        try {
+            $plano = $servico->planoDoEstorno((int) ($valores['id'] ?? 0), (string) ($valores['modo'] ?? ''),
+                $this->itensDoEstorno($valores['linhas'] ?? []), $this->contexto->tenantId());
+        } catch (\App\Exceptions\RegraDeNegocioException) {
+            return null;
+        }
+
+        $linhas = array_values(array_map(fn (array $l) => [(int) $l['item_id'], (int) $l['quantidade'], (int) $l['valor_centavos']],
+            array_filter($plano['linhas'], fn (array $l) => $l['quantidade'] >= 1)));
+        usort($linhas, fn (array $a, array $b) => $a[0] <=> $b[0]);
+
+        return substr(hash('sha256', json_encode([$tool, (int) ($valores['id'] ?? 0), $linhas])), 0, 32);
     }
 
     /**

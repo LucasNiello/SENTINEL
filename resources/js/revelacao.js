@@ -7,6 +7,7 @@ const LIMITE_MS = 3000;     // nunca segura a página mais que isso, mesmo se al
 
 export function revelarPagina(raiz) {
     if (!raiz) return;
+    if (document.documentElement.classList.contains('sem-cortina')) { raiz.remove(); return; }
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) { raiz.remove(); return; }
 
     const contagem = raiz.querySelector('[data-revelacao-contagem]');

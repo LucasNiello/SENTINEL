@@ -38,7 +38,7 @@ não é exercitada.
 6. Isolamento por tenant em todo método de service e tool: o tenant vem do
    `ContextoUsuario` e filtra toda leitura, alteração, exclusão e restauração;
    registro de outro tenant é tratado como inexistente.
-7. Confirmação conferida no servidor (prazo de 5 min da proposta, consumo único, valores só da sessão; sem janela de 2 a 12 s desde a decisão B de 13/11),
+7. Confirmação conferida no servidor, no fluxo de um passo (prazo de 5 min da proposta, consumo único; os valores recebidos do card são revalidados e escopados por tenant no servidor, e segredos ficam fora de `valores`; rascunho só do dono — usuário e tenant que o abriram —, com a mesma resposta de "indisponível" para quem não é; sem janela de 2 a 12 s desde a decisão B de 13/11),
    nunca só na interface.
 8. CPF e salário mascarados nas respostas das tools e na auditoria
    (`audit_logs` e log de arquivo).
@@ -61,6 +61,17 @@ Domínio clínica (aplicar quando o bloco tocar a clínica/petshop):
     a máscara LGPD vale dentro dos itens.
 17. Ler o log de decisões da sessão (`.claude/decisoes/`) e apontar decisão
     que contradiga a Documentação 1.2 ou o CLAUDE.md.
+
+# ESCOPO E ECONOMIA (23/11)
+- Leia só os arquivos listados no pedido e o que eles chamam diretamente; se
+  o pedido não trouxer a lista, devolva "informe os arquivos tocados" em vez
+  de explorar o projeto.
+- Aplique só os itens do checklist indicados no pedido.
+- Use Grep antes de Read. Não leia .docx.
+- Item 17: leia só o fim do log do dia (últimas 60 linhas).
+- Segunda passada: só as correções feitas depois da primeira, não o bloco
+  inteiro.
+- Relatório com no máximo 40 linhas.
 
 # FORMATO DO RELATÓRIO
 Liste os achados por severidade (bloqueador / importante / cosmético), cada um

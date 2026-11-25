@@ -92,13 +92,13 @@ class FormularioAgenteTest extends TestCase
         $this->assertFalse($campos['nome']['faltando']);
 
         $this->assertTrue($campos['documento']['sensivel']);
-        $this->assertSame('***.***.789-01', $campos['documento']['valor']);
+        $this->assertSame('123.***.**9-01', $campos['documento']['valor']);
         $this->assertSame('email', $campos['email']['tipo']);
         $this->assertFalse($campos['email']['obrigatorio']);
         $this->assertNull($campos['email']['valor']);
 
         // LGPD: o front só vê a máscara; a sessão guarda o valor cru para a confirmação.
-        $this->assertSame('***.***.789-01', $resposta->json('argumentos.documento'));
+        $this->assertSame('123.***.**9-01', $resposta->json('argumentos.documento'));
         $this->assertStringNotContainsString('123.456.789', $resposta->getContent());
         $this->assertSame('123.456.789-01', session('confirmacoes.'.$resposta->json('proposta').'.argumentos.documento'));
         $this->assertNull($resposta->json('token'), 'o token de segurar só sai no Revisar');
@@ -210,9 +210,9 @@ class FormularioAgenteTest extends TestCase
         $this->assertEquals(5000, $trocado->salario);
 
         $log = AuditLog::query()->latest('id')->first();
-        $this->assertSame('***.***.777-66', $log->parametros['cpf']);
+        $this->assertSame('999.***.**7-66', $log->parametros['cpf']);
         $this->assertSame('[redigido]', $log->parametros['salario']);
-        $this->assertSame('***.***.333-44', $log->parametros_propostos['cpf']);
+        $this->assertSame('111.***.**3-44', $log->parametros_propostos['cpf']);
         $this->assertSame('[redigido]', $log->parametros_propostos['salario']);
     }
 
@@ -242,7 +242,7 @@ class FormularioAgenteTest extends TestCase
     {
         // Papel rebaixado entre propor e revisar: o Revisar nega, e a negação é o desfecho da proposta.
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
-        $this->logarComo('leitura', 1);
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitura'])->save();
         $this->revisar($proposta, ['nome' => 'Loja'])
             ->assertStatus(403)
             ->assertJsonPath('tipo', 'negado');
@@ -252,7 +252,7 @@ class FormularioAgenteTest extends TestCase
         $this->logarComo('operador', 1);
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
         $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
-        $this->logarComo('leitura', 1);
+        \Illuminate\Support\Facades\Auth::user()->forceFill(['papel' => 'leitura'])->save();
         $this->travel(2)->seconds();
         $this->postJson('/agente/confirmar', ['token' => $token])
             ->assertStatus(403)
@@ -436,15 +436,15 @@ class FormularioAgenteTest extends TestCase
         $proposta = $this->rascunho(['nome' => 'Loja', 'documento' => '123.456.789-01'], 'criar_cliente');
 
         $resposta = $this->revisar($proposta, ['documento' => '999.888.777-66', 'email' => 'nao-e-email'])->assertStatus(422);
-        $this->assertSame('***.***.777-66', $this->campos($resposta)['documento']['valor'], 'o card mostra o editado');
+        $this->assertSame('999.***.**7-66', $this->campos($resposta)['documento']['valor'], 'o card mostra o editado');
 
         // Corrige o e-mail e deixa o documento em branco ("manter"): vale o que o humano editou, não o da IA.
         $this->revisarEConfirmar($proposta, ['documento' => '', 'email' => 'loja@exemplo.com'])->assertOk();
 
         $this->assertSame('999.888.777-66', Cliente::query()->sole()->documento);
         $sucesso = AuditLog::query()->where('resultado', 'sucesso')->sole();
-        $this->assertSame('***.***.789-01', $sucesso->parametros_propostos['documento'], 'o proposto continua sendo o da IA');
-        $this->assertSame('***.***.777-66', $sucesso->parametros['documento']);
+        $this->assertSame('123.***.**9-01', $sucesso->parametros_propostos['documento'], 'o proposto continua sendo o da IA');
+        $this->assertSame('999.***.**7-66', $sucesso->parametros['documento']);
     }
 
     public function test_os_5_minutos_do_rascunho_valem_tambem_para_o_token_de_segurar(): void
@@ -631,7 +631,7 @@ class FormularioAgenteTest extends TestCase
         $this->assertTrue($campos['salario']['informado']);
         $this->assertNull($campos['salario']['valor'], 'a máscara do salário esconde tudo: nada para mostrar');
         $this->assertTrue($campos['cpf']['informado']);
-        $this->assertSame('***.***.333-44', $campos['cpf']['valor']);
+        $this->assertSame('111.***.**3-44', $campos['cpf']['valor']);
     }
 
     public function test_admin_ve_o_salario_formatado_em_reais_so_no_card(): void
@@ -642,7 +642,7 @@ class FormularioAgenteTest extends TestCase
         $campos = $this->campos($resposta);
         $this->assertSame('R$ 4.567,89', $campos['salario']['valor']);
         $this->assertTrue($campos['salario']['informado']);
-        $this->assertSame('***.***.333-44', $campos['cpf']['valor'], 'CPF continua mascarado até para o admin');
+        $this->assertSame('111.***.**3-44', $campos['cpf']['valor'], 'CPF continua mascarado até para o admin');
         $this->assertSame('[redigido]', $resposta->json('argumentos.salario'), 'fora do card, mascarado');
 
         // "4.567,89" digitado no card não some calado: volta como erro do campo, e o formulário mantém o formato.
@@ -707,7 +707,7 @@ class FormularioAgenteTest extends TestCase
 
         $resposta = $this->confirmar($this->propor(self::FUNCIONARIO, 'criar_funcionario'))->assertOk();
 
-        $this->assertSame('***.***.333-44', $resposta->json('resultado.cpf'));
+        $this->assertSame('111.***.**3-44', $resposta->json('resultado.cpf'));
         $this->assertSame('[redigido]', $resposta->json('resultado.salario'));
         $this->assertStringNotContainsString('111.222', $resposta->getContent());
         $this->assertStringNotContainsString('4567', $resposta->getContent());

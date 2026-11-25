@@ -281,12 +281,12 @@ class ClinicaTelasController extends Controller
         }
         abort_unless($this->contexto->ehDono(), 403);
 
-        $filtros = $this->filtros($request, ['periodo' => 'nullable|in:dia,semana,mes', 'dia' => 'nullable|date_format:Y-m-d']);
+        $filtros = $this->filtros($request, ['periodo' => 'nullable|in:dia,semana,mes,ano', 'dia' => 'nullable|date_format:Y-m-d']);
         $periodo = $filtros['periodo'] ?? 'mes';
         $dia = $this->data($filtros['dia'] ?? null);
         [$inicio, $fim] = $resultados->intervalo($periodo, $dia);
         $passo = fn (int $sinal) => match ($periodo) {
-            'semana' => $dia->addWeeks($sinal), 'mes' => $dia->startOfMonth()->addMonthsNoOverflow($sinal), default => $dia->addDays($sinal),
+            'semana' => $dia->addWeeks($sinal), 'mes' => $dia->startOfMonth()->addMonthsNoOverflow($sinal), 'ano' => $dia->startOfYear()->addYears($sinal), default => $dia->addDays($sinal),
         };
 
         $resumo = $resultados->resumo($this->contexto->tenantId(), $inicio, $fim);

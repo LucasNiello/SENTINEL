@@ -31,7 +31,7 @@ class ClinicaSeederTest extends TestCase
         parent::setUp();
         $this->travelTo(Carbon::parse('2026-11-10 08:00', 'America/Sao_Paulo'));
         $this->definirSenha(self::SENHA);
-        if (! in_array($this->name(), ['test_sem_demo_senha_ou_com_senha_fraca_nada_e_gravado', 'test_saida_do_seed_nao_mostra_a_demo_senha', 'test_tenant_fora_da_config_da_clinica_nada_e_gravado'], true)) {
+        if (! in_array($this->name(), ['test_sem_demo_senha_ou_com_senha_fraca_nada_e_gravado', 'test_saida_do_seed_nao_mostra_a_demo_senha', 'test_tenant_fora_da_config_da_clinica_nada_e_gravado', 'test_nenhum_agendamento_cai_no_intervalo_do_expediente'], true)) {
             $this->seed(ClinicaSeeder::class);
         }
     }
@@ -207,6 +207,58 @@ class ClinicaSeederTest extends TestCase
             $this->assertGreaterThan(0, $r['despesas'], $mes->format('m/Y'));
             $margem = $r['lucro'] / max(1, $r['faturamento']);
             $this->assertTrue($margem > 0.1 && $margem < 0.7, $mes->format('m/Y').': margem '.round($margem * 100).'%');
+        }
+    }
+
+    /** 23/11, pedidos 20 e 26 da bateria: um bloco de hoje com as 4 vagas do vet2 ocupadas e a atendente ocupada no mesmo horário. */
+    public function test_bloco_lotado_para_a_bateria_do_agente(): void
+    {
+        $vet2 = User::where('email', 'vet2@clinica.sentinel.br')->firstOrFail();
+        $lotado = Agendamento::where('tenant_id', self::T)->where('profissional_id', $vet2->id)->where('setor', 'clinica')
+            ->where('inicio', '>=', now())->get()->groupBy(fn ($a) => $a->inicio->toDateTimeString())->filter(fn ($g) => $g->count() === 4);
+        $this->assertCount(1, $lotado, 'um bloco com as 4 vagas do vet2 ocupadas');
+        $bloco = $lotado->keys()->first();
+        $this->assertSame(now()->toDateString(), substr($bloco, 0, 10), 'o bloco é de hoje');
+
+        $quinta = app(\App\Services\AgendaService::class)->motivoParaNaoAgendar(['pet_id' => Pet::where('tenant_id', self::T)->where('nome', 'Amora')->value('id'),
+            'profissional_id' => $vet2->id, 'catalogo_item_id' => CatalogoItem::where('tenant_id', self::T)->where('nome_comercial', 'Consulta clínica')->value('id'),
+            'inicio' => Carbon::parse($bloco), 'fim' => Carbon::parse($bloco)->addMinutes(30)], self::T);
+        $this->assertNotNull($quinta, 'a quinta consulta no bloco é recusada');
+
+        $estetica = User::where('email', 'estetica1@clinica.sentinel.br')->firstOrFail();
+        $this->assertTrue(Agendamento::where('tenant_id', self::T)->where('profissional_id', $estetica->id)->where('setor', 'petshop')
+            ->where('inicio', $bloco)->exists(), 'a atendente está ocupada no mesmo horário (pedido 26)');
+    }
+
+    public function test_nenhum_agendamento_cai_no_intervalo_do_expediente(): void
+    {
+        // O setUp não semeou este teste: o seed roda aqui, com almoço das 12:00 às 13:00 no expediente.
+        config(['sentinel.agenda.expediente.intervalo' => ['inicio' => '12:00', 'fim' => '13:00']]);
+        $this->seed(ClinicaSeeder::class);
+
+        $agendamentos = Agendamento::where('tenant_id', self::T)->where('inicio', '>=', now()->startOfDay())->get();
+        $this->assertGreaterThan(10, $agendamentos->count());
+        foreach ($agendamentos as $a) {
+            $almocoIni = $a->inicio->copy()->setTime(12, 0);
+            $almocoFim = $a->inicio->copy()->setTime(13, 0);
+            $this->assertFalse($a->inicio->lt($almocoFim) && $a->fim->gt($almocoIni), "agendamento {$a->id} às {$a->inicio} toca o intervalo");
+        }
+    }
+
+    public function test_lancamentos_em_varios_meses_e_o_ano_sem_prejuizo(): void
+    {
+        $meses = Lancamento::where('tenant_id', self::T)->get()->map(fn ($l) => substr((string) $l->data, 0, 7))->unique();
+        $this->assertGreaterThanOrEqual(6, $meses->count(), 'despesas em pelo menos 6 meses diferentes');
+
+        $resultados = app(\App\Services\ResultadosClinica::class);
+        $hoje = \Carbon\CarbonImmutable::now();
+        $ano = $resultados->resumo(self::T, ...$resultados->intervalo('ano', $hoje));
+        $this->assertGreaterThan(0, $ano['despesas']);
+        $this->assertGreaterThan(0, $ano['lucro'], 'o ano não mostra prejuízo');
+
+        for ($m = $hoje->month; $m >= 1; $m--) {
+            $r = $resultados->resumo(self::T, ...$resultados->intervalo('mes', $hoje->setDay(1)->setMonth($m)));
+            $this->assertGreaterThanOrEqual(0, $r['lucro'], "mês {$m}: lucro {$r['lucro']}");
         }
     }
 

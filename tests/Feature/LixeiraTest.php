@@ -96,7 +96,7 @@ class LixeiraTest extends TestCase
             ->assertJsonMissingPath('formulario.reautenticar');
         $resumo = collect($resposta->json('formulario.resumo'))->pluck('valor', 'rotulo');
         $this->assertSame('Mercado Central', $resumo['Nome']);
-        $this->assertSame('***.***.789-01', $resumo['Documento'], 'LGPD: o card só mostra a máscara do CPF');
+        $this->assertSame('123.***.**9-01', $resumo['Documento'], 'LGPD: o card só mostra a máscara do CPF');
         $this->assertNotNull(Cliente::find($cliente->id), 'propor não exclui nada');
 
         $token = $this->revisar($resposta->json('proposta'))->assertOk()->json('token');

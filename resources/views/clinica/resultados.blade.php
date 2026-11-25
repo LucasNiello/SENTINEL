@@ -1,5 +1,12 @@
 @extends('layouts.app')
 
+@push('estilos')
+    <style>
+        .resultados-mobile td {overflow-wrap:anywhere;min-width:0}
+    </style>
+@endpush
+
+
 @section('titulo', 'Resultados')
 
 @php
@@ -10,14 +17,20 @@
     $rotuloPeriodo = match ($periodo) {
         'dia' => $dia->format('d/m/Y'),
         'semana' => $inicio->format('d/m').' a '.$fim->format('d/m/Y'),
+        'ano' => (string) $dia->year,
         default => $meses[$dia->month - 1].' de '.$dia->year,
     };
-    $nomes = ['dia' => ['Dia anterior', 'Próximo dia'], 'semana' => ['Semana anterior', 'Próxima semana'], 'mes' => ['Mês anterior', 'Próximo mês']][$periodo];
+    $nomes = ['dia' => ['Dia anterior', 'Próximo dia'], 'semana' => ['Semana anterior', 'Próxima semana'], 'mes' => ['Mês anterior', 'Próximo mês'], 'ano' => ['Ano anterior', 'Próximo ano']][$periodo];
     // Barra de proporção por setor (largura = parte do faturamento); o número está sempre ao lado.
     $parte = fn (int $valor) => $r['faturamento'] > 0 ? (int) round($valor * 100 / $r['faturamento']) : 0;
 @endphp
 
 @section('conteudo')
+@if (request()->query('amostra') === 'estados')
+    @include('amostras.estados', ['tipoAmostra' => 'resultados'])
+@elseif (request()->query('amostra') === 'painel-dono')
+    @include('amostras.painel-dono')
+@else
     <header class="page-header">
         <p class="eyebrow">Resultados</p>
         <h1>Resultados da clínica e do petshop</h1>
@@ -53,7 +66,7 @@
     <div class="blocos">
         <section class="bloco" aria-labelledby="titulo-setores">
             <h2 id="titulo-setores">Por setor</h2>
-            <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="Resultados por setor">
+            <div class="tabela-rolagem tabela-empilha resultados-mobile" tabindex="0" role="region" aria-label="Resultados por setor">
                 <table>
                     <thead><tr><th scope="col">Setor</th><th scope="col" class="num">Faturamento</th><th scope="col">Parte</th><th scope="col" class="num">Estornado</th><th scope="col" class="num">Líquido</th><th scope="col" class="num">Ticket médio</th></tr></thead>
                     <tbody>
@@ -77,7 +90,7 @@
             @if ($r['top_itens'] === [])
                 <p class="vazio">Nenhum pagamento no período.</p>
             @else
-                <div class="tabela-rolagem tabela-empilha" tabindex="0" role="region" aria-label="Itens que mais faturaram">
+                <div class="tabela-rolagem tabela-empilha resultados-mobile" tabindex="0" role="region" aria-label="Itens que mais faturaram">
                     <table>
                         <thead><tr><th scope="col">Item</th><th scope="col" class="num">Quantidade</th><th scope="col" class="num">Total</th></tr></thead>
                         <tbody>
@@ -94,4 +107,5 @@
             @endif
         </section>
     </div>
+@endif
 @endsection

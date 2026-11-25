@@ -49,13 +49,16 @@ class ConversaAgente
         $frase = is_string($resposta['lista']['frase'] ?? null) && ($resposta['tipo'] ?? null) === 'resultado_leitura' ? $resposta['lista']['frase'] : null;
         $texto = match ($resposta['tipo'] ?? null) {
             'texto' => $resposta['mensagem'] ?? '',
-            'confirmacao_pendente' => self::AVISO_PROPOSTA,
+            // 23/11: a proposta fecha o turno com uma fala do SERVIDOR (nunca da IA), para o histórico seguir alternando
+            // usuário/assistente e a IA poder corrigir a proposta pelo chat. O estado dela muda depois (marcarProposta).
+            'confirmacao_pendente' => $this->fraseDaProposta($resposta, 'ainda não confirmada'),
             'resultado_leitura' => $frase ?? 'A consulta foi concluída. Os dados não são guardados no histórico.',
             default => null,
         };
         if ($texto === null) return;
-        $interno = $frase === null && (isset($resposta['tool']) || in_array($resposta['tipo'] ?? null, ['confirmacao_pendente', 'resultado_leitura'], true));
-        $this->acrescentar($sessao, $mensagem, $texto, $interno);
+        $tipo = $resposta['tipo'] ?? null;
+        $interno = $tipo !== 'confirmacao_pendente' && $frase === null && (isset($resposta['tool']) || $tipo === 'resultado_leitura');
+        $this->acrescentar($sessao, $mensagem, $texto, $interno, $tipo === 'confirmacao_pendente' ? ['resumo' => $this->resumoDaProposta($resposta)] : []);
     }
 
     /**
@@ -102,11 +105,83 @@ class ConversaAgente
         $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase);
     }
 
-    private function acrescentar(Session $sessao, string $mensagem, string $texto, bool $interno = false): void
+    /** Como cada desfecho de uma proposta aparece no histórico (frase do servidor, sem valores sensíveis). */
+    private const DESFECHOS = [
+        'confirmada' => 'confirmada e executada',
+        'cancelada' => 'cancelada pelo usuário. Nada foi gravado',
+        'substituida' => 'substituída por novo pedido. Nada foi gravado',
+        'expirada' => 'expirou sem confirmação. Nada foi gravado',
+        'falhou' => 'não foi executada. Nada foi gravado',
+    ];
+
+    /**
+     * Liga a última fala de proposta ao id dela (o UUID só existe depois do guardarRascunho), para o desfecho
+     * (confirmada, cancelada, substituída, expirada) atualizar a mesma fala.
+     */
+    public function vincularProposta(Session $sessao, string $proposta): void
+    {
+        $dados = $sessao->get(self::CHAVE, []);
+        $mensagens = (array) ($dados['mensagens'] ?? []);
+        $ultima = array_key_last($mensagens);
+        if (($dados['identidade'] ?? null) !== $this->identidade() || $ultima === null || ! isset($mensagens[$ultima]['resumo'])) {
+            return;
+        }
+        $mensagens[$ultima]['proposta'] = $proposta;
+        $sessao->put(self::CHAVE, ['identidade' => $this->identidade(), 'mensagens' => $mensagens]);
+    }
+
+    /**
+     * 23/11: o desfecho de uma proposta (sem IA, fala do servidor): a mesma fala passa de "ainda não confirmada" para
+     * "cancelada", "substituída por novo pedido", etc. O pedido original continua no histórico, então "na verdade,
+     * coloca R$ 90" ainda tem a que se referir. Fala que já saiu do histórico (limite de mensagens): nada a fazer.
+     */
+    public function marcarProposta(Session $sessao, string $proposta, string $desfecho): void
+    {
+        $dados = $sessao->get(self::CHAVE, []);
+        if (($dados['identidade'] ?? null) !== $this->identidade() || ! isset(self::DESFECHOS[$desfecho])) {
+            return;
+        }
+        $mensagens = (array) ($dados['mensagens'] ?? []);
+        foreach ($mensagens as $i => $m) {
+            if (($m['proposta'] ?? null) === $proposta) {
+                $mensagens[$i]['content'] = $this->sanitizar('[Proposta: '.($m['resumo'] ?? 'sem resumo').' — '.self::DESFECHOS[$desfecho].']');
+                $sessao->put(self::CHAVE, ['identidade' => $this->identidade(), 'mensagens' => $mensagens]);
+
+                return;
+            }
+        }
+    }
+
+    /** "[Proposta: Cadastrar item do catálogo (nome: Banho premium; …) — ainda não confirmada]". */
+    private function fraseDaProposta(array $resposta, string $situacao): string
+    {
+        return $this->sanitizar('[Proposta: '.$this->resumoDaProposta($resposta).' — '.$situacao.']');
+    }
+
+    /**
+     * O que foi proposto, para o histórico: o título do card e os campos NÃO sensíveis (cpf, documento, telefone, salário
+     * e o texto clínico ficam de fora), cada valor curto. É o que permite corrigir pelo chat ("coloca R$ 90").
+     */
+    private function resumoDaProposta(array $resposta): string
+    {
+        $titulo = is_string($resposta['formulario']['titulo'] ?? null) ? $resposta['formulario']['titulo'] : (string) ($resposta['tool'] ?? 'ação');
+        $pares = [];
+        foreach ((array) ($resposta['argumentos'] ?? []) as $campo => $valor) {
+            if (! is_string($campo) || $campo === 'tenant_id' || in_array($campo, AuditoriaService::camposSensiveis(), true) || ! is_scalar($valor) || $valor === '') {
+                continue;
+            }
+            $pares[] = $campo.': '.mb_substr((string) $valor, 0, 60);
+        }
+
+        // Até 600 caracteres: o fechamento "— cancelada…]" nunca fica de fora do limite de 1000 do sanitizar().
+        return mb_substr($titulo.($pares === [] ? '' : ' ('.implode('; ', $pares).')'), 0, 600);
+    }
+
+    private function acrescentar(Session $sessao, string $mensagem, string $texto, bool $interno = false, array $extra = []): void
     {
         $historico = $this->ler($sessao);
         $historico[] = ['role' => 'user', 'content' => $this->sanitizar($mensagem)];
-        $historico[] = ['role' => 'assistant', 'content' => $this->sanitizar($texto)];
+        $historico[] = ['role' => 'assistant', 'content' => $this->sanitizar($texto), ...$extra];
         if ($interno) $historico[array_key_last($historico)]['interno'] = true;
         $historico = array_slice($historico, -self::MAX_MENSAGENS);
         while (count($historico) > 2 && array_sum(array_map(fn ($m) => mb_strlen($m['content']), $historico)) > self::MAX_CARACTERES) {

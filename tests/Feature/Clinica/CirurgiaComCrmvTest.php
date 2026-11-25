@@ -349,6 +349,27 @@ class CirurgiaComCrmvTest extends TestCase
         $this->recusa(fn () => $this->agenda->agendar([...$base, 'catalogo_item_id' => $consulta->id, 'inicio' => '2026-11-13 15:00'], self::T), 'não tem vaga');
     }
 
+    /** 23/11: a cirurgia pede o bloco inteiro; basta UMA consulta marcada em qualquer dos 2 blocos para recusar, e nada é gravado. */
+    public function test_cirurgia_e_recusada_em_bloco_com_consulta_ja_marcada(): void
+    {
+        $vet = $this->usuarioClinica('veterinario');
+        $consulta = $this->item();
+        $aut = ['ator' => $vet, 'reautenticado' => true];
+        $base = ['pet_id' => $this->thor->id, 'profissional_id' => $vet->id, 'catalogo_item_id' => $this->castracao->id];
+
+        // Consulta no 2º bloco da cirurgia (15:00): a cirurgia das 14:00 cobre 14:00 e 15:00 e é recusada.
+        $this->agenda->agendar(['pet_id' => $this->thor->id, 'profissional_id' => $vet->id, 'catalogo_item_id' => $consulta->id, 'inicio' => '2026-11-13 15:00'], self::T);
+        $this->recusa(fn () => $this->agenda->agendar([...$base, 'inicio' => '2026-11-13 14:00'], self::T, $aut), 'ocupa o bloco inteiro');
+        // E no 1º bloco (15:00 como início, com a consulta nele): também recusada.
+        $this->recusa(fn () => $this->agenda->agendar([...$base, 'inicio' => '2026-11-13 15:00'], self::T, $aut), 'ocupa o bloco inteiro');
+        $this->assertSame(1, Agendamento::count(), 'a recusa não grava a cirurgia');
+
+        // Cancelada a consulta, o bloco volta a ficar livre e a cirurgia entra.
+        Agendamento::query()->update(['status' => 'cancelado']);
+        $this->agenda->agendar([...$base, 'inicio' => '2026-11-13 14:00'], self::T, $aut);
+        $this->assertSame(2, Agendamento::count());
+    }
+
     /** Revisão de 16/11: mover a cirurgia de um colega mantendo o colega é recusado; e consulta não vira cirurgia pela troca. */
     public function test_nao_remarca_a_cirurgia_do_colega_sem_assumir_e_consulta_nao_vira_cirurgia(): void
     {

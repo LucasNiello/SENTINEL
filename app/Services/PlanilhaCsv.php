@@ -18,10 +18,16 @@ class PlanilhaCsv
     {
         $arquivo = fopen('php://temp', 'r+');
         fwrite($arquivo, self::BOM);
-        fputcsv($arquivo, array_map(self::celula(...), $colunas), ';', '"', '');
+        // Dinheiro em reais: a coluna "preco_centavos" sai como "preco_reais", com "80,00" (vírgula decimal do Excel em português).
+        $cabecalho = array_map(fn (string $c) => str_ends_with($c, '_centavos') ? substr($c, 0, -9).'_reais' : $c, $colunas);
+        fputcsv($arquivo, array_map(self::celula(...), $cabecalho), ';', '"', '');
 
         foreach ($linhas as $linha) {
-            fputcsv($arquivo, array_map(fn (string $coluna) => self::celula($linha[$coluna] ?? null), $colunas), ';', '"', '');
+            fputcsv($arquivo, array_map(function (string $coluna) use ($linha) {
+                $valor = $linha[$coluna] ?? null;
+
+                return self::celula(str_ends_with($coluna, '_centavos') && is_int($valor) ? \App\Support\Dinheiro::emReais($valor) : $valor);
+            }, $colunas), ';', '"', '');
         }
 
         rewind($arquivo);

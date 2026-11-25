@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\Dinheiro;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -106,6 +107,21 @@ class FormularioTool
             }
             if (isset($erros[$nome])) {
                 $campo['erro'] = $erros[$nome];
+            }
+
+            // Dinheiro em centavos no banco e nas regras, em REAIS na tela: o card mostra "80,00" e rotula "(R$)"; o
+            // que a pessoa digita volta em reais e o servidor converte (AiAgentService::aplicarValores). Nunca "8000".
+            if (str_ends_with($nome, '_centavos')) {
+                $campo['moeda'] = true;
+                $campo['tipo'] = 'numero';
+                unset($campo['inteiro']);
+                $campo['rotulo'] .= ' (R$)';
+                $campo['valor'] = is_int($valor) ? Dinheiro::emReais($valor) : $valor;
+                foreach (['min', 'max'] as $limite) {
+                    if (isset($campo[$limite])) {
+                        $campo[$limite] = $campo[$limite] / 100;
+                    }
+                }
             }
 
             $campos[] = $campo;

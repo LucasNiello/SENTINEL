@@ -7,6 +7,7 @@ use App\Services\AiAgentService;
 use App\Services\ConsultaAuditoria;
 use App\Services\ContextoUsuario;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\Request;
 
 /**
  * B3 (Bloco 7): as telas da bancada fora do agente. Aqui só se monta a página; os dados
@@ -60,7 +61,7 @@ class TelasController extends Controller
     {
     }
 
-    public function cadastros()
+    public function cadastros(Request $request)
     {
         // T1: o Administrador da clínica só gerencia PINs.
         if ($this->contexto->ehAdminDaClinica()) {
@@ -71,7 +72,14 @@ class TelasController extends Controller
         $cadastros = $this->contexto->dominio() === 'clinica' ? self::CADASTROS_CLINICA : self::CADASTROS;
         $entidades = array_map(fn (array $e) => [...$e, 'criar' => $this->agente->podeExecutar($e['criar']) ? $e['criar'] : null], $cadastros);
 
+        // ?cadastro=catalogo abre direto naquele cadastro, mas só entre os que este papel consulta (a mesma regra do RBAC da consulta).
+        // Valor ausente, inválido ou não permitido: a tela abre no primeiro (Tutores).
+        $pedido = $request->query('cadastro');
+        $visiveis = array_keys(array_filter($cadastros, fn (array $e) => $this->agente->podeExecutar($e['consultar'])));
+        $inicial = is_string($pedido) && in_array($pedido, $visiveis, true) ? $pedido : null;
+
         return view('telas.consulta', [
+            'cadastroInicial' => $inicial,
             'titulo' => 'Cadastros',
             'intro' => 'Liste, busque, cadastre e edite sem usar o agente. Toda gravação passa pela mesma revisão e confirmação.',
             'entidades' => $entidades,
@@ -126,7 +134,7 @@ class TelasController extends Controller
             'usuarios' => User::query()->where('tenant_id', $this->contexto->tenantId())->orderBy('name')->pluck('name', 'id')->all(),
             'resultados' => ConsultaAuditoria::resultados(),
             'tools' => [...array_column(array_column($this->agente->tools(), 'function'), 'name'), ConsultaAuditoria::TOOL,
-                ...($this->contexto->dominio() === 'clinica' ? [ClinicaTelasController::TOOL_FICHA, ClinicaTelasController::TOOL_FICHA_TUTOR, ClinicaTelasController::TOOL_RESULTADOS] : [])],
+                ...($this->contexto->dominio() === 'clinica' ? [ClinicaTelasController::TOOL_FICHA, ClinicaTelasController::TOOL_FICHA_TUTOR, ClinicaTelasController::TOOL_RESULTADOS, PainelDonoController::TOOL_PAINEL, PainelDonoController::TOOL_SALVAR] : [])],
         ]);
     }
 }

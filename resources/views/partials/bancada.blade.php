@@ -5,16 +5,20 @@
 
 <div id="status-anuncio" class="sr-only" aria-live="assertive"></div>
 
-<div id="overlay-popup">
-    <div id="popup" role="dialog" aria-modal="true" aria-label="Resultado da operação"></div>
+{{-- Toast (23/11): resultado da operação no canto inferior direito, sem fundo escurecido e sem bloquear a tela. Duas regiões
+     vivas permanentes (o leitor de tela anuncia o que entra nelas): status (educado) para sucesso/cancelamento/aviso e
+     alert só para erro. Um único componente, mostrarPopup(estado, texto). --}}
+<div id="toasts">
+    <div id="toast-status" role="status" aria-live="polite"></div>
+    <div id="toast-alerta" role="alert"></div>
 </div>
 
 <script>
         const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
         const historico = document.getElementById('historico');
         const statusAnuncio = document.getElementById('status-anuncio');
-        const overlayPopup = document.getElementById('overlay-popup');
-        const popup = document.getElementById('popup');
+        const regiaoToastStatus = document.getElementById('toast-status');
+        const regiaoToastAlerta = document.getElementById('toast-alerta');
 
         // Decisão B (13/11): segurar 2 s é só gesto visual, nas ações destrutivas (o /agente/revisar manda "segurar").
         // As demais escritas confirmam com um clique. O servidor não tem mais janela de 2 a 12 s.
@@ -111,9 +115,24 @@
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const trCabecalho = document.createElement('tr');
+            // Coluna de dinheiro em centavos (nome termina em _centavos): a tabela mostra "preco" em R$ 0,00, nunca "8000".
+            const ehCentavos = (c) => c.endsWith('_centavos');
+            const emReais = (v) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? (v ?? '')
+                : 'R$ ' + (Number(v) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            // O que a tabela mostra, em duas funções que a tabela e o botão Copiar compartilham (a cópia é o que está na tela).
+            // Cabeçalho legível, regra única para qualquer coluna: "_" vira espaço e só a 1ª letra fica maiúscula
+            // ("controla_estoque" → "Controla estoque"). Exceção pontual: preco_centavos é "Preço". As chaves no servidor
+            // e no CSV não mudam.
+            const tituloDaColuna = (c) => {
+                if (c === 'preco_centavos') return 'Preço';
+                const t = (ehCentavos(c) ? c.replace(/_centavos$/, '') : c).replace(/_/g, ' ');
+                return t.charAt(0).toUpperCase() + t.slice(1);
+            };
+            // Booleano (controla_estoque, exige_receita…) aparece como Sim/Não, nunca "true"/"false".
+            const textoDaCelula = (l, c) => ehCentavos(c) ? emReais(l[c]) : (typeof l[c] === 'boolean' ? (l[c] ? 'Sim' : 'Não') : (l[c] ?? ''));
             colunas.forEach(c => {
                 const th = document.createElement('th');
-                th.textContent = c;
+                th.textContent = tituloDaColuna(c);
                 th.scope = 'col';
                 trCabecalho.appendChild(th);
             });
@@ -130,7 +149,8 @@
                 if (l.destaque === 'aviso') tr.className = 'linha--aviso';
                 colunas.forEach(c => {
                     const td = document.createElement('td');
-                    td.textContent = l[c] ?? '';
+                    td.textContent = textoDaCelula(l, c);
+
                     tr.appendChild(td);
                 });
                 if (temAcao) {
@@ -188,60 +208,112 @@
             resumo.textContent = linhas.length + ' registro(s) encontrado(s)';
             historico.appendChild(resumo);
             historico.appendChild(rolagem);
+            // Copiar (23/11): a tabela como está na tela, em TSV (cola no Excel/Sheets mantendo as colunas), com o cabeçalho
+            // legível, Sim/Não e R$. Só o que já está mascarado na tela; sem rota, sem auditoria (cópia local). Em toda tabela
+            // do chat e dos Cadastros, exportável ou não.
+            const textoTsv = () => {
+                const limpo = (v) => String(v).replace(/[\t\r\n]+/g, ' ');
+                return [colunas.map((c) => limpo(tituloDaColuna(c))).join('\t'),
+                    ...linhas.map((l) => colunas.map((c) => limpo(textoDaCelula(l, c))).join('\t'))].join('\n');
+            };
+            // O clipboard moderno só existe em contexto seguro (HTTPS, localhost, 127.0.0.1). Pelo IP da rede local (a demo
+            // no celular), cai no plano B: campo de texto temporário + execCommand('copy').
+            const copiarComPlanoB = (texto) => {
+                const campo = document.createElement('textarea');
+                campo.value = texto;
+                campo.setAttribute('readonly', '');
+                campo.style.position = 'fixed';
+                campo.style.opacity = '0';
+                document.body.appendChild(campo);
+                campo.select();
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                document.body.removeChild(campo);
+                return ok;
+            };
+            const copiarTabela = async () => {
+                const texto = textoTsv();
+                try {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(texto);
+                    } else if (!copiarComPlanoB(texto)) {
+                        throw new Error('sem clipboard');
+                    }
+                    mostrarPopup('sucesso', 'Tabela copiada');
+                } catch (e) {
+                    // O clipboard moderno pode recusar (permissão); tenta o plano B antes de desistir.
+                    if (copiarComPlanoB(texto)) mostrarPopup('sucesso', 'Tabela copiada');
+                    else mostrarPopup('erro', 'Não consegui copiar. Use o Exportar CSV.');
+                }
+            };
+            const acoesTabela = document.createElement('div');
+            acoesTabela.className = 'tabela-acoes';
+            const botaoCopiar = document.createElement('button');
+            botaoCopiar.type = 'button';
+            botaoCopiar.className = 'btn-exportar';
+            botaoCopiar.textContent = 'Copiar';
+            botaoCopiar.setAttribute('aria-label', 'Copiar a tabela');
+            botaoCopiar.addEventListener('click', copiarTabela);
+            acoesTabela.appendChild(botaoCopiar);
             if (exportar) {
                 const botaoExportar = document.createElement('button');
                 botaoExportar.type = 'button';
                 botaoExportar.className = 'btn-exportar';
                 botaoExportar.textContent = 'Exportar CSV';
                 botaoExportar.addEventListener('click', () => exportarTabela(exportar, botaoExportar));
-                historico.appendChild(botaoExportar);
+                acoesTabela.appendChild(botaoExportar);
             }
+            historico.appendChild(acoesTabela);
         }
 
+        // Toast (23/11): sucesso e cancelamento somem em 4 s, erro em 8 s; o "×" fecha qualquer um. Passar o mouse ou o
+        // foco por cima pausa a contagem (quem lê devagar não perde o aviso). Sem animação (skill sentinel-visual §1:
+        // bancada sem movimento), o que também respeita prefers-reduced-motion.
+        const DURACAO_TOAST_MS = { sucesso: 4000, neutro: 4000, aviso: 4000, erro: 8000 };
         let timerPopup = null;
 
         function fecharPopup() {
             clearTimeout(timerPopup);
-            overlayPopup.style.display = 'none';
-            popup.replaceChildren();
+            regiaoToastStatus.replaceChildren();
+            regiaoToastAlerta.replaceChildren();
         }
 
-        // textContent: a mensagem pode vir do servidor, nunca vira HTML.
-        // Erro é mensagem crítica: fica até o usuário fechar (botão ou Esc). Os demais somem sozinhos.
+        // textContent: a mensagem pode vir do servidor, nunca vira HTML. Um toast por vez: o novo substitui o anterior.
+        // Só o erro vai para a região role="alert"; os demais, para role="status".
         function mostrarPopup(estado, texto) {
-            clearTimeout(timerPopup);
-            popup.className = estado;
-            popup.setAttribute('role', estado === 'erro' ? 'alertdialog' : 'status');
-            if (estado === 'erro') popup.setAttribute('aria-modal', 'true');
-            else popup.removeAttribute('aria-modal');
-            popup.textContent = texto;
-            overlayPopup.style.display = 'flex';
-            if (estado === 'erro') {
-                const fechar = document.createElement('button');
-                fechar.type = 'button';
-                fechar.className = 'popup-fechar';
-                fechar.textContent = 'Fechar';
-                fechar.addEventListener('click', () => {
+            fecharPopup();
+            const duracao = DURACAO_TOAST_MS[estado] ?? DURACAO_TOAST_MS.sucesso;
+            const toast = document.createElement('div');
+            toast.className = 'toast toast--' + estado;
+            const corpo = document.createElement('span');
+            corpo.className = 'toast__texto';
+            corpo.textContent = texto;
+            const fechar = document.createElement('button');
+            fechar.type = 'button';
+            fechar.className = 'toast__fechar';
+            fechar.textContent = '×';
+            fechar.setAttribute('aria-label', 'Fechar aviso');
+            fechar.addEventListener('click', fecharPopup);
+            toast.appendChild(corpo);
+            toast.appendChild(fechar);
+            const iniciar = () => {
+                clearTimeout(timerPopup);
+                timerPopup = setTimeout(fecharPopup, duracao);
+            };
+            toast.addEventListener('mouseenter', () => clearTimeout(timerPopup));
+            toast.addEventListener('focusin', () => clearTimeout(timerPopup));
+            toast.addEventListener('mouseleave', iniciar);
+            toast.addEventListener('focusout', iniciar);
+            // Esc fecha o toast quando o foco está nele (o toast não toma o foco nem bloqueia o resto da tela).
+            toast.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
                     fecharPopup();
                     focarPagina();
-                });
-                popup.appendChild(fechar);
-                fechar.focus();
-            } else {
-                timerPopup = setTimeout(fecharPopup, 2500);
-            }
+                }
+            });
+            (estado === 'erro' ? regiaoToastAlerta : regiaoToastStatus).appendChild(toast);
+            iniciar();
         }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Tab' && popup.classList.contains('erro') && overlayPopup.style.display === 'flex') {
-                e.preventDefault();
-                popup.querySelector('.popup-fechar')?.focus();
-            }
-            if (e.key === 'Escape' && popup.classList.contains('erro') && overlayPopup.style.display === 'flex') {
-                fecharPopup();
-                focarPagina();
-            }
-        });
 
         // Cancelar e fim de prazo: o servidor tira a proposta da sessão e audita o desfecho. Se foi
         // cancelado ou expirado, quem decide é ele, pelo horário da proposta. Sem rede, a proposta
@@ -368,7 +440,12 @@
                 bloco.appendChild(paragrafo('campo-info', id + '-info', texto));
                 descricoes.push(id + '-info');
             }
-            if (campo.tipo === 'numero' && !campo.inteiro) {
+            if (campo.moeda) {
+                // Dinheiro sempre em reais: o servidor converte para centavos (o card nunca mostra "8000").
+                entrada.placeholder = '0,00';
+                bloco.appendChild(paragrafo('campo-info', id + '-dica', 'Em reais, com vírgula nos centavos (ex.: 45,90).'));
+                descricoes.push(id + '-dica');
+            } else if (campo.tipo === 'numero' && !campo.inteiro) {
                 bloco.appendChild(paragrafo('campo-info', id + '-dica', 'Só números, com ponto nos centavos (ex.: 4567.89).'));
                 descricoes.push(id + '-dica');
             }
@@ -753,7 +830,9 @@
             // O alvo precisa estar no DOM para receber foco. Assim quem abre
             // Novo/Editar por teclado entra no formulário, sem voltar à tabela.
             const primeiroCampo = form.querySelector('input:not([type="hidden"]), select');
-            (primeiroCampo || btnRevisar).focus();
+            // No /agente (conversa com rolagem própria) quem leva o card à vista é a rolagem do histórico; nas outras telas
+            // não há essa rolagem, então o foco continua rolando a página até o card.
+            (primeiroCampo || btnRevisar).focus({ preventScroll: !!document.querySelector('.agent-workspace') });
 
             const pequeno = document.createElement('span');
             pequeno.className = 'pequeno';

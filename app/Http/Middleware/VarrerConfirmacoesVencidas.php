@@ -29,6 +29,9 @@ class VarrerConfirmacoesVencidas
             $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), 'expirado',
                 'A confirmação expirou sem resposta. Nada foi gravado.', ConfirmacoesPendentes::origem($pendente),
                 entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
+            if (isset($pendente['proposta_id'])) {
+                app(\App\Services\ConversaAgente::class)->marcarProposta($request->session(), $pendente['proposta_id'], 'expirada');
+            }
         }
 
         return $resposta;

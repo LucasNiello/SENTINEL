@@ -47,12 +47,12 @@ class ValorAnteriorTest extends TestCase
 
     public function test_atualizar_guarda_o_antes_so_dos_campos_que_mudaram(): void
     {
-        $cliente = Cliente::create(['nome' => 'Mercado Central', 'email' => 'velho@exemplo.com', 'telefone' => '1999', 'tenant_id' => 1]);
+        $cliente = Cliente::create(['nome' => 'Mercado Central', 'email' => 'velho@exemplo.com', 'telefone' => '(19) 98765-4321', 'tenant_id' => 1]);
 
-        $this->confirmar($this->propor(['id' => $cliente->id, 'email' => 'novo@exemplo.com', 'telefone' => '1888'], 'atualizar_cliente'))->assertOk();
+        $this->confirmar($this->propor(['id' => $cliente->id, 'email' => 'novo@exemplo.com', 'telefone' => '(19) 91234-5678'], 'atualizar_cliente'))->assertOk();
 
         $log = $this->sucesso();
-        $this->assertSame(['email' => 'velho@exemplo.com', 'telefone' => '1999'], $log->valores_anteriores);
+        $this->assertSame(['email' => 'velho@exemplo.com', 'telefone' => '(19) 9****-*321'], $log->valores_anteriores);
         $this->assertSame('novo@exemplo.com', $log->parametros['email'], 'o depois continua em parametros');
     }
 
@@ -69,7 +69,7 @@ class ValorAnteriorTest extends TestCase
         $this->assertSame('555.666.777-88', $funcionario->refresh()->cpf);
 
         $anteriores = $this->sucesso()->valores_anteriores;
-        $this->assertSame('***.***.333-44', $anteriores['cpf']);
+        $this->assertSame('111.***.**3-44', $anteriores['cpf']);
         $this->assertSame(AuditoriaService::REDIGIDO, $anteriores['salario']);
         $this->assertArrayHasKey('cargo', $anteriores);
         $this->assertArrayNotHasKey('nome', $anteriores, 'o que não mudou não entra');
@@ -110,7 +110,7 @@ class ValorAnteriorTest extends TestCase
     {
         $cliente = Cliente::create(['nome' => 'Pessoa', 'documento' => '111.222.333-44', 'tenant_id' => 1]);
         $this->confirmar($this->propor(['id' => $cliente->id, 'documento' => '12.345.678/0001-90'], 'atualizar_cliente'))->assertOk();
-        $this->assertSame(['documento' => '***.***.333-44'], $this->sucesso()->valores_anteriores);
+        $this->assertSame(['documento' => '111.***.**3-44'], $this->sucesso()->valores_anteriores);
         $this->assertAuditoriaSemValores(['111.222.333-44', '11122233344']);
 
         AuditLog::query()->delete();
@@ -148,7 +148,7 @@ class ValorAnteriorTest extends TestCase
         $antigo = AuditLog::create(['user_id' => auth()->id(), 'tool' => 'atualizar_funcionario', 'acao' => 'atualizar', 'parametros' => [],
             'valores_anteriores' => ['cpf' => '111.222.333-44', 'salario' => '4567.89'], 'resultado' => 'sucesso', 'papel' => 'admin', 'permitido' => true, 'tenant_id' => 1]);
         $this->getJson("/auditoria/registros/{$antigo->id}")->assertOk()
-            ->assertJsonPath('anterior', ['cpf' => '***.***.333-44', 'salario' => AuditoriaService::REDIGIDO])
+            ->assertJsonPath('anterior', ['cpf' => '111.***.**3-44', 'salario' => AuditoriaService::REDIGIDO])
             ->assertDontSee('111.222.333-44')->assertDontSee('4567');
     }
 
