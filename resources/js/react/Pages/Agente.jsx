@@ -3,6 +3,7 @@ import { usePage } from '@inertiajs/react';
 import Workspace from '../Layouts/Workspace';
 import Farol from '../Components/Farol';
 import Confirmacao from '../Components/Confirmacao';
+import TabelaConsulta from '../Components/TabelaConsulta';
 
 const errosHttp = {
     403: 'Você não tem permissão para esta operação.',
@@ -116,14 +117,11 @@ export default function Agente({ historico = [] }) {
                 case 'negado':
                     throw new Error(typeof dados.mensagem === 'string' ? dados.mensagem : 'Não foi possível processar o pedido.');
                 case 'resultado_leitura':
-                    {
-                        const formularios = (Array.isArray(dados.resultado) ? dados.resultado : [])
-                            .filter((linha) => linha && (linha.acao?.tool || dados.editar) && linha.id)
-                            .map((linha) => ({ id: linha.id, tool: linha.acao?.tool || dados.editar,
-                                rotulo: linha.acao?.rotulo || 'Editar', descricao: linha.nome || linha.descricao || `Registro #${linha.id}` }));
-                        if (formularios.length) setMensagens((atuais) => [...atuais, { formularios }]);
-                        else adicionar('A consulta retornou um resultado que ainda não pode ser exibido nesta tela.', 'msg--aviso');
+                    if (!Array.isArray(dados.resultado) || dados.resultado.some((linha) => !linha || typeof linha !== 'object' || Array.isArray(linha))
+                        || (dados.colunas != null && (!Array.isArray(dados.colunas) || dados.colunas.some((coluna) => typeof coluna !== 'string')))) {
+                        throw new Error('O servidor retornou uma consulta inválida. Tente novamente.');
                     }
+                    setMensagens((atuais) => [...atuais, { consulta: dados }]);
                     break;
                 case 'confirmacao_pendente':
                     if (typeof dados.proposta !== 'string' || !dados.proposta) throw new Error('Proposta inválida. Peça novamente.');
@@ -164,14 +162,8 @@ export default function Agente({ historico = [] }) {
                         </div>}
                         {mensagens.map((mensagem, indice) => mensagem.proposta
                             ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} />
-                            : mensagem.formularios ? <div key={indice} className="msg msg--agente">
-                                <span className="msg__speaker">Sentinel</span>
-                                <p>Registros disponíveis para formulário:</p>
-                                {mensagem.formularios.map((item, i) => <div key={i} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-                                    <p>{item.descricao} · #{item.id}</p>
-                                    <button type="button" className="btn-editar-linha" disabled={pensando} onClick={() => abrirFormulario(item.tool, item.id)}>{item.rotulo} registro #{item.id}</button>
-                                </div>)}
-                            </div>
+                            : mensagem.consulta ? <TabelaConsulta key={indice} consulta={mensagem.consulta} ocupado={pensando} abrirFormulario={abrirFormulario}
+                                prepararPedido={(pedido) => { if (!requisicao.current) { setTexto(pedido.slice(0, 1000)); campo.current?.focus(); } }} />
                             : <div key={indice} className={`msg ${mensagem.classe}`}>
                             <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : mensagem.classe === 'msg--erro' ? 'Atenção' : 'Sentinel'}</span>
                             <span>{mensagem.texto}</span>
