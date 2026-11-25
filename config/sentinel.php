@@ -60,6 +60,12 @@ return [
     'agenda_duracao_maxima_minutos' => (int) env('SENTINEL_AGENDA_DURACAO_MAXIMA_MIN', 480),
 
     /*
+    | Front (migração para React, 18/11): "blade" (padrão, telas de hoje) ou "react" (Inertia).
+    | Qualquer outro valor vale "blade". Lido por App\Support\Front.
+    */
+    'front' => env('SENTINEL_FRONT', 'blade'),
+
+    /*
     | Agenda (decisão do Lucas, 15/11): o único ponto de configuração, lido pelo AgendaService e pelo calendário da
     | ficha (App\Services\GradeDaAgenda). Sem tabela nem campo no banco; pendência: o dono vai configurar isto numa
     | futura aba "Clínica".
