@@ -126,10 +126,10 @@ class LixeiraTest extends TestCase
             ->assertJsonPath('mensagem', 'Não encontrei o cliente com esse nome.');
         $this->comando('excluir_cliente', [])
             ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Informe qual cliente deve ser excluído: o número ou o nome.');
+            ->assertJsonPath('mensagem', 'Qual cliente você quer excluir? Me diga o número ou o nome.');
         $this->comando('excluir_nota_fiscal', [])
             ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Informe qual nota fiscal deve ser excluída: o número.');
+            ->assertJsonPath('mensagem', 'Qual nota fiscal você quer excluir? Me diga o número.');
         $this->comando('restaurar_lancamento', ['busca' => 'Nada'])
             ->assertStatus(422)
             ->assertJsonPath('mensagem', 'Não encontrei o lançamento com essa descrição na lixeira.');

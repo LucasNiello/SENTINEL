@@ -41,6 +41,22 @@ class ConfirmacoesPendentes
      */
     public const PRAZO_RASCUNHO_S = 300;
 
+    /** Quantos cards de tela (sem prazo) o mesmo usuário mantém na sessão; ao passar, o mais antigo sai (a sessão não incha). */
+    private const LIMITE_RASCUNHOS_DE_TELA = 20;
+
+    /**
+     * Quanto tempo a marca de desfecho único (concluir) vale. 25/11: o card de TELA não vence, então a pendência pode ficar na
+     * sessão (que se renova com o uso) por muito mais que antes; a marca não pode vencer antes dela, senão uma requisição
+     * concorrente que ressuscitou a pendência poderia confirmar de novo. 30 dias cobrem qualquer sessão realista.
+     */
+    private const DIAS_DA_MARCA_DE_DESFECHO = 30;
+
+    /** O prazo, em segundos, de uma proposta de origem $origem; null = sem prazo (card aberto por tela). O front só cria timer se vier número. */
+    public static function prazoS(string $origem): ?int
+    {
+        return $origem === 'formulario' ? null : self::PRAZO_RASCUNHO_S;
+    }
+
     /** Guarda o que a IA propôs como rascunho e devolve o id da proposta. */
     public function guardarRascunho(Session $sessao, string $tool, array $argumentos, ?array $propostos = null, string $origem = 'agente', ?int $tempoIaMs = null, ?array $loteIds = null): string
     {
@@ -65,6 +81,36 @@ class ConfirmacoesPendentes
         ]);
 
         return $proposta;
+    }
+
+    /**
+     * Sem prazo, o card de tela esquecido ficaria para sempre: o usuário mantém só os LIMITE_RASCUNHOS_DE_TELA mais novos. Os
+     * excedentes (os mais antigos) saem da sessão COM os tokens deles e voltam para o controller auditar o desfecho
+     * ("cancelado"): toda proposta termina com um desfecho (R3) e nenhum token de um card despejado continua valendo.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function retirarExcedentesDeTela(Session $sessao): array
+    {
+        $meus = array_filter((array) $sessao->get(self::CHAVE, []), fn ($p) => is_array($p) && ($p['estado'] ?? null) === 'rascunho'
+            && self::prazoS(self::origem($p)) === null && $this->pertenceAoUsuario($p));
+
+        if (count($meus) <= self::LIMITE_RASCUNHOS_DE_TELA) {
+            return [];
+        }
+
+        uasort($meus, fn (array $a, array $b) => ($a['criado_em'] ?? 0) <=> ($b['criado_em'] ?? 0));
+        $retiradas = [];
+        foreach (array_slice(array_keys($meus), 0, count($meus) - self::LIMITE_RASCUNHOS_DE_TELA) as $chave) {
+            $proposta = (string) $chave;
+            // Mesma marca de desfecho único das demais saídas (confirmar, cancelar, expirar): só quem concluir audita.
+            if ($this->concluir($proposta)) {
+                $retiradas[] = [...$meus[$chave], 'proposta_id' => $proposta];
+            }
+            $this->encerrar($sessao, $proposta);
+        }
+
+        return $retiradas;
     }
 
     /** O rascunho ainda em edição; null se não existe, já teve desfecho ou a chave não é de rascunho. */
@@ -269,16 +315,14 @@ class ConfirmacoesPendentes
      * mesma pendência. O add é atômico no store (chave única no driver database),
      * então só a primeira dá o desfecho da proposta (confirmar, cancelar ou
      * expirar). A marca é por PROPOSTA, não por token: dois tokens da mesma
-     * proposta nunca rendem duas gravações. Ela dura o tempo de vida da sessão:
-     * uma requisição concorrente pode regravar a sessão com a pendência já
-     * concluída, e ela não pode ser auditada de novo depois.
-     * Premissa: SESSION_LIFETIME conta inatividade e se renova a cada requisição,
-     * então toda tela autenticada nova deve ficar no grupo da varredura
-     * (routes/web.php) — senão a sessão vive mais que a marca sem ser varrida.
+     * proposta nunca rendem duas gravações. Ela dura DIAS_DA_MARCA_DE_DESFECHO dias
+     * (25/11; antes, o tempo de vida da sessão): uma requisição concorrente pode regravar a sessão com a pendência já
+     * concluída, e ela não pode ser confirmada nem auditada de novo depois. O card de tela não vence, então a marca tem de
+     * sobreviver à pendência, não à varredura.
      */
     public function concluir(string $proposta): bool
     {
-        return Cache::add("agente:token_usado:{$proposta}", true, now()->addMinutes(max(1, (int) config('session.lifetime'))));
+        return Cache::add("agente:token_usado:{$proposta}", true, now()->addDays(self::DIAS_DA_MARCA_DE_DESFECHO));
     }
 
     /** Segundos (com fração) desde a emissão (token) ou desde a proposta (rascunho), pelo relógio do servidor. */
@@ -294,6 +338,13 @@ class ConfirmacoesPendentes
      */
     public function expirou(array $pendente): bool
     {
+        // 25/11 (decisão do Lucas): card aberto por uma TELA (origem "formulario") não tem prazo: quem abriu é o humano, sem IA
+        // propondo nada. O Confirmar revalida tudo no servidor (vaga, versão, permissão, tenant), então um card parado não grava
+        // dado velho; a sessão de login continua vencendo sozinha. O prazo de 5 min fica para a proposta da IA (chat).
+        if (self::prazoS(self::origem($pendente)) === null) {
+            return false;
+        }
+
         if (($pendente['estado'] ?? 'revisada') === 'rascunho') {
             return $this->decorrido($pendente) > self::PRAZO_RASCUNHO_S;
         }

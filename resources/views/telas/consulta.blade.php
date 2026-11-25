@@ -165,10 +165,12 @@
             }
         });
 
-        // Lixeira: depois de restaurar ou excluir de vez, a linha sai da lista (sem "não encontrei" no segundo clique).
+        // 25/11: depois de qualquer gravação a lista se atualiza sozinha (refaz a consulta com os filtros atuais). Na Lixeira (restaurar
+        // ou excluir de vez) a frase do servidor continua aparecendo depois da tabela; nas demais o toast já diz o que foi gravado.
         document.addEventListener('sentinel:gravado', (e) => {
-            if (entidadeAtual().consultar !== 'consultar_lixeira') return;
-            mensagemDepoisDeRecarregar = e.detail.mensagem;
+            // Uma consulta já em andamento traz a lista nova: evita dois pedidos simultâneos (duas tabelas).
+            if (formConsulta.getAttribute('aria-busy') === 'true') return;
+            mensagemDepoisDeRecarregar = entidadeAtual().consultar === 'consultar_lixeira' ? e.detail.mensagem : '';
             formConsulta.requestSubmit();
         });
 

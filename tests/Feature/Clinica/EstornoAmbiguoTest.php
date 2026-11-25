@@ -49,7 +49,7 @@ class EstornoAmbiguoTest extends TestCase
         $resposta = $this->comando('estornar_cobranca', ['busca' => 'Thor', 'motivo' => 'Cobrado a mais.', 'modo' => 'tudo'])->assertOk();
 
         $resposta->assertJsonPath('tipo', 'resultado_leitura')->assertJsonMissingPath('proposta');
-        $this->assertStringContainsString('Escolha um na lista', (string) $resposta->json('aviso'));
+        $this->assertStringContainsString('Qual deles você quer', (string) $resposta->json('aviso'));
         $this->assertEqualsCanonicalizing([$a->id, $b->id], $resposta->json('resultado.*.id'));
         $this->assertSame(0, Estorno::count());
         $this->assertSame([], (array) session('confirmacoes', []), 'nenhum rascunho aberto');

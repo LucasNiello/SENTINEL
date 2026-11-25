@@ -164,7 +164,8 @@ class ValorAnteriorTest extends TestCase
     public function test_tool_que_saiu_do_catalogo_com_proposta_na_sessao_nao_grava_o_proposto(): void
     {
         $this->freezeTime();
-        $proposta = $this->postJson('/agente/formulario', ['tool' => 'criar_cliente'])->assertOk()->json('proposta');
+        // 25/11: proposta do chat (a de tela não vence por tempo, então não passa pela varredura).
+        $proposta = (string) $this->comando('criar_cliente', ['nome' => 'Cliente X'])->assertOk()->json('proposta');
         // A tool some do catálogo com a proposta ainda na sessão (ex.: atualização do sistema).
         $rascunho = session("confirmacoes.{$proposta}");
         session(["confirmacoes.{$proposta}" => [...$rascunho, 'tool' => 'tool_removida', 'propostos' => ['cpf' => '123.456.789-01', 'obs' => 'x 98765432100']]]);

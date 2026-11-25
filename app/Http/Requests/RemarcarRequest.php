@@ -21,7 +21,7 @@ class RemarcarRequest extends FormRequest
     {
         return [
             'id' => 'required|integer|min:1',
-            'profissional_id' => 'required|integer|exists:users,id',
+            'profissional_id' => 'nullable|integer|exists:users,id',
             'inicio' => 'required|string|max:19',
             'tenant_id' => 'required|integer',
         ];

@@ -119,7 +119,7 @@ class AtualizarTest extends TestCase
 
         $this->comando('atualizar_cliente', ['email' => 'x@exemplo.com'])
             ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Informe qual cliente deve ser alterado: o número ou o nome.');
+            ->assertJsonPath('mensagem', 'Qual cliente você quer alterar? Me diga o número ou o nome.');
     }
 
     public function test_registro_de_outro_tenant_ou_na_lixeira_responde_igual_a_inexistente(): void
@@ -239,7 +239,7 @@ class AtualizarTest extends TestCase
 
         $this->comando('atualizar_cliente', ['id' => 0])
             ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Informe qual cliente deve ser alterado: o número ou o nome.');
+            ->assertJsonPath('mensagem', 'Qual cliente você quer alterar? Me diga o número ou o nome.');
     }
 
     public function test_service_atualizar_trata_outro_tenant_e_lixeira_como_inexistente(): void
@@ -353,6 +353,7 @@ class AtualizarTest extends TestCase
             ->assertOk()
             ->assertSee("fetch('/agente/formulario'", false)
             ->assertSee("botao.textContent = 'Editar';", false)
-            ->assertSee('adicionarTabela(dados.resultado || [], dados.colunas, dados.editar, dados.exportar);', false);
+            // 25/11: a chamada passa também a "selecao" (lista com checkbox de cancelar em lote); sem ela, a tabela é a de sempre.
+            ->assertSee('adicionarTabela(dados.resultado || [], dados.colunas, dados.editar, dados.exportar, dados.selecao);', false);
     }
 }

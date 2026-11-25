@@ -139,6 +139,8 @@ class AgenteController extends Controller
             $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null,
                 tempoIaMs: $resposta['tempo_ia_ms'] ?? null, loteIds: $resposta['lote_ids'] ?? null);
             $this->conversa->vincularProposta($request->session(), $resposta['proposta']);
+            // 25/11: quanto tempo a proposta vale (s); o front só cria o contador se vier número (contrato para o React também).
+            $resposta['prazo_s'] = ConfirmacoesPendentes::prazoS('agente');
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
             unset($resposta['propostos'], $resposta['tempo_ia_ms'], $resposta['lote_ids']);
         }
@@ -567,7 +569,7 @@ class AgenteController extends Controller
         // o Editar não pode apagar esse desfecho nem devolver a proposta ao formulário.
         if (is_array($pendente) && $this->pendentes->expirou($pendente)) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_EXPIRED',
-                'http_status' => 422, 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.'], 422);
+                'http_status' => 422, 'mensagem' => 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.'], 422);
         }
 
         $proposta = $token === null ? null : $this->pendentes->invalidarToken($request->session(), $token);
@@ -625,8 +627,8 @@ class AgenteController extends Controller
             entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
         return response()->json($expirou
-            ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
-            : ['tipo' => 'cancelado', 'mensagem' => 'Cancelado. Nada foi gravado.']);
+            ? ['tipo' => 'expirado', 'mensagem' => 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.']
+            : ['tipo' => 'cancelado', 'mensagem' => 'Tudo bem, cancelei o pedido. Não alterei nada.']);
     }
 
     /**
@@ -695,6 +697,14 @@ class AgenteController extends Controller
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'],
                 $resposta['propostos'] ?? [], 'formulario');
+            // 25/11: card aberto por tela não vence (null): o front não cria contador (ver ConfirmacoesPendentes::prazoS).
+            $resposta['prazo_s'] = ConfirmacoesPendentes::prazoS('formulario');
+            // Sem prazo, há um teto de cards de tela por usuário: o mais antigo que passar dele sai, auditado como cancelado.
+            foreach ($this->pendentes->retirarExcedentesDeTela($request->session()) as $excedente) {
+                $this->aiAgentService->auditarDesfecho($excedente['tool'], ConfirmacoesPendentes::propostos($excedente), 'cancelado',
+                    'Card de tela substituído: limite de cards abertos. Nada foi gravado.', ConfirmacoesPendentes::origem($excedente),
+                    entidadeId: ConfirmacoesPendentes::entidadeId($excedente), tempoIaMs: ConfirmacoesPendentes::tempoIa($excedente));
+            }
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
             unset($resposta['propostos']);
         }

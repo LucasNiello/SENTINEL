@@ -60,7 +60,7 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->cancelar($token)
             ->assertOk()
             ->assertJsonPath('tipo', 'cancelado')
-            ->assertJsonPath('mensagem', 'Cancelado. Nada foi gravado.');
+            ->assertJsonPath('mensagem', 'Tudo bem, cancelei o pedido. Não alterei nada.');
 
         $log = AuditLog::query()->sole();
         $this->assertSame('criar_lancamento', $log->tool);
@@ -99,7 +99,7 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->cancelar($token, ['tipo' => 'cancelado', 'resultado' => 'cancelado'])
             ->assertOk()
             ->assertJsonPath('tipo', 'expirado')
-            ->assertJsonPath('mensagem', 'Confirmação expirada. Nada foi gravado. Peça de novo.');
+            ->assertJsonPath('mensagem', 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.');
 
         $this->assertSame(['cancelado', 'expirado'], $this->resultadosAuditados());
     }
@@ -473,7 +473,7 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->get('/agente')
             ->assertOk()
             ->assertSee("fetch('/agente/cancelar'", false)
-            ->assertSee('Você soltou antes do fim. Nada foi gravado.')
+            ->assertSee('Você soltou antes da hora, então não fiz nada. Se quiser, é só segurar de novo.')
             // 23/11: o aviso virou toast; o botão de fechar é o "×" com aria-label (antes, o botão "Fechar" do modal de erro).
             ->assertSee("setAttribute('aria-label', 'Fechar aviso')", false)
             ->assertDontSee('transition: opacity', false);

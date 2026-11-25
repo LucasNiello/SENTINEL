@@ -23,7 +23,7 @@ class AgendarRequest extends FormRequest
         return [
             'pet_id' => 'required|integer|exists:pets,id',
             'catalogo_item_id' => 'required|integer|exists:catalogo_itens,id',
-            'profissional_id' => 'required|integer|exists:users,id',
+            'profissional_id' => 'nullable|integer|exists:users,id',
             'inicio' => 'required|string|max:19',
             'tenant_id' => 'required|integer',
         ];

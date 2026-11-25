@@ -292,8 +292,9 @@ class AuditoriaConsultaTest extends TestCase
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
         $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
 
-        // Expirado pela varredura (rascunho esquecido além dos 5 min), aberto sem IA.
-        $proposta = $this->postJson('/agente/formulario', ['tool' => 'atualizar_cliente', 'id' => $cliente->id])->assertOk()->json('proposta');
+        // Expirado pela varredura (rascunho da IA esquecido além dos 5 min). 25/11: o card aberto por TELA (/agente/formulario) não
+        // vence mais; quem expira por tempo é a proposta do chat.
+        $proposta = (string) $this->comando('atualizar_cliente', ['id' => $cliente->id])->assertOk()->json('proposta');
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
         $this->get('/agente')->assertOk();
         $this->assertNull(session("confirmacoes.{$proposta}"));

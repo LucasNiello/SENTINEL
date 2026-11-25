@@ -1,19 +1,26 @@
 {{-- Molde único da ficha de agendamento (15/11): agendar, remarcar e trocar o serviço. O card de sempre (bancada) monta o
      cabeçalho (o "resumo" que o servidor manda: pet e tutor com link, serviço, profissional e horário atuais) e os campos
      editáveis da ação; este molde troca os campos de profissional e início pelo calendário: profissional (lista do setor,
-     com busca) → dia (Hoje, Amanhã e mini mês; dia sem vaga apagado) → horário (clínica: "09:00 · 2 vagas", lotado
-     desabilitado; petshop: os horários livres). Clicar num horário VALE como Revisar: o servidor confere e emite o token;
-     sobra só o Confirmar. O calendário só mostra (GET /agenda/disponibilidade): a vaga é conferida de novo na gravação.
+     com busca por digitação no MESMO campo) → dia (Hoje, Amanhã e mini mês; dia sem vaga apagado) → horário (clínica:
+     "09:00 · 2 vagas", lotado desabilitado; petshop: os horários livres). 25/11: clicar num horário só SELECIONA (dá para
+     trocar à vontade); quem confere e grava é o Confirmar, em um passo. "Qualquer" = profissional em branco: o servidor
+     escolhe na gravação (menos atendimentos no dia), então não há pergunta "quem atende?". O calendário só mostra
+     (GET /agenda/disponibilidade): a vaga é conferida de novo na gravação.
      Tudo por createElement/textContent; nada de HTML vindo do servidor. Sem animação (bancada). --}}
 <template id="molde-ficha-agendamento">
     <div class="ficha-agenda">
         <div class="ficha-atalhos" hidden></div>
         <fieldset class="ficha-passo">
             <legend>1. Profissional</legend>
-            <label class="ficha-rotulo ficha-rotulo-busca">Buscar profissional</label>
-            <input type="search" class="ficha-busca" autocomplete="off" maxlength="60">
-            <label class="ficha-rotulo ficha-rotulo-profissional">Profissional</label>
-            <select class="ficha-profissional"></select>
+            <label class="ficha-rotulo ficha-rotulo-profissional">Profissional (digite para filtrar)</label>
+            {{-- 25/11: UM campo só (cascata + busca por digitação), padrão ARIA combobox/listbox. Sem "name" de e-mail/busca e com os
+                 atributos que silenciam gerenciadores de senha/alias (o balão "Novo alias de e-mail" aparecia em cima do campo). --}}
+            <div class="ficha-combo">
+                <input type="text" class="ficha-profissional" role="combobox" aria-autocomplete="list" aria-expanded="false"
+                       autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="60"
+                       data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" data-protonpass-ignore="true">
+                <ul class="ficha-combo-lista" role="listbox" aria-label="Profissionais" hidden></ul>
+            </div>
         </fieldset>
         <fieldset class="ficha-passo">
             <legend>2. Dia</legend>
@@ -35,10 +42,7 @@
             <legend>3. Horário</legend>
             <p class="ficha-estado" role="status"></p>
             <div class="ficha-horarios"></div>
-            <div class="ficha-quem" hidden>
-                <p class="ficha-quem-titulo"></p>
-                <div class="ficha-quem-lista"></div>
-            </div>
+            <p class="ficha-escolha" role="status" hidden></p>
         </fieldset>
     </div>
 </template>
@@ -74,15 +78,15 @@
             const raiz = molde.content.firstElementChild.cloneNode(true);
             campos.appendChild(raiz);
             const $ = (seletor) => raiz.querySelector(seletor);
-            const busca = $('.ficha-busca');
-            const selProfissional = $('.ficha-profissional');
-            busca.id = prefixo + '-ficha-busca';
-            selProfissional.id = prefixo + '-ficha-profissional';
-            $('.ficha-rotulo-busca').htmlFor = busca.id;
-            $('.ficha-rotulo-profissional').htmlFor = selProfissional.id;
+            const campoProfissional = $('.ficha-profissional');
+            const listaProfissional = $('.ficha-combo-lista');
+            campoProfissional.id = prefixo + '-ficha-profissional';
+            listaProfissional.id = prefixo + '-ficha-profissional-lista';
+            campoProfissional.setAttribute('aria-controls', listaProfissional.id);
+            $('.ficha-rotulo-profissional').htmlFor = campoProfissional.id;
             const estadoTexto = $('.ficha-estado');
             const horarios = $('.ficha-horarios');
-            const quem = $('.ficha-quem');
+            const escolhaTexto = $('.ficha-escolha');
 
             const hoje = new Date();
             const estado = card.fichaEstado || (card.fichaEstado = {
@@ -109,6 +113,7 @@
             const servicoAtual = () => (entradaServico && entradaServico.value) || (ficha.servico_id ? String(ficha.servico_id) : '');
             const nomeDe = (id) => (estado.profissionais.find((p) => String(p.id) === String(id)) || {}).nome || ('#' + id);
             const qualquer = () => (estado.setor === 'petshop' ? 'Qualquer atendente' : 'Qualquer veterinário');
+            const semAcento = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
             function dizer(texto) { estadoTexto.textContent = texto; }
 
@@ -123,15 +128,108 @@
                 return dados;
             }
 
-            function montarProfissionais() {
-                const termo = busca.value.trim().toLowerCase();
-                const opcoes = [new Option(qualquer(), '')];
-                estado.profissionais
-                    .filter((p) => !termo || p.nome.toLowerCase().includes(termo) || String(p.id) === estado.profissional)
-                    .forEach((p) => opcoes.push(new Option(p.nome, String(p.id))));
-                selProfissional.replaceChildren(...opcoes);
-                selProfissional.value = estado.profissionais.some((p) => String(p.id) === estado.profissional) ? estado.profissional : '';
+            // ---- Combobox do profissional (ARIA): cascata (Qualquer + os do setor) e filtro por digitação, no mesmo campo.
+            let opcoesVisiveis = [];
+            let ativa = -1;
+            let digitando = false;
+
+            const rotuloDoSelecionado = () => (estado.profissional ? nomeDe(estado.profissional) : qualquer());
+
+            function fecharLista(restaurar = true) {
+                listaProfissional.hidden = true;
+                campoProfissional.setAttribute('aria-expanded', 'false');
+                campoProfissional.removeAttribute('aria-activedescendant');
+                digitando = false;
+                ativa = -1;
+                if (restaurar) campoProfissional.value = rotuloDoSelecionado();
             }
+
+            function desenharLista() {
+                // "Qualquer" sempre fica (mesmo sem lista carregada ou com falha): é o padrão seguro e o servidor escolhe.
+                const termo = digitando ? semAcento(campoProfissional.value.trim()) : '';
+                opcoesVisiveis = [{ id: '', nome: qualquer() }, ...estado.profissionais.filter((p) => !termo || semAcento(p.nome).includes(termo))];
+                const itens = opcoesVisiveis.map((p, i) => {
+                    const li = document.createElement('li');
+                    li.id = listaProfissional.id + '-' + i;
+                    li.setAttribute('role', 'option');
+                    li.className = 'ficha-combo-opcao';
+                    li.textContent = p.nome;
+                    const marcado = String(p.id) === estado.profissional;
+                    li.setAttribute('aria-selected', marcado ? 'true' : 'false');
+                    if (i === ativa) li.classList.add('is-ativa');
+                    // mousedown (e não click) para o campo não perder o foco antes de escolher.
+                    li.addEventListener('mousedown', (e) => { e.preventDefault(); escolherProfissional(p.id); });
+                    return li;
+                });
+                if (itens.length === 1 && termo) {
+                    const vazio = document.createElement('li');
+                    vazio.className = 'ficha-combo-vazio';
+                    vazio.setAttribute('role', 'presentation');
+                    vazio.textContent = 'Nenhum profissional com esse nome.';
+                    itens.push(vazio);
+                }
+                listaProfissional.replaceChildren(...itens);
+                if (ativa >= 0 && itens[ativa]) campoProfissional.setAttribute('aria-activedescendant', itens[ativa].id);
+                else campoProfissional.removeAttribute('aria-activedescendant');
+            }
+
+            function abrirLista() {
+                if (campoProfissional.disabled) return;
+                digitando = false; // abre mostrando TODAS as opções; só filtra depois que a pessoa digita
+                ativa = -1;
+                desenharLista(); // calcula opcoesVisiveis
+                ativa = Math.max(0, opcoesVisiveis.findIndex((p) => String(p.id) === estado.profissional));
+                desenharLista();
+                listaProfissional.hidden = false;
+                campoProfissional.setAttribute('aria-expanded', 'true');
+            }
+
+            function escolherProfissional(id) {
+                const novo = String(id);
+                fecharLista(false);
+                const mudou = novo !== estado.profissional;
+                estado.profissional = novo;
+                campoProfissional.value = rotuloDoSelecionado();
+                if (mudou) {
+                    // O horário já escolhido segue o novo profissional (ou "qualquer"); se ele não tiver vaga ali, montarHorarios() o tira.
+                    if (estado.escolhido) estado.escolhido.profissional = novo;
+                    // O campo do formulário SEMPRE acompanha o combobox (senão a tela mostra "Qualquer" e o servidor grava o profissional antigo).
+                    if (entradaProfissional) entradaProfissional.value = novo;
+                    resumirEscolha();
+                    carregarMes();
+                }
+            }
+
+            function montarProfissionais() {
+                if (!estado.profissionais.some((p) => String(p.id) === estado.profissional)) estado.profissional = '';
+                if (document.activeElement !== campoProfissional) campoProfissional.value = rotuloDoSelecionado();
+                if (!listaProfissional.hidden) desenharLista();
+            }
+
+            campoProfissional.addEventListener('focus', () => { campoProfissional.select(); abrirLista(); });
+            campoProfissional.addEventListener('click', () => { if (listaProfissional.hidden) abrirLista(); });
+            campoProfissional.addEventListener('input', () => { digitando = true; ativa = 0; if (listaProfissional.hidden) { listaProfissional.hidden = false; campoProfissional.setAttribute('aria-expanded', 'true'); } desenharLista(); });
+            campoProfissional.addEventListener('blur', () => fecharLista());
+            campoProfissional.addEventListener('keydown', (e) => {
+                const aberta = !listaProfissional.hidden;
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (!aberta) { abrirLista(); return; }
+                    const passo = e.key === 'ArrowDown' ? 1 : -1;
+                    ativa = (ativa + passo + opcoesVisiveis.length) % opcoesVisiveis.length;
+                    desenharLista();
+                    const li = listaProfissional.children[ativa];
+                    if (li && li.scrollIntoView) li.scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'Enter' && aberta) {
+                    e.preventDefault(); // não envia o formulário do card
+                    if (opcoesVisiveis[ativa]) escolherProfissional(opcoesVisiveis[ativa].id);
+                } else if (e.key === 'Escape' && aberta) {
+                    e.preventDefault();
+                    fecharLista();
+                } else if (e.key === 'Home' || e.key === 'End') {
+                    if (aberta) { e.preventDefault(); ativa = e.key === 'Home' ? 0 : opcoesVisiveis.length - 1; desenharLista(); }
+                }
+            });
 
             async function carregarMes() {
                 const meu = ++pedido;
@@ -147,7 +245,11 @@
                     estado.setor = dados.setor;
                     estado.profissionais = dados.profissionais || [];
                     // Profissional que não é do setor do serviço (ex.: troca de setor): volta para "qualquer".
-                    if (estado.profissional && !estado.profissionais.some((p) => String(p.id) === estado.profissional)) estado.profissional = '';
+                    if (estado.profissional && !estado.profissionais.some((p) => String(p.id) === estado.profissional)) {
+                        estado.profissional = '';
+                        if (entradaProfissional) entradaProfissional.value = '';
+                        if (estado.escolhido) estado.escolhido.profissional = '';
+                    }
                     montarProfissionais();
                     montarMes(dados.dias || {});
                     await carregarDia(meu);
@@ -170,6 +272,7 @@
                     botao.textContent = String(deIso(iso).getDate());
                     botao.disabled = !dias[iso];
                     botao.setAttribute('aria-label', diaPorExtenso(iso) + (dias[iso] ? ', com vaga' : ', sem vaga'));
+                    botao.dataset.iso = iso;
                     botao.setAttribute('aria-pressed', iso === estado.dia ? 'true' : 'false');
                     botao.addEventListener('click', () => escolherDia(iso));
                     celulas.push(botao);
@@ -180,7 +283,6 @@
 
             async function carregarDia(meuMes) {
                 const meu = meuMes || ++pedido;
-                quem.hidden = true;
                 dizer('Carregando os horários de ' + diaPorExtenso(estado.dia) + '…');
                 try {
                     const dados = await buscar({ dia: estado.dia });
@@ -204,18 +306,24 @@
                     botao.textContent = comVagas ? h.hora + ' · ' + (lotado ? 'lotado' : h.vagas + (h.vagas === 1 ? ' vaga' : ' vagas'))
                         : blocos ? h.hora + ' · ' + (lotado ? 'ocupado' : 'livre') : h.hora;
                     botao.disabled = lotado;
-                    if (entradaInicio && entradaInicio.value === h.inicio && (!estado.profissional || !entradaProfissional || entradaProfissional.value === estado.profissional)) {
-                        botao.setAttribute('aria-current', 'true');
-                    }
+                    botao.dataset.inicio = h.inicio;
+                    botao.setAttribute('aria-pressed', entradaInicio && entradaInicio.value === h.inicio ? 'true' : 'false');
+                    if (lotado) botao.setAttribute('aria-label', h.hora + ', ' + (blocos ? 'sem vaga' : 'indisponível'));
                     botao.addEventListener('click', () => escolherHorario(h));
                     return botao;
                 });
                 horarios.replaceChildren(...botoes);
+                // O horário escolhido neste dia que o profissional atual não oferece mais (ocupado): sai, em vez de ficar valendo calado.
+                const escolhido = estado.escolhido;
+                if (escolhido && escolhido.dia === estado.dia && !(dados.horarios || []).some((h) => h.inicio === escolhido.inicio && h.vagas > 0)) {
+                    limparHorarioEscolhido();
+                }
                 const livres = (dados.horarios || []).filter((h) => h.vagas > 0).length;
                 const motivo = formulario.erro || erros[0];
                 dizer((motivo ? motivo + ' ' : '') + (livres
-                    ? diaPorExtenso(estado.dia) + ': ' + livres + (livres === 1 ? ' horário livre.' : ' horários livres.') + ' Clicar num horário já revisa.'
+                    ? diaPorExtenso(estado.dia) + ': ' + livres + (livres === 1 ? ' horário livre.' : ' horários livres.') + ' Escolha um horário e clique em Confirmar.'
                     : diaPorExtenso(estado.dia) + ': nenhum horário livre. Escolha outro dia.'));
+                resumirEscolha();
             }
 
             function escolherDia(iso) {
@@ -225,41 +333,37 @@
                     carregarMes();
                     return;
                 }
-                raiz.querySelectorAll('.ficha-dia').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+                // Marca o dia na hora (não espera a resposta): quadrado cheio no escolhido, todos os outros desmarcados.
+                raiz.querySelectorAll('.ficha-dia').forEach((b) => b.setAttribute('aria-pressed', b.dataset.iso === iso ? 'true' : 'false'));
                 carregarDia();
-                const marcado = Array.from(raiz.querySelectorAll('.ficha-dia')).find((b) => b.textContent === String(deIso(iso).getDate()));
-                if (marcado) marcado.setAttribute('aria-pressed', 'true');
             }
 
+            // Clicar num horário só SELECIONA (dá para trocar à vontade); o Confirmar revisa e grava em um passo.
+            // Profissional em branco = "qualquer": o servidor escolhe na gravação, então não há pergunta "quem atende?".
             function escolherHorario(h) {
-                const comVaga = h.profissionais || [];
-                if (estado.profissional) return confirmarEscolha(estado.profissional, h);
-                if (comVaga.length === 1) return confirmarEscolha(String(comVaga[0].id), h);
-                // "Qualquer": às 09:00, só os profissionais com vaga nesse horário.
-                $('.ficha-quem-titulo').textContent = 'Quem atende às ' + h.hora + '?';
-                $('.ficha-quem-lista').replaceChildren(...comVaga.map((p) => {
-                    const botao = document.createElement('button');
-                    botao.type = 'button';
-                    botao.className = 'ficha-horario';
-                    botao.textContent = nomeDe(p.id) + (estado.comVagas ? ' · ' + p.vagas + (p.vagas === 1 ? ' vaga' : ' vagas') : '');
-                    botao.addEventListener('click', () => confirmarEscolha(String(p.id), h));
-                    return botao;
-                }));
-                quem.hidden = false;
-                const primeiro = $('.ficha-quem-lista button');
-                if (primeiro) primeiro.focus();
-            }
-
-            // A escolha vai para os campos do formulário e o Revisar sai na hora (o servidor confere a vaga de novo).
-            function confirmarEscolha(profissionalId, h) {
-                if (entradaProfissional) entradaProfissional.value = profissionalId;
+                if (h.vagas < 1) return;
+                estado.escolhido = { inicio: h.inicio, hora: h.hora, dia: estado.dia, profissional: estado.profissional };
+                if (entradaProfissional) entradaProfissional.value = estado.profissional;
                 if (entradaInicio) entradaInicio.value = h.inicio;
-                dizer('Escolhido: ' + diaPorExtenso(estado.dia) + ', ' + h.hora + ', com ' + nomeDe(profissionalId) + '. Conferindo…');
-                revisar();
+                horarios.querySelectorAll('.ficha-horario').forEach((b) => b.setAttribute('aria-pressed', b.dataset.inicio === h.inicio ? 'true' : 'false'));
+                resumirEscolha();
             }
 
-            busca.addEventListener('input', montarProfissionais);
-            selProfissional.addEventListener('change', () => { estado.profissional = selProfissional.value; carregarMes(); });
+            function limparHorarioEscolhido() {
+                estado.escolhido = null;
+                if (entradaInicio) entradaInicio.value = '';
+                horarios.querySelectorAll('.ficha-horario').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+                resumirEscolha();
+            }
+
+            function resumirEscolha() {
+                const e = estado.escolhido;
+                escolhaTexto.hidden = !e;
+                if (!e) return;
+                const quem = e.profissional ? nomeDe(e.profissional) : qualquer() + ' (o sistema escolhe quem atende)';
+                escolhaTexto.textContent = 'Escolhido: ' + diaPorExtenso(e.dia) + ', ' + e.hora + ', com ' + quem + '.';
+            }
+
             $('.ficha-hoje').addEventListener('click', () => escolherDia(isoDia(new Date())));
             $('.ficha-amanha').addEventListener('click', () => { const d = new Date(); d.setDate(d.getDate() + 1); escolherDia(isoDia(d)); });
             const andarMes = (passo) => {
@@ -277,6 +381,8 @@
             }
             card.fichaRecarregar = carregarMes;
 
+            campoProfissional.value = rotuloDoSelecionado();
+            resumirEscolha();
             carregarMes();
         };
     })();
