@@ -292,6 +292,49 @@ class AgendaLimiteERemarcarTest extends TestCase
         $this->assertCount(0, $this->agenda->localizarParaRemarcar(null, '100%', self::T), 'o % não é curinga');
     }
 
+    public function test_o_ultimo_ou_o_mais_recente_e_o_ultimo_criado_em_aberto_do_tenant_e_nao_palavra_de_busca(): void
+    {
+        $rafael = User::factory()->papel('veterinario')->doTenant(self::T)->create(['name' => 'Rafael Lima', 'crmv' => 'CRMV-SP 1']);
+        $retorno = $this->item(['nome_comercial' => 'Retorno']);
+        $thor = $this->pet();
+        $mel = $this->pet(null, self::T, ['nome' => 'Mel']);
+        // A data do atendimento NÃO manda: o "último" é o último criado.
+        $velho = $this->agendamentoDireto($thor, $rafael, $retorno, ['inicio' => '2026-11-20 09:00', 'fim' => '2026-11-20 09:30', 'status' => 'agendado']);
+        $recente = $this->agendamentoDireto($thor, $rafael, $retorno, ['inicio' => '2026-11-12 09:00', 'fim' => '2026-11-12 09:30', 'status' => 'confirmado']);
+        $daMel = $this->agendamentoDireto($mel, $rafael, $retorno, ['inicio' => '2026-11-13 09:00', 'fim' => '2026-11-13 09:30', 'status' => 'agendado']);
+        $cancelado = $this->agendamentoDireto($thor, $rafael, $retorno, ['inicio' => '2026-11-14 09:00', 'fim' => '2026-11-14 09:30', 'status' => 'cancelado']);
+        $deFora = $this->agendamentoDireto($this->pet(null, self::OUTRO_TENANT), $this->usuarioClinica('veterinario', self::OUTRO_TENANT), $this->item(['nome_comercial' => 'Retorno'], self::OUTRO_TENANT),
+            ['inicio' => '2026-11-15 09:00', 'fim' => '2026-11-15 09:30', 'status' => 'agendado', 'tenant_id' => self::OUTRO_TENANT]);
+        foreach ([$velho, $daMel, $recente, $cancelado, $deFora] as $minutos => $a) {
+            Agendamento::query()->whereKey($a->id)->update(['created_at' => '2026-11-10 08:'.sprintf('%02d', $minutos).':00']);
+        }
+
+        foreach (['último', 'ultimo', 'o último agendamento', 'o último agendamento que eu criei', 'quero o mais recente', 'ÚLTIMA'] as $busca) {
+            $this->assertSame([$recente->id], $this->agenda->localizarParaRemarcar(null, $busca, self::T)->pluck('id')->all(), $busca);
+        }
+        $this->assertSame([$daMel->id], $this->agenda->localizarParaRemarcar(null, 'último da mel', self::T)->pluck('id')->all(), 'as outras palavras continuam filtrando');
+        $this->assertSame([$recente->id, $velho->id], $this->agenda->localizarParaRemarcar(null, 'thor', self::T)->pluck('id')->all(), 'sem "último" a busca segue por data do atendimento');
+        // Setor que o papel não vê: o mais novo do tenant é de outro setor e o "último" tem de ser o anterior, não ele.
+        $banho = $this->item(['setor' => 'petshop', 'categoria' => 'banho', 'nome_comercial' => 'Banho']);
+        $doPetshop = $this->agendamentoDireto($thor, User::factory()->papel('atendente')->doTenant(self::T)->create(), $banho, ['inicio' => '2026-11-16 09:00', 'fim' => '2026-11-16 10:00', 'status' => 'agendado']);
+        Agendamento::query()->whereKey($doPetshop->id)->update(['created_at' => '2026-11-10 09:00:00']);
+        $this->assertSame([$doPetshop->id], $this->agenda->localizarParaRemarcar(null, 'último', self::T, ['petshop'])->pluck('id')->all());
+        $this->assertSame([$recente->id], $this->agenda->localizarParaRemarcar(null, 'último', self::T, [$recente->setor])->pluck('id')->all(), 'o papel sem petshop não recebe o do petshop');
+    }
+
+    public function test_remarcar_pelo_agente_com_busca_ultimo_abre_a_ficha_do_ultimo_criado(): void
+    {
+        $this->logarComo('recepcao', self::T);
+        $antigo = $this->agendamentoAberto();
+        $novo = $this->agendamentoAberto();
+        Agendamento::query()->whereKey($antigo->id)->update(['created_at' => '2026-11-10 08:00:00']);
+        Agendamento::query()->whereKey($novo->id)->update(['created_at' => '2026-11-10 09:00:00']);
+
+        $this->comando('remarcar_agendamento', ['busca' => 'último'])->assertOk()
+            ->assertJsonPath('tipo', 'confirmacao_pendente')
+            ->assertJsonPath('formulario.ficha.agendamento_id', $novo->id);
+    }
+
     // ---------------------------------------------------------------- remarcar (agente, card e papéis)
 
     public function test_remarcar_pelo_agente_edita_o_existente_com_card_de_so_o_inicio_e_confirma(): void

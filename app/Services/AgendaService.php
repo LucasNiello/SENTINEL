@@ -17,6 +17,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Clínica vet: agenda da clínica e do banho e tosa.
@@ -669,7 +670,13 @@ class AgendaService
     {
         $palavras = $id ? [] : $this->palavrasDaBusca((string) $busca);
 
-        if (! $id && $palavras === []) {
+        // "O último", "o mais recente": ordem de criação, não palavra para casar com nome. Sobram as demais palavras como filtro.
+        $maisRecente = ! $id && $this->pedeOMaisRecente($palavras);
+        if ($maisRecente) {
+            $palavras = array_values(array_filter($palavras, fn (string $p) => ! in_array(Str::ascii($p), self::PALAVRAS_DO_MAIS_RECENTE, true)));
+        }
+
+        if (! $id && ! $maisRecente && $palavras === []) {
             return new Collection;
         }
 
@@ -687,13 +694,33 @@ class AgendaService
             });
         }
 
-        return $consulta->orderBy('agendamentos.inicio')->limit(6)
+        // O mais recente é UM só (o último criado em aberto); a busca comum devolve até 6 por data.
+        $consulta = $maisRecente
+            ? $consulta->orderByDesc('agendamentos.created_at')->orderByDesc('agendamentos.id')->limit(1)
+            : $consulta->orderBy('agendamentos.inicio')->limit(6);
+
+        return $consulta
             ->get($this->selecaoDaAgenda())
             ->each(function (Agendamento $a) {
                 $this->horarioNaLinha($a);
                 $a->setAttribute('resumo', $a->getAttribute('pet').' · '.$a->getAttribute('servico').' · '.$a->getAttribute('profissional')
                     .' · '.$a->inicio->format('d/m H:i'));
             });
+    }
+
+    /** Palavras que dizem "o último criado" (sem acento) e as de enfeite que vêm junto ("o último agendamento que criei"). */
+    private const PALAVRAS_DO_MAIS_RECENTE = ['ultimo', 'ultima', 'recente', 'mais', 'agendamento', 'agendado', 'criei', 'criado', 'criada', 'quero', 'queria', 'remarca', 'remarcar', 'aquele', 'aquela', 'meu', 'minha'];
+
+    /** @param  string[]  $palavras */
+    private function pedeOMaisRecente(array $palavras): bool
+    {
+        foreach ($palavras as $p) {
+            if (in_array(Str::ascii($p), ['ultimo', 'ultima', 'recente'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** As colunas da tabela da agenda (pet, tutor, serviço, profissional) nas listas de escolha. */

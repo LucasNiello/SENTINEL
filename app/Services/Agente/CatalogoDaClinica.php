@@ -267,7 +267,7 @@ trait CatalogoDaClinica
             // que já existe. Nunca cria agendamento novo; o fim recalcula. "Abrir a ficha do agendamento" também abre esta.
             $this->definirAcao(
                 nome: 'remarcar_agendamento',
-                descricao: 'Remarca um agendamento que já existe (em aberto): muda o início (e, se o usuário pedir, o profissional do mesmo setor); o servidor recalcula o fim; pet, tutor e serviço continuam. Também é a tool para "ver", "abrir" ou "mostrar a ficha" de um agendamento. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional). Nunca cria um agendamento novo. Novo início no formato AAAA-MM-DD HH:MM (horário de São Paulo); sem horário dito, deixe em branco: a ficha abre com o calendário.',
+                descricao: 'Remarca um agendamento que já existe (em aberto): muda o início (e, se o usuário pedir, o profissional do mesmo setor); o servidor recalcula o fim; pet, tutor e serviço continuam. Também é a tool para "ver", "abrir" ou "mostrar a ficha" de um agendamento. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional). Para "o último agendamento" ou "o mais recente" (o último CRIADO na clínica, por qualquer pessoa, sem tabela mostrada antes), mande busca = "último" (ou "último" mais o nome do pet, se o usuário disse); nunca posicao nesse caso. Nunca cria um agendamento novo. Novo início no formato AAAA-MM-DD HH:MM (horário de São Paulo); sem horário dito, deixe em branco: a ficha abre com o calendário.',
                 acao: 'atualizar',
                 entidade: 'Agendamento',
                 papeis: self::PAPEIS_DA_AGENDA,
@@ -311,7 +311,7 @@ trait CatalogoDaClinica
             // em branco e a ficha abre com a lista do setor novo e o calendário.
             $this->definirAcao(
                 nome: 'alterar_servico_agendamento',
-                descricao: 'Troca o serviço de um agendamento que já existe (em aberto), quando foi marcado errado ("não era banho, era consulta", "troca o banho do Thor por tosa"). Altera o mesmo agendamento, nunca cria outro. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional) no campo busca. Informe em catalogo_item_id o número do serviço novo, escolhido na lista de serviços; sem certeza, deixe em branco: a ficha mostra a lista.',
+                descricao: 'Troca o serviço de um agendamento que já existe (em aberto), quando foi marcado errado ("não era banho, era consulta", "troca o banho do Thor por tosa"). Altera o mesmo agendamento, nunca cria outro. Achado pelo número, pela linha da última tabela (posicao) ou pelo que o usuário disse (nome do pet, do tutor, do serviço ou do profissional) no campo busca. Para "o último agendamento" ou "o mais recente" (o último CRIADO na clínica, por qualquer pessoa, sem tabela mostrada antes), mande busca = "último"; nunca posicao nesse caso. Informeem catalogo_item_id o número do serviço novo, escolhido na lista de serviços; sem certeza, deixe em branco: a ficha mostra a lista.',
                 acao: 'atualizar',
                 entidade: 'Agendamento',
                 papeis: self::PAPEIS_DA_AGENDA,
