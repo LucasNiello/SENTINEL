@@ -1,6 +1,8 @@
+import ExportarConsulta from './ExportarConsulta';
+
 const textoCelula = (valor) => valor == null ? '' : typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
 
-export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, prepararPedido }) {
+export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, prepararPedido, adicionar }) {
     const linhas = consulta.resultado;
     // Sem cabeçalhos explícitos, usar apenas chaves realmente recebidas.
     const colunas = consulta.colunas?.length ? consulta.colunas
@@ -28,6 +30,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
                     })}</tbody>
                 </table>
             </div>
+            {typeof consulta.exportar === 'string' && consulta.exportar && <ExportarConsulta consulta={consulta.exportar} ocupado={ocupado} adicionar={adicionar} />}
         </>}
     </>;
 }

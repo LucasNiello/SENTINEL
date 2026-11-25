@@ -64,7 +64,7 @@ try {
     assert.match(await page.locator('#historico').innerText(), /Histórico anterior preservado/);
     assert.match(await page.locator('#historico').innerText(), /Consulta concluída/);
     assert.match(await page.locator('#historico').innerText(), /Dados do tenant atual/);
-    assert.equal(await page.getByRole('button', { name: /Exportar/ }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: /Exportar/ }).count(), 1);
     for (const viewport of [{ width: 360, height: 740 }, { width: 1440, height: 900 }]) {
         await page.setViewportSize(viewport);
         await until(async () => await page.evaluate(() => document.documentElement.scrollWidth === innerWidth));

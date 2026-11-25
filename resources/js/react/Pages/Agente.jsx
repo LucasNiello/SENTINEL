@@ -162,7 +162,7 @@ export default function Agente({ historico = [] }) {
                         </div>}
                         {mensagens.map((mensagem, indice) => mensagem.proposta
                             ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} />
-                            : mensagem.consulta ? <TabelaConsulta key={indice} consulta={mensagem.consulta} ocupado={pensando} abrirFormulario={abrirFormulario}
+                            : mensagem.consulta ? <TabelaConsulta key={indice} consulta={mensagem.consulta} ocupado={pensando} abrirFormulario={abrirFormulario} adicionar={adicionar}
                                 prepararPedido={(pedido) => { if (!requisicao.current) { setTexto(pedido.slice(0, 1000)); campo.current?.focus(); } }} />
                             : <div key={indice} className={`msg ${mensagem.classe}`}>
                             <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : mensagem.classe === 'msg--erro' ? 'Atenção' : 'Sentinel'}</span>
