@@ -58,7 +58,7 @@
                 }
                 if (!resp.ok) {
                     const dados = await resp.json().catch(() => ({}));
-                    adicionarMensagem(dados.mensagem || 'Não consegui exportar esta tabela agora.', 'msg--erro');
+                    adicionarMensagem(dados.mensagem || 'Não consegui exportar essa tabela agora. Tenta de novo?', 'msg--erro');
                     return;
                 }
                 const nome = (resp.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
@@ -72,7 +72,7 @@
                 URL.revokeObjectURL(url);
                 anunciar('planilha baixada');
             } catch (e) {
-                adicionarMensagem('Falha ao contatar o servidor.', 'msg--erro');
+                adicionarMensagem('Não consegui falar com o servidor agora. Tenta de novo daqui a pouco?', 'msg--erro');
             } finally {
                 botao.disabled = false;
             }
@@ -98,7 +98,7 @@
 
         // Campo "aviso" do JSON (ex.: só o primeiro de vários pedidos foi atendido). Texto + cor, nunca só a cor.
         function adicionarAviso(texto) {
-            adicionarMensagem('Aviso: ' + texto, 'msg--aviso');
+            adicionarMensagem(texto, 'msg--agente');
         }
 
 
@@ -106,7 +106,160 @@
         // "editar" (RF02): nome da tool de atualizar; cada linha ganha um botão que abre o formulário sem IA.
         // Linha com "acao" própria (Bloco 4, lixeira): {tool, rotulo} só daquela linha, já filtrada pelo papel no servidor.
         // "exportar": id da consulta guardada no servidor (A3); com ele, a tabela ganha o botão Exportar.
-        function adicionarTabela(linhas, colunasServidor, editar, exportar) {
+        // 25/11 ("selecao"): lista com CHECKBOX para o usuário marcar quais registros cancelar (cancelar agendamentos em lote).
+        // Nada é gravado ao marcar: o botão (segurar 2 s) envia só os marcados, e o servidor só aceita ids que estavam na lista.
+        function montarSelecaoDeLinhas({ linhas, colunas, tbody, trCabecalho, selecao }) {
+            const posStatus = colunas.indexOf('status');
+            const posObs = colunas.indexOf('observacao');
+            const caixas = [];
+            const caixaGeral = document.createElement('input');
+            caixaGeral.type = 'checkbox';
+            caixaGeral.setAttribute('aria-label', 'Selecionar todos os agendamentos que podem ser cancelados');
+            const thGeral = document.createElement('th');
+            thGeral.scope = 'col';
+            thGeral.className = 'selecao-celula';
+            const rotuloGeral = document.createElement('label');
+            rotuloGeral.appendChild(caixaGeral);
+            thGeral.appendChild(rotuloGeral);
+            trCabecalho.insertBefore(thGeral, trCabecalho.firstChild);
+
+            Array.from(tbody.rows).forEach((tr, i) => {
+                const l = linhas[i];
+                const td = document.createElement('td');
+                td.className = 'selecao-celula';
+                const rotulo = document.createElement('label');
+                const caixa = document.createElement('input');
+                caixa.type = 'checkbox';
+                caixa.className = 'selecao-caixa';
+                caixa.value = String(l.id);
+                caixa.disabled = l.bloqueado === true;
+                // Leitor de tela: o que está sendo marcado (pet e horário), não só o número.
+                caixa.setAttribute('aria-label', (caixa.disabled ? 'Não pode ser cancelado: ' : 'Selecionar para cancelar: ') + [l.pet, l.horario, 'agendamento ' + l.id].filter(Boolean).join(', '));
+                rotulo.appendChild(caixa);
+                td.appendChild(rotulo);
+                tr.insertBefore(td, tr.firstChild);
+                if (caixa.disabled) tr.classList.add('linha-bloqueada');
+                caixas.push({ caixa, tr, l });
+            });
+
+            const barra = document.createElement('div');
+            barra.className = 'selecao-barra';
+            const aviso = document.createElement('p');
+            aviso.className = 'selecao-aviso';
+            aviso.setAttribute('role', 'status');
+            const botao = document.createElement('button');
+            botao.type = 'button';
+            botao.className = 'btn-confirmar';
+            const fill = document.createElement('span');
+            fill.className = 'btn-confirmar__fill';
+            const rotuloBotao = document.createElement('span');
+            rotuloBotao.className = 'btn-confirmar__label';
+            botao.append(fill, rotuloBotao);
+
+            const marcados = () => caixas.filter((c) => c.caixa.checked && !c.caixa.disabled);
+            let concluido = false;
+            function atualizar() {
+                const n = marcados().length;
+                const livres = caixas.filter((c) => !c.caixa.disabled);
+                caixaGeral.checked = livres.length > 0 && livres.every((c) => c.caixa.checked);
+                caixaGeral.disabled = concluido || livres.length === 0;
+                botao.disabled = concluido || n === 0;
+                rotuloBotao.textContent = n === 0 ? 'Marque para cancelar' : 'Cancelar ' + n + (n === 1 ? ' marcado' : ' marcados');
+                aviso.textContent = concluido ? '' : (n === 0 ? 'Marque os agendamentos que você quer cancelar. Eu só cancelo o que estiver marcado, e só depois que você segurar o botão.'
+                    : 'Confere a lista: vou cancelar só os ' + n + ' que você marcou. Segure o botão por 2 segundos para confirmar; se soltar antes, não faço nada.');
+            }
+            caixas.forEach((c) => c.caixa.addEventListener('change', atualizar));
+            caixaGeral.addEventListener('change', () => { caixas.forEach((c) => { if (!c.caixa.disabled) c.caixa.checked = caixaGeral.checked; }); atualizar(); });
+
+            async function enviar() {
+                const escolhidos = marcados();
+                if (!escolhidos.length) return;
+                botao.disabled = true;
+                caixas.forEach((c) => { c.caixa.disabled = true; });
+                caixaGeral.disabled = true;
+                const reabrir = () => caixas.forEach((c) => { c.caixa.disabled = c.l.bloqueado === true; });
+                try {
+                    const resp = await fetch(selecao.url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                        body: JSON.stringify({ ids: escolhidos.map((c) => Number(c.caixa.value)) }),
+                    });
+                    if (resp.status === 401 || resp.status === 419) { window.location.href = '/login'; return; }
+                    const dados = await resp.json().catch(() => ({}));
+                    if (resp.ok && dados.tipo === 'resultado_escrita') {
+                        concluido = true;
+                        escolhidos.forEach((c) => {
+                            c.tr.classList.add('linha-cancelada');
+                            if (posStatus >= 0) c.tr.cells[posStatus + 1].textContent = 'cancelado';
+                            if (posObs >= 0) c.tr.cells[posObs + 1].textContent = '';
+                        });
+                        caixas.forEach((c) => { c.caixa.disabled = true; });
+                        atualizar();
+                        mostrarPopup('sucesso', '✔ ' + (dados.mensagem || 'Cancelado'));
+                        anunciar(dados.mensagem || 'cancelado');
+                        document.dispatchEvent(new CustomEvent('sentinel:gravado', { detail: { tool: dados.tool || null, mensagem: dados.mensagem || '' } }));
+                        return;
+                    }
+                    // Recusa (tudo ou nada): nada foi cancelado. Os itens que barraram ficam apontados na própria linha, desmarcados.
+                    reabrir();
+                    const erros = dados.erros && typeof dados.erros === 'object' ? dados.erros : {};
+                    caixas.forEach((c) => {
+                        const motivo = erros[String(c.l.id)];
+                        if (!motivo) return;
+                        c.caixa.checked = false;
+                        c.tr.classList.add('linha--aviso');
+                        if (posObs >= 0) c.tr.cells[posObs + 1].textContent = motivo;
+                    });
+                    atualizar();
+                    popupErro(dados.mensagem || 'Não consegui cancelar agora, e não alterei nada. Tenta de novo?');
+                } catch (e) {
+                    reabrir();
+                    atualizar();
+                    popupErro('Não consegui falar com o servidor agora, e não alterei nada. Tenta de novo daqui a pouco?');
+                }
+            }
+
+            // Segurar 2 s (decisão B): mouse, toque e teclado. Soltar antes do fim não envia nada.
+            let segurando = false;
+            let inicioHold = 0;
+            let rafId = null;
+            function passo() {
+                if (!segurando) return;
+                const pct = Math.min(100, ((performance.now() - inicioHold) / DURACAO_HOLD_MS) * 100);
+                fill.style.width = pct + '%';
+                if (pct >= 100) { segurando = false; fill.style.width = '0%'; enviar(); return; }
+                rafId = requestAnimationFrame(passo);
+            }
+            function iniciar() {
+                if (botao.disabled || segurando) return;
+                segurando = true;
+                inicioHold = performance.now();
+                botao.classList.add('segurando');
+                anunciar('segurando para cancelar');
+                passo();
+            }
+            function soltar() {
+                if (!segurando) return;
+                segurando = false;
+                if (rafId) cancelAnimationFrame(rafId);
+                fill.style.width = '0%';
+                botao.classList.remove('segurando');
+                aviso.textContent = 'Você soltou antes da hora, então não cancelei nada. Se quiser, é só segurar de novo.';
+                anunciar('você soltou antes do fim, nada foi cancelado');
+            }
+            botao.addEventListener('mousedown', iniciar);
+            botao.addEventListener('touchstart', iniciar);
+            ['mouseup', 'mouseleave', 'blur', 'touchend', 'touchcancel'].forEach((ev) => botao.addEventListener(ev, soltar));
+            botao.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); iniciar(); } });
+            botao.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') soltar(); });
+
+            barra.append(aviso, botao);
+            atualizar();
+
+            return barra;
+        }
+
+        function adicionarTabela(linhas, colunasServidor, editar, exportar, selecao) {
             if (!linhas.length) {
                 adicionarMensagem('Nenhum registro encontrado.', 'msg--agente');
                 return;
@@ -147,7 +300,6 @@
                 th.textContent = 'Ação';
                 trCabecalho.appendChild(th);
             }
-            thead.appendChild(trCabecalho);
             const tbody = document.createElement('tbody');
             linhas.forEach(l => {
                 const tr = document.createElement('tr');
@@ -200,6 +352,9 @@
                 }
                 tbody.appendChild(tr);
             });
+            // Lista com checkbox (cancelar em lote): a 1ª coluna vira a de marcar; a barra com o botão (segurar) vai depois da tabela.
+            const barraSelecao = selecao && selecao.url ? montarSelecaoDeLinhas({ linhas, colunas, tbody, trCabecalho, selecao }) : null;
+            thead.appendChild(trCabecalho);
             table.appendChild(thead);
             table.appendChild(tbody);
             // Tabela larga rola dentro do próprio contêiner, nunca a página (375 px; skill seção 9).
@@ -214,6 +369,7 @@
             resumo.textContent = linhas.length + ' registro(s) encontrado(s)';
             historico.appendChild(resumo);
             historico.appendChild(rolagem);
+            if (barraSelecao) historico.appendChild(barraSelecao);
             // Copiar (23/11): a tabela como está na tela, em TSV (cola no Excel/Sheets mantendo as colunas), com o cabeçalho
             // legível, Sim/Não e R$. Só o que já está mascarado na tela; sem rota, sem auditoria (cópia local). Em toda tabela
             // do chat e dos Cadastros, exportável ou não.
@@ -359,18 +515,18 @@
                     adicionarMensagem(dados.mensagem || 'Não consegui abrir esse formulário.', 'msg--erro');
                 }
             } catch (e) {
-                adicionarMensagem('Falha ao contatar o servidor.', 'msg--erro');
+                adicionarMensagem('Não consegui falar com o servidor agora. Tenta de novo daqui a pouco?', 'msg--erro');
             } finally {
                 if (botao) botao.disabled = false;
             }
         }
 
         function popupConfirmado() {
-            mostrarPopup('sucesso', '✔ Confirmado');
+            mostrarPopup('sucesso', '✔ Feito!');
             anunciar('confirmado');
         }
         function popupCancelado() {
-            mostrarPopup('neutro', '✕ Cancelado. Nada foi gravado.');
+            mostrarPopup('neutro', '✕ Tudo bem, cancelei. Não alterei nada.');
             anunciar('cancelado, nada foi gravado');
         }
         function popupErro(mensagem) {
@@ -760,14 +916,14 @@
                 // Aviso que não bloqueia (ex.: "Estoque de Dipirona ficará em -2"): texto na cor de aviso, antes do segurar.
                 const frasesAviso = (formulario.avisos || []).map((frase) => {
                     const p = document.createElement('p');
-                    p.textContent = 'Aviso: ' + frase;
+                    p.textContent = frase;
                     return p;
                 });
                 avisos.replaceChildren(...frasesAviso);
                 avisos.hidden = !frasesAviso.length;
                 montarLote(formulario.itens || []);
                 // Recusa que não é de um campo (ex.: "existem lançamentos vinculados"): vai no topo, com a frase do servidor.
-                resumoErro.textContent = formulario.erro ? formulario.erro + ' Nada foi gravado.' : 'Confira os campos destacados. Nada foi gravado.';
+                resumoErro.textContent = formulario.erro ? formulario.erro + ' Nada foi gravado.' : 'Falta ajustar alguns campos (deixei em destaque). Ainda não alterei nada.';
                 resumoErro.hidden = !formulario.erro && !formulario.campos.some((campo) => campo.erro);
                 const primeiroComErro = form.querySelector('[aria-invalid="true"]');
                 if (primeiroComErro) primeiroComErro.focus();
@@ -868,7 +1024,7 @@
             const avisoSoltou = document.createElement('div');
             avisoSoltou.className = 'msg msg--aviso card-expirado-texto';
             avisoSoltou.setAttribute('role', 'status');
-            avisoSoltou.textContent = 'Você soltou antes do fim. Nada foi gravado.';
+            avisoSoltou.textContent = 'Você soltou antes da hora, então não fiz nada. Se quiser, é só segurar de novo.';
             avisoSoltou.hidden = true;
             card.appendChild(avisoSoltou);
 
@@ -942,7 +1098,7 @@
             // botões desativados. O aviso ao servidor sai logo depois, quando ele já conta como expirado.
             function expirarRascunho() {
                 const corpo = token ? { token } : { proposta };
-                desativarTudo(token ? 'Confirmação expirada. Nada foi gravado. Peça de novo.' : (passoUnico ? 'O prazo desta ação terminou. Nada foi gravado. Peça de novo.' : 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.'));
+                desativarTudo(token ? 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.' : (passoUnico ? 'O prazo desta ação terminou. Nada foi gravado. Peça de novo.' : 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.'));
                 setTimeout(() => encerrarSemGravar(corpo), 500);
                 anunciar(token ? 'confirmação expirada, nada foi gravado' : 'prazo para revisar terminou, nada foi gravado');
             }
@@ -1158,7 +1314,7 @@
                         anunciar('não foi possível gravar, nada foi gravado: ' + (dados.formulario.erro || 'confira os campos destacados'));
                         // A senha/CRMV saiu do campo ao enviar: quem usa leitor de tela precisa saber que ela é pedida de novo.
                         if (formulario.reautenticar) anunciar(textosAutorizacao.apagado);
-                        popupErro(dados.formulario.erro || dados.mensagem || 'Confira os campos destacados. Nada foi gravado.');
+                        popupErro(dados.formulario.erro || dados.mensagem || 'Falta ajustar alguns campos (deixei em destaque). Ainda não alterei nada.');
                         return;
                     }
                     encerrarCard();

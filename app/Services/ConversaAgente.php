@@ -14,6 +14,9 @@ class ConversaAgente
     private const CHAVE_LISTA = 'agente_ultima_lista'; // P-C1
     private const PRAZO_LISTA_S = 1800;
 
+    /** Lista com checkbox (cancelar em lote): o mesmo prazo da proposta do agente (ConfirmacoesPendentes::PRAZO_RASCUNHO_S). */
+    private const PRAZO_LISTA_SELECIONAVEL_S = 300;
+
     public function __construct(private ContextoUsuario $contexto) {}
 
     private function identidade(): string
@@ -74,6 +77,10 @@ class ConversaAgente
             'em' => now()->getTimestamp(),
             'entidade' => $lista['entidade'] ?? null,
             'linhas' => array_values($lista['linhas'] ?? []),
+            // 25/11: tabela com checkboxes (cancelar agendamentos em lote): só dela saem os ids que o endpoint aceita.
+            'selecionavel' => $lista['selecionavel'] ?? null,
+            // A "versão" (updated_at) de cada linha NO MOMENTO em que o usuário a viu: a gravação recusa o que mudou depois.
+            'versoes' => $lista['versoes'] ?? [],
         ]);
     }
 
@@ -87,7 +94,17 @@ class ConversaAgente
             return null;
         }
 
-        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? []];
+        // 25/11: a lista com CHECKBOX é um caminho de escrita sem rascunho nem token: vale o mesmo prazo da proposta (5 min). Depois
+        // disso a tabela segue valendo para "o Rex", "o último" (30 min), mas deixa de ser selecionável (o endpoint recusa).
+        $selecionavel = now()->getTimestamp() - (int) ($lista['em'] ?? 0) > self::PRAZO_LISTA_SELECIONAVEL_S ? null : ($lista['selecionavel'] ?? null);
+
+        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? [], 'selecionavel' => $selecionavel, 'versoes' => $lista['versoes'] ?? []];
+    }
+
+    /** Uma tabela com checkboxes só vale para UM envio: depois de gravar, some (reenviar o mesmo pedido não cancela de novo). */
+    public function esquecerLista(Session $sessao): void
+    {
+        $sessao->forget(self::CHAVE_LISTA);
     }
 
     /**

@@ -291,7 +291,37 @@ class AiAgentService
         $resposta = $this->traduzirAnthropic($resposta);
 
         // Tudo o que esta resposta auditar (leitura, negado, tool fora do catálogo) leva o tempo da IA.
-        return $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada, $lista));
+        $interpretada = $this->detalhesAuditoria->com(['tempo_ia_ms' => $tempoIaMs], fn () => $this->interpretar($resposta, $tempoIaMs, $toolSolicitada, $lista));
+
+        // 25/11: a frase natural que o modelo escreveu JUNTO da chamada da tool ("Beleza, achei o agendamento do Rex…"). Vai só para a
+        // tela, acima do card ou da tabela; nunca entra no histórico nem no que é gravado.
+        $introducao = in_array($interpretada['tipo'] ?? null, ['confirmacao_pendente', 'resultado_leitura'], true) ? $this->introducaoDoModelo($resposta) : null;
+
+        return $introducao === null ? $interpretada : [...$interpretada, 'introducao' => $introducao];
+    }
+
+    /**
+     * O texto que o modelo escreveu ao lado de uma chamada de tool, se for seguro mostrar: curto, sem markdown pesado e SEM afirmar
+     * que algo foi gravado (isso só acontece depois da confirmação humana, e o servidor é quem avisa). Na dúvida, descarta: o
+     * card ou a tabela continuam ali, só sem a frase.
+     */
+    private function introducaoDoModelo(\Illuminate\Http\Client\Response $resposta): ?string
+    {
+        $mensagem = $resposta->json('choices.0.message');
+        $texto = is_array($mensagem) && ! empty($mensagem['tool_calls']) && is_string($mensagem['content'] ?? null) ? trim($mensagem['content']) : '';
+        if ($texto === '') {
+            return null;
+        }
+        $texto = trim((string) preg_replace('/\s+/u', ' ', str_replace(['**', '__', '`', '#'], '', $texto)));
+        $ascii = Str::ascii(mb_strtolower($texto));
+
+        if ($texto === '' || mb_strlen($texto) > 300 || preg_match('#https?://|www\.#', $ascii) === 1
+            || preg_match('/\b(remarcad|agendad|cancelad|gravad|registrad|cadastrad|atualizad|alterad|excluid|conciliad|estornad)[oa]s?\b/', $ascii) === 1
+            || preg_match('/\b(ja (remarquei|agendei|cancelei|gravei|registrei|cadastrei|atualizei|alterei|exclui|estornei)|feito|pronto)\b/', $ascii) === 1) {
+            return null;
+        }
+
+        return $texto;
     }
 
     /**
@@ -370,6 +400,17 @@ class AiAgentService
 
             if ($conteudo !== null && ! is_string($conteudo)) {
                 return $this->respostaForaDoFormato($resposta->status());
+            }
+
+            // 25/11: o modelo respondeu SÓ em texto afirmando que gravou ("Agendamento remarcado.") sem chamar tool: é falso (nada foi
+            // gravado). O servidor troca a frase, para o usuário nunca acreditar numa gravação que não aconteceu.
+            if (is_string($conteudo) && self::afirmaGravacaoSemTool($conteudo)) {
+                Log::warning('AiAgentService: texto afirmava gravação sem tool (trocado)', ['tempo_ia_ms' => $tempoIaMs, 'categoria' => 'claim_without_tool']);
+
+                return [
+                    'tipo' => 'texto',
+                    'mensagem' => 'Calma, ainda não alterei nada! Me diz o que você quer fazer — por exemplo: “remarque o agendamento do Thor para o dia 21”.',
+                ];
             }
 
             // Só o tempo: nada do texto (pode trazer dado pessoal) vai para o log.
@@ -452,7 +493,7 @@ class AiAgentService
             unset($argumentos['posicao']);
 
             if ($definicao['localizar'] !== null) {
-                $localizado = $this->localizarRegistro($tool, $definicao, $argumentos);
+                $localizado = $this->localizarRegistro($tool, $definicao, $argumentos, $lista);
 
                 if (isset($localizado['resposta'])) {
                     $encontrados = $localizado['resposta'];
@@ -511,6 +552,10 @@ class AiAgentService
             // P-C1: a tabela mostrada fica congelada na sessão (ids em ordem), e o histórico ganha uma frase sem dados.
             if (($resposta['tipo'] ?? null) === 'resultado_leitura') {
                 $resposta['lista'] = $this->listaParaGuardar($tool, $definicao, $resposta['resultado'] ?? []);
+                // A "versao" fica só no servidor (na lista guardada): as linhas que vão ao navegador não a levam.
+                if ($tool === 'cancelar_agendamentos_em_lote' && is_array($resposta['resultado'] ?? null)) {
+                    $resposta['resultado'] = array_map(fn ($l) => is_array($l) ? Arr::except($l, 'versao') : $l, $resposta['resultado']);
+                }
             }
 
             // A3 (RF02): tabela de consulta pode ser exportada. Os argumentos voltam para o controller
@@ -542,8 +587,8 @@ class AiAgentService
     private function promptDaClinica(): array
     {
         return [
-            'principal' => 'Papel autenticado do usuário: '.json_encode($this->contexto->papel()).'. Você é o assistente do Sentinel, um sistema de gestão para uma clínica veterinária com petshop (banho e tosa). A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje", "amanhã" e "ontem". Use as tools disponíveis para consultar e cadastrar tutores, pets e itens do catálogo, consultar a agenda, agendar, remarcar, trocar o serviço e mudar o status de um agendamento, cobrar atendimentos, receber e cancelar cobranças, registrar vendas avulsas, e consultar as mensagens dos tutores e marcá-las como tratadas. Você só pode executar operações representadas pelas ferramentas disponibilizadas. Preserve a operação explicitamente solicitada: cadastro, alteração, cobrança, recebimento, cancelamento e exclusão nunca devem virar consulta. Não substitua uma ação proibida por outra permitida; o servidor aplica a autorização. Se o pedido não corresponder a nenhuma ferramenta (por exemplo, registrar prontuário ou receitar), explique claramente que a operação não é suportada. Perguntas de conhecimento geral fora do catálogo (por exemplo, geografia, ou diagnóstico, dose e tratamento de animais) devem ser recusadas educadamente, sem responder o conteúdo da pergunta; convidar a voltar ao Sentinel depois de dar a resposta não atende a essa restrição. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: tutor é a pessoa responsável e pet é o animal; todo pet pertence a um tutor. Cadastro de usuários e de profissionais não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o tutor, o nome ou a espécie de um pet), chame a tool com o que tiver, sem inventar o que falta; o card marca o campo que falta. Exemplos: "preciso cadastrar um tutor novo" → chame criar_tutor sem argumentos; "quero cadastrar um pet" → chame criar_pet sem argumentos; "cadastre um pet chamado Rex" → chame criar_pet só com o nome Rex, sem inventar o tutor nem a espécie. Nunca responda esses pedidos só com uma pergunta em texto. Cada pedido recebe uma única resposta sua, e o resultado de uma consulta vai para a tela, não volta para você. Por isso, quando o pedido é uma ação (agendar um atendimento novo, remarcar (mudar o horário de um agendamento que já existe: use remarcar_agendamento e nunca agende de novo no lugar dele), trocar o serviço de um agendamento marcado errado ("não era banho, era consulta": use alterar_servico_agendamento, que altera o mesmo agendamento), ver ou abrir a ficha de um agendamento (use remarcar_agendamento com o número ou a busca), encaixe de emergência, mudar o status de um agendamento, cadastrar, alterar, vender, cobrar, receber, cancelar ou estornar), chame nesta resposta a tool dessa ação, mesmo sem saber os números: nunca chame uma consulta antes para descobrir o pet, o tutor, o serviço, o profissional, o item ou o registro. Para achar o registro de uma ação, use o campo busca com o nome do pet ou do tutor; números que você não sabe ficam em branco (o card mostra as listas para a pessoa escolher), e nunca invente um número. Quando o usuário se refere a uma linha da última tabela mostrada, use o campo posicao. Agendamento sempre abre a ficha para a pessoa preencher: nunca discuta opções em texto (por exemplo "remarcar ou cancelar?") nem diga que não consegue mostrar ou trocar o agendamento; chame a tool com o que souber, e o que faltar vira campo na ficha. Isso vale também para marcar ou remarcar sem dizer o horário (ou o dia): chame agendar_atendimento ou remarcar_agendamento com o início em branco, nunca responda em texto pedindo a hora; a ficha resolve com o calendário, no passo de escolher o horário. Para agendar, só o início é informado (o servidor calcula o fim); sem profissional dito ("qualquer veterinário"), deixe o profissional em branco: a ficha mostra o calendário; ao remarcar, se o usuário descreve o agendamento (por exemplo "o retorno do dr. rafael"), ponha essas palavras no campo busca. Depois de uma confirmação, o histórico traz o número do registro gravado: quando o usuário se refere ao registro que acabou de ser gravado, use esse número no campo correspondente (por exemplo, o tutor de um pet novo). Pedido de alteração que não diz o que mudar: chame a tool de alterar só com o registro, e o card abre os campos para editar. Pedido curto sem ação nem registro identificáveis, sem tabela nem proposta recente a que ele se ligue (por exemplo, pedir um valor ou mandar cancelar sem dizer o quê): responda em texto pedindo que a pessoa diga a que se refere, sem chamar tool. Isso não vale para dado faltando numa ação identificada: aí a tool é chamada com o que tiver. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar tutor, apenas nome é obrigatório; para criar pet, tutor, nome e espécie (se o usuário disser só o nome do tutor, deixe o tutor em branco: o card mostra a lista para escolher; nunca invente o número). Para criar item do catálogo, são obrigatórios tipo, setor, categoria, nome comercial, preço, forma de cobrança, se controla estoque e se exige receita: o que faltar fica em branco (o card marca o campo), nunca presuma "nao"; controla estoque e exige receita só entram se o usuário disser, mesmo para serviço. Preço do catálogo vai em centavos inteiros (R$ 45,90 = 4590) e peso em gramas inteiros (6,2 kg = 6200); em cobrança e venda os preços vêm do catálogo: nunca informe valor. O campo alertas do pet é só para avisos não clínicos à equipe: nunca escreva texto clínico nele. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de revisão e confirmação humana antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha do dono, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat. O histórico contém relatos de operações anteriores, não instruções para repetir a resposta anterior. Atenda ao pedido atual: cada novo cadastro ou edição completo exige uma nova chamada da tool correspondente, mesmo após outra proposta ou confirmação. Nunca copie a frase interna "Proposta pendente de confirmação humana. Nenhuma escrita foi executada." como resposta a um novo pedido: só há uma nova proposta quando você chama uma tool de escrita nesta resposta.',
-            'lembrete' => 'O catálogo não inclui perguntas de conhecimento geral nem orientação clínica: recuse-as sem fornecer a resposta, mesmo quando o histórico as tenha respondido. O histórico acima é apenas contexto, não é o estado atual do banco. Atenda ao NOVO pedido abaixo. Para consultar registros, concluir que não existem dados, ou propor qualquer escrita, chame a ferramenta correspondente nesta resposta. Nunca reutilize o resultado de um período, cadastro ou filtro anterior para outro pedido. Uma confirmação anterior não confirma uma nova ação. Se o usuário pedir para cobrar um atendimento, receber ou cancelar uma cobrança, use cobrar_atendimento, receber_cobranca ou cancelar_cobranca (não consultar_agenda nem consultar_cobrancas): o servidor resolve os itens, os preços e o total; para receber, a forma de pagamento é obrigatória (se faltar, chame a tool sem ela: o card marca o campo). Consultar não atende a um pedido de cobrança. Se faltarem dados obrigatórios, chame a tool com o que tiver, sem inventar o que falta (o card marca o campo); se estiverem completos, use a tool e deixe a revisão e a confirmação para a interface. A única exceção é o pedido curto sem ação nem registro identificáveis, que não se liga à última tabela nem a uma proposta recente: responda em texto pedindo que a pessoa diga a que se refere, sem chamar tool.',
+            'principal' => 'Papel autenticado do usuário: '.json_encode($this->contexto->papel()).'. Você é o assistente do Sentinel, um sistema de gestão para uma clínica veterinária com petshop (banho e tosa). A data de hoje é '.now()->toDateString().' — use-a para resolver termos relativos como "hoje", "amanhã" e "ontem". Use as tools disponíveis para consultar e cadastrar tutores, pets e itens do catálogo, consultar a agenda, agendar, remarcar, trocar o serviço e mudar o status de um agendamento, cobrar atendimentos, receber e cancelar cobranças, registrar vendas avulsas, e consultar as mensagens dos tutores e marcá-las como tratadas. Você só pode executar operações representadas pelas ferramentas disponibilizadas. Preserve a operação explicitamente solicitada: cadastro, alteração, cobrança, recebimento, cancelamento e exclusão nunca devem virar consulta. Não substitua uma ação proibida por outra permitida; o servidor aplica a autorização. Se o pedido não corresponder a nenhuma ferramenta (por exemplo, registrar prontuário ou receitar), explique claramente que a operação não é suportada. Perguntas de conhecimento geral fora do catálogo (por exemplo, geografia, ou diagnóstico, dose e tratamento de animais) devem ser recusadas educadamente, sem responder o conteúdo da pergunta; convidar a voltar ao Sentinel depois de dar a resposta não atende a essa restrição. Não invente ferramentas, não afirme ter executado ações e não substitua entidades: tutor é a pessoa responsável e pet é o animal; todo pet pertence a um tutor. Cadastro de usuários e de profissionais não está disponível. Propostas no histórico não significam escrita executada: somente a confirmação humana autoriza a execução. Nunca invente dados — se faltar informação obrigatória para uma tool (por exemplo, o tutor, o nome ou a espécie de um pet), chame a tool com o que tiver, sem inventar o que falta; o card marca o campo que falta. Exemplos: "preciso cadastrar um tutor novo" → chame criar_tutor sem argumentos; "quero cadastrar um pet" → chame criar_pet sem argumentos; "cadastre um pet chamado Rex" → chame criar_pet só com o nome Rex, sem inventar o tutor nem a espécie. Nunca responda esses pedidos só com uma pergunta em texto. Cada pedido recebe uma única resposta sua, e o resultado de uma consulta vai para a tela, não volta para você. Por isso, quando o pedido é uma ação (agendar um atendimento novo, remarcar (mudar o horário de um agendamento que já existe: use remarcar_agendamento e nunca agende de novo no lugar dele), trocar o serviço de um agendamento marcado errado ("não era banho, era consulta": use alterar_servico_agendamento, que altera o mesmo agendamento), ver ou abrir a ficha de um agendamento (use remarcar_agendamento com o número ou a busca), encaixe de emergência, mudar o status de um agendamento, cadastrar, alterar, vender, cobrar, receber, cancelar ou estornar), chame nesta resposta a tool dessa ação, mesmo sem saber os números: nunca chame uma consulta antes para descobrir o pet, o tutor, o serviço, o profissional, o item ou o registro. Para achar o registro de uma ação, use o campo busca com o nome do pet ou do tutor; números que você não sabe ficam em branco (o card mostra as listas para a pessoa escolher), e nunca invente um número. Quando o usuário se refere a uma linha da última tabela mostrada ("o último", "o primeiro", "esse", "ele", "o Rex" que está na tabela), use o campo posicao (ou busca, se ele disse um nome): você não enxerga as linhas, mas o servidor resolve a referência pela tabela que o usuário viu; nunca responda pedindo que ele repita nem diga que não consegue ler a linha. Agendamento sempre abre a ficha para a pessoa preencher: nunca discuta opções em texto (por exemplo "remarcar ou cancelar?") nem diga que não consegue mostrar ou trocar o agendamento; chame a tool com o que souber, e o que faltar vira campo na ficha. Isso vale também para marcar ou remarcar sem dizer o horário (ou o dia): chame agendar_atendimento ou remarcar_agendamento com o início em branco, nunca responda em texto pedindo a hora; a ficha resolve com o calendário, no passo de escolher o horário. Para agendar, só o início é informado (o servidor calcula o fim); sem profissional dito ("qualquer veterinário"), deixe o profissional em branco: a ficha mostra o calendário; ao remarcar, se o usuário descreve o agendamento (por exemplo "o retorno do dr. rafael"), ponha essas palavras no campo busca. Para mudar só o DIA de um agendamento ("pro dia 21", "amanhã", "mesmo horário"), mande dia (AAAA-MM-DD) ou dia_do_mes e NUNCA invente o horário, porque você não o conhece: o servidor mantém o horário do agendamento (hora só se o usuário disser). "Agenda do Thor" é consultar_agenda com o campo pet, e não consultar_pets. TOM: converse como um colega prestativo e simpático, em português do Brasil, na primeira pessoa, sem jargão de sistema nem linguagem de formulário. Sempre que chamar uma tool, escreva TAMBÉM uma frase curta e natural (uma só) dizendo o que entendeu e o que vai mostrar, por exemplo "Achei o agendamento do Rex de hoje, dá uma conferida no card antes de confirmar." ou "Vou te mostrar os agendamentos do Diego para você marcar quais cancelar." ou "Certo, vou abrir a ficha para você escolher o novo horário." Varie o jeito de começar: não repita a mesma palavra de abertura (como "Beleza") em respostas seguidas. Nessa frase NUNCA diga que algo foi remarcado, agendado, cancelado ou gravado (isso só acontece depois da confirmação humana), não cite números de registro, CPF, telefone nem valores, e não repita o que a tabela já mostra. Em consultar_agenda e em cancelar_agendamentos_em_lote passe TODOS os filtros que o usuário citar: tutor (o cliente, dono do animal), pet (o animal), profissional (nome), dia ou data_inicio/data_fim e setor; "os agendamentos do cliente Diego" é tutor "Diego", e nunca a agenda inteira: não liste mais do que ele pediu. Para cancelar VÁRIOS agendamentos de uma vez ("cancele todos", "cancele tudo menos o dia 25"), chame cancelar_agendamentos_em_lote: ela só mostra a lista para o usuário MARCAR quais cancelar (nunca cancele às cegas, nunca peça ids); "menos o dia 25" vai em exceto_dia. Depois de uma confirmação, o histórico traz o número do registro gravado: quando o usuário se refere ao registro que acabou de ser gravado, use esse número no campo correspondente (por exemplo, o tutor de um pet novo). Pedido de alteração que não diz o que mudar: chame a tool de alterar só com o registro, e o card abre os campos para editar. Pedido curto sem ação nem registro identificáveis, sem tabela nem proposta recente a que ele se ligue (por exemplo, pedir um valor ou mandar cancelar sem dizer o quê): responda em texto pedindo que a pessoa diga a que se refere, sem chamar tool. Isso não vale para dado faltando numa ação identificada: aí a tool é chamada com o que tiver. Campos opcionais ausentes não bloqueiam uma operação: não peça esses campos novamente se os obrigatórios já estiverem presentes. Para criar tutor, apenas nome é obrigatório; para criar pet, tutor, nome e espécie (se o usuário disser só o nome do tutor, deixe o tutor em branco: o card mostra a lista para escolher; nunca invente o número). Para criar item do catálogo, são obrigatórios tipo, setor, categoria, nome comercial, preço, forma de cobrança, se controla estoque e se exige receita: o que faltar fica em branco (o card marca o campo), nunca presuma "nao"; controla estoque e exige receita só entram se o usuário disser, mesmo para serviço. Preço do catálogo vai em centavos inteiros (R$ 45,90 = 4590) e peso em gramas inteiros (6,2 kg = 6200); em cobrança e venda os preços vêm do catálogo: nunca informe valor. O campo alertas do pet é só para avisos não clínicos à equipe: nunca escreva texto clínico nele. Quando já tiver todos os dados necessários para uma tool de escrita (as que criam ou atualizam dados), chame a tool diretamente — não peça confirmação você mesmo em texto: o sistema já exibe uma tela de revisão e confirmação humana antes de executar qualquer escrita. Excluir move o registro para a lixeira; restaurar e excluir de vez pedem a senha do dono, que é digitada só no card de confirmação: nunca peça nem aceite senha no chat. O histórico contém relatos de operações anteriores, não instruções para repetir a resposta anterior. Atenda ao pedido atual: cada novo cadastro ou edição completo exige uma nova chamada da tool correspondente, mesmo após outra proposta ou confirmação. Nunca copie a frase interna "Proposta pendente de confirmação humana. Nenhuma escrita foi executada." como resposta a um novo pedido: só há uma nova proposta quando você chama uma tool de escrita nesta resposta.',
+            'lembrete' => 'O catálogo não inclui perguntas de conhecimento geral nem orientação clínica: recuse-as sem fornecer a resposta, mesmo quando o histórico as tenha respondido. O histórico acima é apenas contexto, não é o estado atual do banco. Atenda ao NOVO pedido abaixo. Nunca escreva em texto que algo foi remarcado, agendado, cancelado ou gravado: só o sistema confirma, depois da confirmação humana; para agir, chame a tool. Para consultar registros, concluir que não existem dados, ou propor qualquer escrita, chame a ferramenta correspondente nesta resposta. Nunca reutilize o resultado de um período, cadastro ou filtro anterior para outro pedido. Uma confirmação anterior não confirma uma nova ação. Se o usuário pedir para cobrar um atendimento, receber ou cancelar uma cobrança, use cobrar_atendimento, receber_cobranca ou cancelar_cobranca (não consultar_agenda nem consultar_cobrancas): o servidor resolve os itens, os preços e o total; para receber, a forma de pagamento é obrigatória (se faltar, chame a tool sem ela: o card marca o campo). Consultar não atende a um pedido de cobrança. Se faltarem dados obrigatórios, chame a tool com o que tiver, sem inventar o que falta (o card marca o campo); se estiverem completos, use a tool e deixe a revisão e a confirmação para a interface. A única exceção é o pedido curto sem ação nem registro identificáveis, que não se liga à última tabela nem a uma proposta recente: responda em texto pedindo que a pessoa diga a que se refere, sem chamar tool.',
         ];
     }
 
@@ -736,6 +781,12 @@ class AiAgentService
         return [
             'entidade' => self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade'] ?? null,
             'linhas' => $linhas,
+            // 25/11: a tabela de cancelar em lote tem checkboxes; só os ids dela entram no endpoint de gravação.
+            'selecionavel' => $tool === 'cancelar_agendamentos_em_lote' ? $tool : null,
+            // A versão de cada linha como o usuário a VIU (a gravação recusa o que mudou depois); nunca vai ao navegador.
+            'versoes' => $tool === 'cancelar_agendamentos_em_lote'
+                ? collect($resultado)->filter(fn ($l) => is_array($l) && isset($l['id'], $l['versao']))->mapWithKeys(fn (array $l) => [(int) $l['id'] => (string) $l['versao']])->all()
+                : [],
             'frase' => $n === 0
                 ? "A consulta ({$tool}) não encontrou registros."
                 : "Mostrei ao usuário uma tabela com {$n} ".($n === 1 ? 'linha' : 'linhas')." ({$tool}). Ela fica guardada no servidor: para alterar uma linha dela (\"edite o segundo\", \"a última\"), use o campo posicao (1 = primeira, -1 = última), nunca o número da linha como id.",
@@ -972,6 +1023,8 @@ class AiAgentService
             'tool' => $tool,
             'resultado' => $resultado,
             ...($definicao['colunas'] ? ['colunas' => $definicao['colunas']] : []),
+            // 25/11: lista para MARCAR quais cancelar (checkbox). Nada é gravado aqui: quem grava é o endpoint, só com os ids marcados.
+            ...($tool === 'cancelar_agendamentos_em_lote' ? ['selecao' => ['url' => '/agente/agenda/cancelar-lote', 'rotulo' => 'Cancelar selecionados', 'segurar' => true]] : []),
             // RF02 "editável": a linha abre o formulário de atualizar (sem IA), se o papel permitir.
             ...($this->podeEditar($definicao['editavel_por']) ? ['editar' => $definicao['editavel_por']] : []),
         ];
@@ -1029,6 +1082,47 @@ class AiAgentService
     }
 
     /**
+     * 25/11: o pedido é SÓ "o último" ("o último", "o mais recente", "o último agendamento que criei"), sem nome de pet, tutor etc.?
+     * Com uma tabela recente da mesma entidade, isso vale para a última linha dela (localizarRegistro).
+     */
+    private static function soPedeOUltimo(string $busca): bool
+    {
+        $palavras = array_map(fn (string $p) => Str::ascii($p), (array) preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($busca), -1, PREG_SPLIT_NO_EMPTY));
+        $marcas = array_intersect($palavras, ['ultimo', 'ultima', 'recente']);
+
+        // "o último que CRIEI" é o último CRIADO (não a última linha da tabela): com isso, a tabela não decide.
+        if (array_intersect($palavras, ['criei', 'criado', 'criada', 'criamos']) !== []) {
+            return false;
+        }
+
+        return $marcas !== [] && array_diff($palavras, AgendaService::PALAVRAS_DO_MAIS_RECENTE, ['o', 'a', 'os', 'as', 'da', 'de', 'do', 'que', 'eu', 'e', 'ele', 'esse', 'essa']) === [];
+    }
+
+    /** "Achei 4 agendamentos que batem com “Rex”. Qual deles você quer? …": quantos, de quê, e o que fazer a seguir. */
+    private function fraseDeVariosEncontrados(array $definicao, int $quantos, ?string $busca): string
+    {
+        $coisa = FormularioTool::semArtigo((string) ($definicao['rotulo'] ?? 'o registro'));
+        $plural = ['agendamento' => 'agendamentos', 'cliente' => 'clientes', 'fornecedor' => 'fornecedores', 'funcionário' => 'funcionários', 'lançamento' => 'lançamentos',
+            'tutor' => 'tutores', 'pet' => 'pets', 'cobrança' => 'cobranças', 'venda' => 'vendas', 'mensagem' => 'mensagens'][$coisa] ?? 'registros';
+        $alvo = $busca !== null && $busca !== '' ? ' que batem com “'.$busca.'”' : '';
+        $dica = $coisa === 'agendamento' ? 'me diga o dia e o horário' : 'me diga o número';
+
+        return "Achei {$quantos} {$plural}{$alvo}. Qual deles você quer? É só clicar em “Escolher” na linha certa (ou {$dica}).";
+    }
+
+    /**
+     * Os ids da última tabela mostrada a este usuário, SE for da mesma entidade da tool (e ainda dentro do prazo, que a sessão confere).
+     *
+     * @return int[]
+     */
+    private function linhasDaUltimaTabela(string $tool, array $definicao, ?array $lista): array
+    {
+        $linhas = is_array($lista['linhas'] ?? null) ? array_values(array_filter($lista['linhas'], 'is_int')) : [];
+
+        return $linhas !== [] && ($lista['entidade'] ?? null) === (self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade']) ? $linhas : [];
+    }
+
+    /**
      * Bloco 3: acha o registro a atualizar por id ou por nome/número, resolvido no
      * SERVIDOR e dentro do tenant (a memória do agente não guarda as linhas das
      * tabelas, então a IA só conhece o nome que o usuário digitou). Um registro:
@@ -1037,7 +1131,7 @@ class AiAgentService
      *
      * @return array{argumentos?: array, resposta?: array}
      */
-    private function localizarRegistro(string $tool, array $definicao, array $argumentos): array
+    private function localizarRegistro(string $tool, array $definicao, array $argumentos, ?array $lista = null): array
     {
         $id = isset($argumentos['id']) && is_numeric($argumentos['id']) && (int) $argumentos['id'] >= 1 ? (int) $argumentos['id'] : null;
         $busca = is_string($argumentos['busca'] ?? null) && trim($argumentos['busca']) !== '' ? trim($argumentos['busca']) : null;
@@ -1045,17 +1139,40 @@ class AiAgentService
             'tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_TOOL_REFUSED', 'http_status' => 422, 'mensagem' => $mensagem,
         ]];
 
+        // 25/11: a IA não vê as linhas das tabelas, então a referência ("o Rex", "o último", "esse", "ele") é resolvida AQUI, pela última
+        // tabela mostrada da mesma entidade (ainda no prazo dela). Sem tabela, tudo segue como antes.
+        $daTabela = $this->linhasDaUltimaTabela($tool, $definicao, $lista);
+        if ($id === null && $daTabela !== []) {
+            if ($busca === null && count($daTabela) === 1) {
+                $id = $daTabela[0]; // sem dizer qual: tabela de uma linha só
+            } elseif ($busca !== null && self::soPedeOUltimo($busca)) {
+                $id = $daTabela[array_key_last($daTabela)]; // "o último" = a última linha da tabela que ele viu
+                $busca = null;
+            }
+        }
+
         if ($id === null && $busca === null) {
             // "o número ou o nome" / "ou a descrição"; na nota fiscal a busca já é pelo número.
             $ouTexto = match ($definicao['busca_por']) { 'número' => '', 'descrição' => ' ou a descrição', default => ' ou o '.$definicao['busca_por'] };
 
-            return $recusa('Informe qual '.FormularioTool::semArtigo($definicao['rotulo']).' deve ser '.$definicao['feito'].': o número'.$ouTexto.'.');
+            // 25/11: pergunta, como uma pessoa faria ("Qual cliente você quer alterar? Me diga o número ou o nome.").
+            $verbo = preg_replace(['/ad[oa]( de vez)?$/u', '/íd[oa]( de vez)?$/u', '/id[oa]( de vez)?$/u'], ['ar$1', 'ir$1', 'er$1'], (string) $definicao['feito']);
+
+            return $recusa('Qual '.FormularioTool::semArtigo($definicao['rotulo']).' você quer '.$verbo.'? Me diga o número'.$ouTexto.'.');
         }
 
         $encontrados = ($definicao['localizar'])($id, $busca, $this->contexto->tenantId());
 
         if ($encontrados->isEmpty()) {
             return $recusa('Não encontrei '.$definicao['rotulo'].' com '.($id !== null ? 'esse número' : ($definicao['busca_por'] === 'descrição' ? 'essa ' : 'esse ').$definicao['busca_por']).$definicao['onde'].'.');
+        }
+
+        // Achou vários pelo nome: entre eles, os que estão na tabela que o usuário acabou de ver (um só = é esse).
+        if ($id === null && $encontrados->count() > 1 && $daTabela !== []) {
+            $naTabela = $encontrados->filter(fn (Model $m) => in_array((int) $m->getKey(), $daTabela, true))->values();
+            if ($naTabela->isNotEmpty()) {
+                $encontrados = $naTabela;
+            }
         }
 
         if ($encontrados->count() > 1) {
@@ -1069,7 +1186,8 @@ class AiAgentService
                 'resultado' => $encontrados->map(fn (Model $m) => [...AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)), ...$this->colunasCalculadasDaLista($m, $colunas), ...$acao])->values()->all(),
                 'colunas' => $colunas,
                 ...($acao === [] ? ['editar' => $tool] : []),
-                'aviso' => 'Encontrei mais de um registro com esse nome. Escolha um na lista ou peça de novo com o número.',
+                // 25/11: conversa, não "aviso de sistema": diz quantos achou, de quê, e como seguir.
+                'aviso' => $this->fraseDeVariosEncontrados($definicao, $encontrados->count(), $busca),
             ]];
         }
 
@@ -1645,6 +1763,25 @@ class AiAgentService
      * "Cliente cadastrado. Ficou sem e-mail e telefone." / "Cliente cadastrado com todos os dados."
      * Tool sem campo opcional: só "Status do lançamento atualizado.".
      */
+    /**
+     * Resposta só de texto que AFIRMA uma gravação concluída ("Agendamento remarcado.", "Feito, cancelei.", "O cadastro foi
+     * atualizado."). Conservadora de propósito: só frases CURTAS cujo núcleo é o verbo de gravação no particípio ou na 1ª pessoa,
+     * para não pegar explicações legítimas (que citam o histórico, fazem perguntas ou descrevem uma proposta).
+     */
+    public static function afirmaGravacaoSemTool(string $texto): bool
+    {
+        $t = \Illuminate\Support\Str::ascii(mb_strtolower(trim($texto)));
+        if ($t === '' || mb_strlen($t) > 90 || str_contains($t, '?') || str_contains($t, 'proposta') || str_contains($t, 'confirm')
+            || count(preg_split('/\s+/', $t, -1, PREG_SPLIT_NO_EMPTY) ?: []) > 8) {
+            return false;
+        }
+        // Só particípios e 1ª pessoa do passado (nunca o radical do infinitivo: "Para excluir, use a lixeira." é legítimo).
+        $verbos = 'remarcad|agendad|cancelad|gravad|registrad|cadastrad|atualizad|alterad|excluid|conciliad|estornad|salvei|remarquei|agendei|cancelei|gravei|registrei|cadastrei|atualizei|alterei|estornei|conciliei';
+
+        // "agendamento remarcado.", "pronto, remarquei.", "feito: o pet foi cadastrado!" (sem negação)
+        return preg_match('/\b('.$verbos.')\w*\b/', $t) === 1 && preg_match('/\b(nao|nenhum|nada|ainda|precisa|preciso|posso|consigo|quer|deseja|esta|estao|era|sera|voce|se|caso)\b/', $t) !== 1;
+    }
+
     /** "Qualquer profissional" (agenda): diz quem o servidor escolheu. Vazio nos demais casos. */
     private function fraseDoProfissionalEscolhido(string $tool, mixed $resultado, array $argumentos): string
     {
@@ -2368,6 +2505,89 @@ class AiAgentService
                 return Schema::hasColumn($tabela, 'deleted_at') ? $regraExists->whereNull('deleted_at') : $regraExists;
             }, explode('|', $regra));
         }, $regras);
+    }
+
+    /**
+     * Cancelar agendamentos em lote (25/11): grava SÓ os ids que o usuário marcou na lista (o controller já conferiu que eles
+     * estavam na última tabela mostrada). TUDO OU NADA, numa transação: cada item passa pelo MESMO executor de
+     * alterar_status_agendamento (papel, setor, tenant, CRMV da cirurgia, cobrança, prontuário, status), com uma linha de
+     * auditoria por item e o mesmo lote_id. Se qualquer item for recusado, nada é gravado, uma linha "recusado" guarda os ids e os
+     * motivos, e a resposta diz qual item barrou (o usuário desmarca e tenta de novo).
+     *
+     * @param  int[]  $ids
+     * @param  array<int, string>  $versoes  o updated_at de cada agendamento COMO O USUÁRIO O VIU na lista; o que mudou depois é recusado
+     *                                       (sem a versão de um id, a recusa vale: falha fechada)
+     * @return array<string, mixed>
+     */
+    public function cancelarAgendamentosEmLote(array $ids, array $versoes = []): array
+    {
+        // Travas SEMPRE em ordem de id: dois lotes que se cruzam não se esperam em círculo (impasse).
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        sort($ids);
+        $tool = 'cancelar_agendamentos_em_lote';
+        $definicao = $this->catalogo()[$tool] ?? null;
+        $tenantId = $this->contexto->tenantId();
+
+        if ($definicao === null || ! $this->podeExecutar('alterar_status_agendamento')) {
+            return $this->negar($tool, $definicao ?? ['acao' => 'consultar', 'entidade' => 'Agendamento'], ['ids' => $ids]);
+        }
+
+        $loteId = (string) Str::uuid();
+        $erros = [];
+
+        try {
+            DB::transaction(function () use ($ids, $versoes, $tenantId, $loteId, &$erros) {
+                foreach ($ids as $id) {
+                    $agendamento = \App\Models\Agendamento::query()->where('tenant_id', $tenantId)->lockForUpdate()->find($id);
+                    if ($agendamento === null) {
+                        $erros[$id] = 'Não encontrei este agendamento.';
+
+                        continue;
+                    }
+
+                    // A versão é a de quando o usuário VIU a linha (não a de agora): remarcado ou mudado por outra pessoa depois de
+                    // marcar, o item é recusado em vez de cancelar o que ele não viu.
+                    $resposta = $this->detalhesAuditoria->com(['lote_id' => $loteId], fn () => $this->executarConfirmada('alterar_status_agendamento',
+                        ['id' => $id, 'novo_status' => 'cancelado', 'versao' => (string) ($versoes[$id] ?? '')], []));
+
+                    if (($resposta['tipo'] ?? null) !== 'resultado_escrita') {
+                        // Erro TÉCNICO (5xx): para tudo aqui (desfaz a transação), em vez de seguir gravando os próximos itens.
+                        if ((int) ($resposta['http_status'] ?? 0) >= 500) {
+                            throw new \RuntimeException('falha técnica no lote');
+                        }
+                        $erros[$id] = (string) ($resposta['mensagem'] ?? 'Não foi possível cancelar este agendamento.');
+                    }
+                }
+
+                if ($erros !== []) {
+                    throw new ToolRecusadaException('lote recusado');
+                }
+            });
+        } catch (ToolRecusadaException) {
+            // Tudo desfeito (inclusive as linhas de auditoria dos itens): fica UMA linha, com os ids e o motivo de cada recusa.
+            $this->detalhesAuditoria->com(['lote_id' => $loteId], fn () => $this->auditar($tool, 'atualizar', 'Agendamento', null,
+                ['ids' => $ids, 'motivos' => $erros], 'recusado', 'Lote recusado: nada foi cancelado.', true));
+
+            return ['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_BATCH_REFUSED', 'http_status' => 422,
+                'mensagem' => 'Não cancelei nada: '.(count($erros) === 1 ? 'um dos agendamentos não pode ser cancelado' : count($erros).' dos agendamentos não podem ser cancelados')
+                    .'. O motivo está na linha. Desmarque '.(count($erros) === 1 ? 'esse' : 'esses').' e tente de novo.',
+                'erros' => $erros];
+        } catch (Throwable $e) {
+            // Falha técnica: nada foi gravado (transação desfeita). Fica UMA linha de auditoria do que foi tentado (RF06/RF07).
+            try {
+                $this->detalhesAuditoria->com(['lote_id' => $loteId], fn () => $this->auditar($tool, 'atualizar', 'Agendamento', null,
+                    ['ids' => $ids], 'erro', 'Falha técnica no lote: nada foi cancelado.', true));
+            } catch (Throwable) {
+                // a auditoria não derruba a resposta ao usuário
+            }
+
+            return $this->erroTecnicoTool($e);
+        }
+
+        $n = count($ids);
+
+        return ['tipo' => 'resultado_escrita', 'tool' => $tool, 'lote_id' => $loteId, 'cancelados' => $ids,
+            'mensagem' => $n === 1 ? 'Pronto, cancelei o agendamento que você marcou.' : 'Pronto, cancelei os '.$n.' agendamentos que você marcou.'];
     }
 
     /**

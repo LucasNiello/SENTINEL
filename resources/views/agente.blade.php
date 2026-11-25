@@ -124,40 +124,46 @@
                 const dados = await resp.json().catch(() => ({}));
                 if (!resp.ok) {
                     const mensagens = {
-                        422: 'Confira os dados do pedido.',
-                        403: 'Você não tem permissão para esta operação.',
-                        429: 'Muitos pedidos. Aguarde antes de tentar novamente.',
-                        502: 'O serviço de IA retornou uma resposta inesperada. Tente novamente.',
-                        503: 'O serviço de IA está indisponível no momento. Tente novamente.',
-                        504: 'O serviço de IA demorou demais para responder. Tente novamente.',
+                        422: 'Não consegui entender direito esse pedido. Pode me dizer de outro jeito?',
+                        403: 'Seu perfil não tem permissão para isso, então não posso fazer por aqui. Se precisar, fale com quem administra o sistema.',
+                        429: 'Opa, estão chegando pedidos rápido demais. Espera só um instante e tenta de novo.',
+                        502: 'A IA me devolveu algo que eu não consegui usar. Pode tentar de novo?',
+                        503: 'A IA está fora do ar neste momento. Tenta de novo daqui a pouco?',
+                        504: 'A IA demorou demais para responder. Tenta de novo?',
                     };
                     // 422: a frase do servidor diz o que faltou ("Não encontrei o cliente com esse número na lixeira.");
                     // é texto pensado para o usuário, sem detalhe técnico.
                     const doServidor = resp.status === 422 && typeof dados.mensagem === 'string' ? dados.mensagem : null;
-                    adicionarMensagem(doServidor || mensagens[resp.status] || 'Não foi possível processar o pedido.', 'msg--erro');
+                    adicionarMensagem(doServidor || mensagens[resp.status] || 'Não consegui processar esse pedido agora. Tenta de novo?', 'msg--erro');
                     return;
                 }
 
+                let avisoJaMostrado = false;
                 switch (dados.tipo) {
                     case 'texto':
                         adicionarMensagem(dados.mensagem || '(sem resposta)', 'msg--agente');
                         break;
                     case 'resultado_leitura':
-                        adicionarTabela(dados.resultado || [], dados.colunas, dados.editar, dados.exportar);
+                        // 25/11: a frase natural que a IA escreveu junto ("Beleza, achei o agendamento do Rex…") vem ANTES da tabela.
+                        if (dados.introducao) adicionarMensagem(dados.introducao, 'msg--agente');
+                        // A pergunta "Achei 4… Qual deles você quer?" vem ANTES da lista, como numa conversa.
+                        if (dados.aviso) { adicionarAviso(dados.aviso); avisoJaMostrado = true; }
+                        adicionarTabela(dados.resultado || [], dados.colunas, dados.editar, dados.exportar, dados.selecao);
                         break;
                     case 'confirmacao_pendente':
+                        if (dados.introducao) adicionarMensagem(dados.introducao, 'msg--agente');
                         renderizarConfirmacaoPendente(dados);
                         break;
                     case 'erro':
                     default:
-                        adicionarMensagem(dados.mensagem || 'Erro desconhecido.', 'msg--erro');
+                        adicionarMensagem(dados.mensagem || 'Algo deu errado do meu lado, e não alterei nada. Tenta de novo?', 'msg--erro');
                         break;
                 }
 
                 // O aviso acompanha qualquer tipo de resposta (skill, seção 7).
-                if (dados.aviso) adicionarAviso(dados.aviso);
+                if (dados.aviso && !avisoJaMostrado) adicionarAviso(dados.aviso);
             } catch (err) {
-                adicionarMensagem(err.name === 'AbortError' ? 'O serviço de IA demorou demais para responder. Tente novamente.' : 'Falha ao contatar o servidor.', 'msg--erro');
+                adicionarMensagem(err.name === 'AbortError' ? 'A IA demorou demais para responder. Tenta de novo?' : 'Não consegui falar com o servidor agora. Tenta de novo daqui a pouco?', 'msg--erro');
             } finally {
                 clearTimeout(timeout);
                 definirCarregando(false);

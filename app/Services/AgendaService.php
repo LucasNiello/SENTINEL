@@ -181,7 +181,7 @@ class AgendaService
      * A agenda do tenant num período (padrão: de hoje até 6 dias depois), com o pet, o tutor, o profissional e o
      * serviço de cada horário. Datas AAAA-MM-DD no fuso da aplicação; até 200, do mais cedo para o mais tarde.
      */
-    public function buscarPorFiltro(?string $dataInicio, ?string $dataFim, ?string $setor, ?int $profissionalId, ?int $petId, ?string $status, int $tenantId): Collection
+    public function buscarPorFiltro(?string $dataInicio, ?string $dataFim, ?string $setor, ?int $profissionalId, ?int $petId, ?string $status, int $tenantId, ?string $petNome = null, ?string $tutorNome = null, ?string $profissionalNome = null): Collection
     {
         $fuso = (string) config('app.timezone');
         foreach (['de início' => $dataInicio, 'de fim' => $dataFim] as $qual => $informada) {
@@ -202,6 +202,11 @@ class AgendaService
             ->when($setor, fn ($query) => $query->where('agendamentos.setor', $setor))
             ->when($profissionalId, fn ($query) => $query->where('agendamentos.profissional_id', $profissionalId))
             ->when($petId, fn ($query) => $query->where('agendamentos.pet_id', $petId))
+            // 25/11: filtros POR NOME, sem número, todos combináveis: o animal ("agenda do Thor"), o cliente/tutor ("os do Diego") e o
+            // profissional ("os da estetica1"). Cada palavra do nome precisa casar; o join já é do tenant.
+            ->tap(fn (Builder $query) => $this->comPalavrasDoNome($query, $petNome, 'pets.nome'))
+            ->tap(fn (Builder $query) => $this->comPalavrasDoNome($query, $tutorNome, 'tutores.nome'))
+            ->tap(fn (Builder $query) => $this->comPalavrasDoNome($query, $profissionalNome, 'users.name'))
             ->when($status, fn ($query) => $query->where('agendamentos.status', $status))
             ->orderBy('agendamentos.inicio')
             ->limit(200)
@@ -789,7 +794,73 @@ class AgendaService
     }
 
     /** Palavras que dizem "o último criado" (sem acento) e as de enfeite que vêm junto ("o último agendamento que criei"). */
-    private const PALAVRAS_DO_MAIS_RECENTE = ['ultimo', 'ultima', 'recente', 'mais', 'agendamento', 'agendado', 'criei', 'criado', 'criada', 'quero', 'queria', 'remarca', 'remarcar', 'aquele', 'aquela', 'meu', 'minha'];
+    public const PALAVRAS_DO_MAIS_RECENTE = ['ultimo', 'ultima', 'recente', 'mais', 'agendamento', 'agendado', 'criei', 'criado', 'criada', 'quero', 'queria', 'remarca', 'remarcar', 'aquele', 'aquela', 'meu', 'minha'];
+
+    /**
+     * Restringe pelo NOME dito pelo usuário: cada palavra (3+ letras) precisa aparecer na coluna ("Ana Beatriz" casa com
+     * "Ana Beatriz Souza"). Texto em branco não filtra; texto só de palavras curtas casa inteiro.
+     */
+    private function comPalavrasDoNome(Builder $query, ?string $texto, string $coluna): void
+    {
+        $texto = is_string($texto) ? trim($texto) : '';
+        if ($texto === '') {
+            return;
+        }
+        $palavras = $this->palavrasDaBusca($texto);
+        foreach ($palavras === [] ? [$texto] : $palavras as $palavra) {
+            $this->nomeContem($query, $palavra, $coluna);
+        }
+    }
+
+    /** Até quantos agendamentos uma lista de cancelamento em lote mostra (acima disso, pede para restringir; nunca trunca). */
+    public const LIMITE_CANCELAR_EM_LOTE = 25;
+
+    /**
+     * Cancelar em lote (25/11): os agendamentos EM ABERTO do período que o usuário pode ver (setores do papel), no tenant, para
+     * ele MARCAR quais cancelar. Nada é cancelado aqui. Cada linha diz se pode ser marcada: cirurgia e internação (exigem CRMV
+     * e senha, um a um) e os que têm cobrança ou prontuário (regra do cancelamento) vêm bloqueados, com o motivo.
+     *
+     * @param  string[]  $setoresDoPapel
+     * @return array<int, array<string, mixed>>
+     */
+    public function candidatosParaCancelarEmLote(?string $de, ?string $ate, ?string $setor, ?string $petNome, ?string $exetoDia, array $setoresDoPapel, int $tenantId, ?string $tutorNome = null, ?string $profissionalNome = null): array
+    {
+        if (is_string($exetoDia) && trim($exetoDia) !== '' && $this->dia(trim($exetoDia)) === null) {
+            throw new RegraDeNegocioException('A data a manter deve estar no formato AAAA-MM-DD (ex.: 2026-11-25).');
+        }
+        $exeto = is_string($exetoDia) && trim($exetoDia) !== '' ? trim($exetoDia) : null;
+
+        $achados = $this->buscarPorFiltro($de, $ate, $setor, null, null, null, $tenantId, $petNome, $tutorNome, $profissionalNome);
+        // A consulta corta em 200 ANTES de filtrar por aberto/setor/dia: se bateu no teto, a lista sairia incompleta sem aviso.
+        if ($achados->count() >= 200) {
+            throw new RegraDeNegocioException('Achei agendamentos demais para listar de uma vez. Pode restringir por período, cliente, animal ou profissional?');
+        }
+
+        return $achados
+            ->filter(fn (Agendamento $a) => array_key_exists((string) $a->status, self::TRANSICOES)
+                && in_array((string) $a->setor, $setoresDoPapel, true)
+                && ($exeto === null || $a->inicio->format('Y-m-d') !== $exeto))
+            ->map(function (Agendamento $a) use ($tenantId) {
+                $motivo = $this->exigeCrmv((int) $a->id, null, $tenantId)
+                    ? 'Cirurgia ou internação: cancele um a um (exige CRMV e senha).'
+                    : $this->motivoParaNaoAlterarStatus((int) $a->id, 'cancelado', $tenantId, null, null);
+
+                return [
+                    'id' => (int) $a->id,
+                    'horario' => $a->inicio->format('d/m/Y H:i').'–'.$a->fim->format('H:i'),
+                    'pet' => $a->getAttribute('pet'),
+                    'tutor' => $a->getAttribute('tutor'),
+                    'servico' => $a->getAttribute('servico'),
+                    'profissional' => $a->getAttribute('profissional'),
+                    'setor' => $a->setor,
+                    'status' => $a->status,
+                    'observacao' => $motivo ?? '',
+                    'bloqueado' => $motivo !== null,
+                    // Só para o servidor guardar (a versão de quando o usuário viu a linha); o navegador não a recebe.
+                    'versao' => (string) $a->getRawOriginal('updated_at'),
+                ];
+            })->values()->all();
+    }
 
     /** @param  string[]  $palavras */
     private function pedeOMaisRecente(array $palavras): bool

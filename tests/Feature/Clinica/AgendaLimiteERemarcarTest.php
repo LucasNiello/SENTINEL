@@ -391,7 +391,7 @@ class AgendaLimiteERemarcarTest extends TestCase
         $this->logarComo('recepcao', self::T);
 
         $this->comando('remarcar_agendamento', ['inicio' => '2026-11-16 10:00'])->assertStatus(422)
-            ->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'Informe qual agendamento deve ser alterado'));
+            ->assertJsonPath('mensagem', fn (string $m) => str_contains($m, 'Qual agendamento você quer alterar?'));
         $this->comando('remarcar_agendamento', ['busca' => 'ninguém', 'inicio' => '2026-11-16 10:00'])->assertStatus(422);
         $this->assertSame(0, Agendamento::count());
     }

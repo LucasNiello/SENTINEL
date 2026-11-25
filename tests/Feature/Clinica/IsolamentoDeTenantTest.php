@@ -59,6 +59,7 @@ class IsolamentoDeTenantTest extends TestCase
             'AgendaService::remarcar', 'AgendaService::motivoParaNaoRemarcar', 'AgendaService::localizarParaRemarcar',
             'AgendaService::trocarServico', 'AgendaService::motivoParaNaoTrocarServico', 'AgendaService::disponibilidadeDoDia',
             'AgendaService::disponibilidadeDoMes', 'AgendaService::exigeCrmv', 'AgendaService::exigeCrmvNoStatus',
+            'AgendaService::candidatosParaCancelarEmLote',
             'ProntuarioService::abrir', 'ProntuarioService::atualizar', 'ProntuarioService::adicionarItem', 'ProntuarioService::removerItem',
             'ProntuarioService::assinar', 'ProntuarioService::adendar', 'ProntuarioService::vincular', 'ProntuarioService::metadados',
             'CobrancaService::abrir', 'CobrancaService::adicionarItem', 'CobrancaService::removerItem', 'CobrancaService::importarDoProntuario',
@@ -203,6 +204,10 @@ class IsolamentoDeTenantTest extends TestCase
             'AgendaService::buscarPorFiltro' => fn () => $this->soNoProprioTenant(
                 fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
                 fn (int $t) => $agenda->buscarPorFiltro(null, null, null, null, null, null, $t)),
+            // 25/11: a lista de cancelar em lote só traz os agendamentos em aberto do PRÓPRIO tenant (e do setor do papel).
+            'AgendaService::candidatosParaCancelarEmLote' => fn () => $this->soNoProprioTenant(
+                fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
+                fn (int $t) => $agenda->candidatosParaCancelarEmLote(null, null, null, null, null, ['clinica', 'petshop'], $t)),
             'AgendaService::localizarEmAberto' => function () use ($agenda) {
                 $agendamento = $this->agendado();
                 $this->assertCount(1, $agenda->localizarEmAberto($agendamento->id, null, self::T));

@@ -1,0 +1,8 @@
+n;grupo;pedido;depende_de;esperado_tool;esperado_tipo;observacao;papel
+1;ref-contexto;mostre a agenda de hoje;;consultar_agenda;resultado_leitura;tabela de hoje;dono
+2;ref-nome;alterar o REX, é tosa completa;1;alterar_servico_agendamento;confirmacao_pendente;o Rex da tabela de hoje (resolve sem lista);dono
+3;ref-contexto;mostre a agenda do Thor em dezembro;;consultar_agenda;resultado_leitura;pet por nome (nao consultar_pets);dono
+4;ref-ultimo;remarque o último;3;remarcar_agendamento;confirmacao_pendente;posicao=ultima (a linha que ele viu);dono
+5;ref-dia;eu marquei o dia errado, altere pro dia 21, mesmo horário;4;remarcar_agendamento;confirmacao_pendente;dia_do_mes=21 e a hora do agendamento (servidor);dono
+6;ref-ele;então é ele;3;remarcar_agendamento;confirmacao_pendente;tabela de 1 linha: ele/esse e a linha;dono
+7;lote;cancele todos, vamos trabalhar apenas com o do dia 25;1;cancelar_agendamentos_em_lote;resultado_leitura;lista com checkbox (exceto_dia); nada e cancelado sem marcar;dono

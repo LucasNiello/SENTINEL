@@ -557,7 +557,7 @@ class AgenteController extends Controller
         // o Editar não pode apagar esse desfecho nem devolver a proposta ao formulário.
         if (is_array($pendente) && $this->pendentes->expirou($pendente)) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_PROPOSAL_EXPIRED',
-                'http_status' => 422, 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.'], 422);
+                'http_status' => 422, 'mensagem' => 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.'], 422);
         }
 
         $proposta = $token === null ? null : $this->pendentes->invalidarToken($request->session(), $token);
@@ -615,8 +615,8 @@ class AgenteController extends Controller
             entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
         return response()->json($expirou
-            ? ['tipo' => 'expirado', 'mensagem' => 'Confirmação expirada. Nada foi gravado. Peça de novo.']
-            : ['tipo' => 'cancelado', 'mensagem' => 'Cancelado. Nada foi gravado.']);
+            ? ['tipo' => 'expirado', 'mensagem' => 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.']
+            : ['tipo' => 'cancelado', 'mensagem' => 'Tudo bem, cancelei o pedido. Não alterei nada.']);
     }
 
     /**
