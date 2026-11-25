@@ -248,16 +248,19 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
 .card-lote tr.item-erro td {background:var(--color-erro-faixa)}
 .card-lote .item-erro-texto {display:block;color:var(--color-erro);font-size:15px}
 .card-expirado-texto {margin-top:16px;color:var(--sentinel-ink-muted)}
-/* TOAST (23/11): resultado da operação no canto inferior direito; sem fundo escurecido, não bloqueia cliques (só o toast os recebe), sem animação. */
-#toasts {position:fixed;right:16px;bottom:16px;z-index:80;display:flex;flex-direction:column;gap:8px;width:max-content;max-width:min(420px,calc(100vw - 32px));pointer-events:none}
+/* TOAST (23/11; 25/11: no TOPO, centralizado na horizontal, entrando de cima para baixo): resultado da operação; sem fundo escurecido, não bloqueia cliques (só o toast os recebe). A entrada é um deslizar curto e some com prefers-reduced-motion. */
+#toasts {position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;align-items:center;gap:8px;width:max-content;max-width:min(520px,calc(100vw - 32px));pointer-events:none}
 #toasts>div:empty {display:none}
-.toast {pointer-events:auto;display:flex;align-items:flex-start;gap:8px;padding:8px 4px 8px 16px;background:var(--sentinel-paper);color:var(--sentinel-ink);border:1px solid var(--sentinel-border);border-left:4px solid var(--sentinel-ink-muted);border-radius:var(--radius);box-shadow:0 8px 24px rgb(10 14 19 / .14);overflow-wrap:anywhere}
+.toast {animation:toast-desce .22s ease-out;pointer-events:auto;display:flex;align-items:flex-start;gap:8px;padding:8px 4px 8px 16px;background:var(--sentinel-paper);color:var(--sentinel-ink);border:1px solid var(--sentinel-border);border-left:4px solid var(--sentinel-ink-muted);border-radius:var(--radius);box-shadow:0 8px 24px rgb(10 14 19 / .14);overflow-wrap:anywhere}
 .toast--sucesso {color:var(--color-sucesso);border-left-color:var(--color-sucesso)}
 .toast--erro {color:var(--color-erro);border-left-color:var(--color-erro)}
 .toast__texto {flex:1;min-width:0;padding:11px 0}
 .toast__fechar {flex:none;width:44px;min-width:44px;padding:0;border:0;background:none;color:inherit;font-size:24px;line-height:1}
 .toast__fechar:hover {background:var(--sentinel-cream-alt)}
-@media (max-width:599px) {#toasts {left:16px;width:auto;max-width:none}}
+/* 25/11: linha que acabou de ser gravada ou alterada (lista atualizada sozinha): fundo + contorno por 4 s, sem animação. */
+.linha-nova {background:var(--color-sucesso-faixa);outline:2px solid var(--color-sucesso);outline-offset:-2px}
+@keyframes toast-desce {from {opacity:0;transform:translateY(-24px)} to {opacity:1;transform:translateY(0)}}
+@media (max-width:599px) {#toasts {left:16px;right:16px;transform:none;width:auto;max-width:none;align-items:stretch}}
 /* AUDIT */
 #lista {min-width:0}
 #lista td:first-child {white-space:nowrap}
@@ -501,7 +504,16 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
 .ficha-passo {margin:0;padding:16px;border:1px solid var(--sentinel-border);border-radius:var(--radius);background:var(--sentinel-paper);min-width:0;display:flex;flex-direction:column;gap:8px}
 .ficha-passo legend {padding:0 4px;font-weight:500}
 .ficha-rotulo {color:var(--sentinel-ink-muted);font-size:15px}
-.ficha-busca,.ficha-profissional {min-height:44px;max-width:360px;width:100%;border:1px solid var(--color-borda-campo);border-radius:6px;padding:8px 12px;background:var(--sentinel-paper);color:var(--sentinel-ink)}
+.ficha-profissional {min-height:44px;width:100%;border:1px solid var(--color-borda-campo);border-radius:6px;padding:8px 12px;background:var(--sentinel-paper);color:var(--sentinel-ink)}
+/* 25/11: combobox único do profissional (cascata + busca por digitação). Lista sobre o conteúdo, sem animação. */
+.ficha-combo {position:relative;max-width:360px;width:100%}
+.ficha-combo-lista {position:absolute;z-index:20;left:0;right:0;top:100%;margin:2px 0 0;padding:4px;list-style:none;max-height:240px;overflow:auto;border:1px solid var(--color-borda-campo);border-radius:6px;background:var(--sentinel-paper)}
+.ficha-combo-opcao,.ficha-combo-vazio {min-height:44px;display:flex;align-items:center;padding:8px 12px;border-radius:4px}
+.ficha-combo-opcao {cursor:pointer}
+.ficha-combo-opcao[aria-selected="true"] {font-weight:500}
+.ficha-combo-opcao[aria-selected="true"]::after {content:"✓";margin-left:auto;color:var(--sentinel-blue)}
+.ficha-combo-opcao.is-ativa,.ficha-combo-opcao:hover {background:var(--sentinel-cream-alt);outline:2px solid var(--sentinel-blue);outline-offset:-2px}
+.ficha-combo-vazio {color:var(--sentinel-ink-muted)}
 .ficha-dias-rapidos {display:flex;gap:8px}
 .ficha-mes {max-width:360px}
 .ficha-mes-topo {display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -509,14 +521,13 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
 .ficha-semana,.ficha-mes-grade {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
 .ficha-semana span {text-align:center;font:12px var(--fonte-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--sentinel-ink-muted)}
 .ficha-dia {min-height:44px;padding:0;font-family:var(--fonte-mono);font-variant-numeric:tabular-nums}
-.ficha-dia[aria-pressed="true"] {border:2px solid var(--sentinel-blue);color:var(--sentinel-blue);font-weight:500}
-.ficha-dia:disabled,.ficha-horario:disabled {color:var(--sentinel-ink-muted);border-color:var(--sentinel-border);background:var(--sentinel-cream-alt);cursor:not-allowed}
-.ficha-horarios,.ficha-quem-lista {display:flex;flex-wrap:wrap;gap:8px}
+.ficha-dia[aria-pressed="true"],.ficha-horario[aria-pressed="true"] {background:var(--sentinel-blue);border:2px solid var(--sentinel-blue);color:var(--sentinel-paper);font-weight:500}
+.ficha-dia:disabled,.ficha-horario:disabled {color:var(--sentinel-ink-muted);border-color:var(--sentinel-border);background:var(--sentinel-cream-alt);cursor:not-allowed;text-decoration:line-through}
+.ficha-horarios {display:flex;flex-wrap:wrap;gap:8px}
 .ficha-horario {font-variant-numeric:tabular-nums}
-.ficha-horario[aria-current="true"] {border:2px solid var(--sentinel-blue)}
 .ficha-estado {margin:0;color:var(--sentinel-ink)}
-.ficha-quem-titulo {margin:8px 0 0;font-weight:500}
-@media (max-width:599px) {.ficha-passo {padding:12px}.ficha-mes,.ficha-busca,.ficha-profissional {max-width:none}}
+.ficha-escolha {margin:8px 0 0;font-weight:500;color:var(--sentinel-ink)}
+@media (max-width:599px) {.ficha-passo {padding:12px}.ficha-mes,.ficha-combo {max-width:none}}
 /* REDUCED MOTION */
 @media (prefers-reduced-motion:reduce) {*,*::before,*::after {scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 
@@ -556,8 +567,7 @@ body:has(.agent-workspace) .context-rail {min-height:0;overflow-y:auto}
 @media (max-height:820px) {body:has(.agent-workspace) .agent-hero {position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}}
 @media (max-height:700px) {body:has(.agent-workspace) .composer-note {display:none}}
 @media (max-height:560px) {body:has(.agent-workspace) .deck-header {display:none}}
-/* Toast acima do compositor (o compositor agora fica sempre no pé da janela); anel de foco do histórico por dentro (a coluna corta o de fora). */
-body:has(.agent-workspace) #toasts {bottom:112px}
+/* Toast no topo também no /agente (25/11); anel de foco do histórico por dentro (a coluna corta o de fora). */
 body:has(.agent-workspace) #historico:focus-visible {outline-offset:-3px}
 /* Texto A+/A++: o zoom do html multiplica as unidades de viewport; compensa a altura da coluna para o compositor não sair da janela (a verificar no navegador). */
 html[data-texto="2"] body:has(.agent-workspace) .workspace-main {height:calc(100vh / 1.125);height:calc(100dvh / 1.125)}

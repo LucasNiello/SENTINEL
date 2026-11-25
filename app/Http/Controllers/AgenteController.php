@@ -127,6 +127,8 @@ class AgenteController extends Controller
             $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'], $resposta['propostos'] ?? null,
                 tempoIaMs: $resposta['tempo_ia_ms'] ?? null, loteIds: $resposta['lote_ids'] ?? null);
             $this->conversa->vincularProposta($request->session(), $resposta['proposta']);
+            // 25/11: quanto tempo a proposta vale (s); o front só cria o contador se vier número (contrato para o React também).
+            $resposta['prazo_s'] = ConfirmacoesPendentes::prazoS('agente');
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
             unset($resposta['propostos'], $resposta['tempo_ia_ms'], $resposta['lote_ids']);
         }
@@ -683,6 +685,14 @@ class AgenteController extends Controller
         if (($resposta['tipo'] ?? null) === 'confirmacao_pendente') {
             $resposta['proposta'] = $this->pendentes->guardarRascunho($request->session(), $resposta['tool'], $resposta['argumentos'],
                 $resposta['propostos'] ?? [], 'formulario');
+            // 25/11: card aberto por tela não vence (null): o front não cria contador (ver ConfirmacoesPendentes::prazoS).
+            $resposta['prazo_s'] = ConfirmacoesPendentes::prazoS('formulario');
+            // Sem prazo, há um teto de cards de tela por usuário: o mais antigo que passar dele sai, auditado como cancelado.
+            foreach ($this->pendentes->retirarExcedentesDeTela($request->session()) as $excedente) {
+                $this->aiAgentService->auditarDesfecho($excedente['tool'], ConfirmacoesPendentes::propostos($excedente), 'cancelado',
+                    'Card de tela substituído: limite de cards abertos. Nada foi gravado.', ConfirmacoesPendentes::origem($excedente),
+                    entidadeId: ConfirmacoesPendentes::entidadeId($excedente), tempoIaMs: ConfirmacoesPendentes::tempoIa($excedente));
+            }
             $resposta['argumentos'] = AuditoriaService::mascararCamposSensiveis($resposta['argumentos']);
             unset($resposta['propostos']);
         }

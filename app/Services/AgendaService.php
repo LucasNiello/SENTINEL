@@ -83,13 +83,20 @@ class AgendaService
         return DB::transaction(function () use ($dados, $tenantId, $autorizacao) {
             // Serializa os agendamentos do mesmo profissional até o commit: dois pedidos simultâneos
             // não passam os dois pela conferência de vaga. (O SQLite dos testes ignora FOR UPDATE.)
-            User::query()->whereKey($this->idValido($dados['profissional_id'] ?? null) ?? 0)->lockForUpdate()->first();
+            // "Qualquer profissional" (profissional_id em branco): trava TODOS os candidatos do setor em ordem de id (o mesmo
+            // padrão de travarProfissionais) e só então escolhe, dentro desta transação.
+            if (blank($dados['profissional_id'] ?? null)) {
+                $this->travarProfissionais(0, null, $this->idsDosCandidatos($this->servicoDoTenant($dados['catalogo_item_id'] ?? null, $tenantId)->setor, $tenantId));
+            } else {
+                User::query()->whereKey($this->idValido($dados['profissional_id'] ?? null) ?? 0)->lockForUpdate()->first();
+            }
 
-            ['servico' => $servico, 'inicio' => $inicio, 'fim' => $fim, 'origem' => $origem] = $this->conferir($dados, $tenantId, $autorizacao);
+            ['servico' => $servico, 'inicio' => $inicio, 'fim' => $fim, 'origem' => $origem, 'profissional_id' => $profissionalId]
+                = $this->conferir($dados, $tenantId, $autorizacao, travar: true);
 
             $agendamento = Agendamento::create([
                 'pet_id' => (int) $dados['pet_id'],
-                'profissional_id' => (int) $dados['profissional_id'],
+                'profissional_id' => $profissionalId,
                 'setor' => $servico->setor,
                 'catalogo_item_id' => $servico->id,
                 'inicio' => $inicio,
@@ -292,8 +299,8 @@ class AgendaService
         return GradeDaAgenda::daConfiguracao($tenantId);
     }
 
-    /** @return array{servico: CatalogoItem, inicio: CarbonImmutable, fim: CarbonImmutable, origem: string} */
-    private function conferir(array $dados, int $tenantId, ?array $autorizacao = null): array
+    /** @return array{servico: CatalogoItem, inicio: CarbonImmutable, fim: CarbonImmutable, origem: string, profissional_id: int} */
+    private function conferir(array $dados, int $tenantId, ?array $autorizacao = null, bool $travar = false): array
     {
         $origem = $dados['origem'] ?? 'normal';
         if (! in_array($origem, Agendamento::ORIGENS, true)) {
@@ -302,11 +309,21 @@ class AgendaService
 
         $this->doTenant(Pet::class, $dados['pet_id'] ?? null, $tenantId, 'o pet');
         $servico = $this->servicoDoTenant($dados['catalogo_item_id'] ?? null, $tenantId);
-        $this->profissionalDoSetor($dados['profissional_id'] ?? null, $servico->setor, $tenantId);
+        // Em branco = "qualquer profissional" (escolhido abaixo, depois do início). Encaixe de emergência não escolhe: exige o profissional.
+        if (blank($dados['profissional_id'] ?? null) && ($dados['origem'] ?? 'normal') === 'encaixe_emergencia') {
+            throw new RegraDeNegocioException('O encaixe de emergência exige o profissional: escolha quem atendeu.');
+        }
+        $qualquer = blank($dados['profissional_id'] ?? null) && ($dados['origem'] ?? 'normal') !== 'encaixe_emergencia';
+        if (! $qualquer) {
+            $this->profissionalDoSetor($dados['profissional_id'] ?? null, $servico->setor, $tenantId);
+        }
 
         $inicio = $this->momento($dados['inicio'] ?? null);
         if ($inicio === null) {
             throw new RegraDeNegocioException('Informe o início com data e hora.');
+        }
+        if ($qualquer) {
+            $dados['profissional_id'] = $this->escolherProfissional($servico, $inicio, $tenantId, null, $travar);
         }
         // O fim não é pedido na tela nem à IA: o servidor calcula pelo modelo do setor (o "fim" dos dados é ignorado).
         $fim = $this->grade($tenantId)->fim($servico->setor, $servico->categoria, $inicio);
@@ -325,7 +342,54 @@ class AgendaService
             $this->conferirHorario($servico, (int) $dados['profissional_id'], $inicio, $tenantId);
         }
 
-        return ['servico' => $servico, 'inicio' => $inicio, 'fim' => $fim, 'origem' => $origem];
+        return ['servico' => $servico, 'inicio' => $inicio, 'fim' => $fim, 'origem' => $origem, 'profissional_id' => (int) $dados['profissional_id']];
+    }
+
+    /** Os profissionais do setor no tenant, em ordem de id (a ordem única de trava e de desempate). @return int[] */
+    private function idsDosCandidatos(string $setor, int $tenantId): array
+    {
+        return User::query()->where('tenant_id', $tenantId)->whereIn('papel', self::PROFISSIONAIS[$setor] ?? [])->orderBy('id')
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
+     * "Qualquer profissional" (25/11, decisão do Lucas): entre os do setor com vaga no horário, o que tem MENOS atendimentos
+     * no dia (ativos e realizados; cancelado e faltou não contam); empate vai para o menor id. $preferido (remarcar: o atual)
+     * ganha se tiver vaga. Cirurgia e internação não usam: o profissional é explícito (regra do CRMV). Com $travar, a leitura
+     * dos agendamentos é a travada da transação de quem grava.
+     */
+    private function escolherProfissional(CatalogoItem $servico, CarbonImmutable $inicio, int $tenantId, ?int $ignorarId, bool $travar, ?int $preferido = null, ?int $seNinguemLivre = null): int
+    {
+        if ($servico->setor === 'clinica' && (in_array($servico->categoria, $this->categoriasRestritas(), true) || $this->grade($tenantId)->foraDaAgenda($servico->categoria))) {
+            throw new RegraDeNegocioException('Este serviço não tem "qualquer profissional": escolha quem atende.');
+        }
+        $ids = $this->idsDosCandidatos($servico->setor, $tenantId);
+        if ($ids === []) {
+            throw new RegraDeNegocioException(self::RECUSA_PROFISSIONAL[$servico->setor] ?? 'Não há profissional para este serviço.');
+        }
+        $grade = $this->grade($tenantId);
+        $dia = $inicio->startOfDay();
+        $ocupados = $this->ocupados($ids, $dia, $dia->addDay(), $tenantId, $ignorarId, $travar);
+        $livres = [];
+        foreach ($ids as $id) {
+            if ($grade->motivo($servico->setor, $servico->categoria, $inicio, $ocupados[$id] ?? []) === null) {
+                $livres[$id] = count($ocupados[$id] ?? []);
+            }
+        }
+        if ($livres === []) {
+            // Remarcar e trocar o serviço: sem ninguém livre, segue com o atual e a própria grade explica o motivo (vaga, conflito).
+            if ($seNinguemLivre !== null) {
+                return $seNinguemLivre;
+            }
+
+            throw new RegraDeNegocioException('Nenhum profissional livre neste horário. Escolha outro horário.');
+        }
+        if ($preferido !== null && isset($livres[$preferido])) {
+            return $preferido;
+        }
+        asort($livres); // estável: o empate mantém a ordem de id
+
+        return (int) array_key_first($livres);
     }
 
     private function servicoDoTenant(mixed $id, int $tenantId): CatalogoItem
@@ -502,11 +566,12 @@ class AgendaService
             // Mesma ordem de trava do agendar (o profissional primeiro, depois os agendamentos): sem impasse entre os dois.
             // A 1ª leitura não trava: só diz de quem é o agendamento (outro tenant: ModelNotFoundException).
             $atual = Agendamento::query()->where('tenant_id', $tenantId)->findOrFail($id);
-            $this->travarProfissionais((int) $atual->profissional_id, $this->idValido($profissionalId));
+            // Em branco = "qualquer": trava também todos os candidatos do setor (em ordem de id) antes de escolher.
+            $this->travarProfissionais((int) $atual->profissional_id, $this->idValido($profissionalId), blank($profissionalId) ? $this->idsDosCandidatos((string) $atual->setor, $tenantId) : []);
             $agendamento = Agendamento::query()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
             $this->conferirVersao($agendamento, $versao);
 
-            [$novoInicio, $novoFim, $novoProfissional] = $this->conferirRemarcacao($agendamento, $inicio, $profissionalId, $tenantId, $autorizacao);
+            [$novoInicio, $novoFim, $novoProfissional] = $this->conferirRemarcacao($agendamento, $inicio, $profissionalId, $tenantId, $autorizacao, travar: true);
             $agendamento->update(['inicio' => $novoInicio, 'fim' => $novoFim, 'profissional_id' => $novoProfissional]);
 
             return $agendamento;
@@ -517,9 +582,9 @@ class AgendaService
      * Remarcar e trocar o serviço podem mudar o profissional: travam o atual e o de destino SEMPRE em ordem de id. Duas
      * trocas cruzadas (A→B e B→A ao mesmo tempo) esperam uma pela outra em vez de travar em impasse.
      */
-    private function travarProfissionais(int $atual, ?int $destino): void
+    private function travarProfissionais(int $atual, ?int $destino, array $candidatos = []): void
     {
-        User::query()->whereKey(array_values(array_unique(array_filter([$atual, $destino]))))->orderBy('id')->lockForUpdate()->get(['id']);
+        User::query()->whereKey(array_values(array_unique(array_filter([$atual, $destino, ...$candidatos]))))->orderBy('id')->lockForUpdate()->get(['id']);
     }
 
     /** Só leitura (para o Revisar): a frase do motivo de recusa da remarcação, ou null. */
@@ -542,7 +607,7 @@ class AgendaService
     }
 
     /** @return array{0: CarbonImmutable, 1: CarbonImmutable, 2: int} o novo início, o novo fim e o profissional */
-    private function conferirRemarcacao(Agendamento $agendamento, mixed $inicio, mixed $profissionalId, int $tenantId, ?array $autorizacao = null): array
+    private function conferirRemarcacao(Agendamento $agendamento, mixed $inicio, mixed $profissionalId, int $tenantId, ?array $autorizacao = null, bool $travar = false): array
     {
         if (! array_key_exists($agendamento->status, self::TRANSICOES)) {
             throw new RegraDeNegocioException("Um agendamento {$agendamento->status} não pode ser remarcado: só os que ainda estão em aberto.");
@@ -552,19 +617,24 @@ class AgendaService
         }
 
         $setor = (string) $agendamento->setor;
-        $profissional = blank($profissionalId) ? (int) $agendamento->profissional_id
-            : (int) $this->profissionalDoSetor($profissionalId, $setor, $tenantId)->id;
+        $explicito = blank($profissionalId) ? null : (int) $this->profissionalDoSetor($profissionalId, $setor, $tenantId)->id;
 
         $novoInicio = $this->momento($inicio);
         if ($novoInicio === null) {
             throw new RegraDeNegocioException('Informe o novo início com data e hora (AAAA-MM-DD HH:MM).');
         }
         $this->conferirNaoPassou($setor, $novoInicio, 'remarcar', $tenantId);
+
+        $servico = $this->servicoDoTenant($agendamento->catalogo_item_id, $tenantId);
+        // Em branco = "qualquer": o atual se tiver vaga no novo horário, senão o de menos atendimentos no dia. Cirurgia e
+        // internação (regra do CRMV) seguem como antes: em branco mantém o atual.
+        $restrito = $setor === 'clinica' && (in_array($servico->categoria, $this->categoriasRestritas(), true) || $this->grade($tenantId)->foraDaAgenda($servico->categoria));
+        $profissional = $explicito ?? ($restrito ? (int) $agendamento->profissional_id
+            : $this->escolherProfissional($servico, $novoInicio, $tenantId, (int) $agendamento->id, $travar, (int) $agendamento->profissional_id, (int) $agendamento->profissional_id));
         if ($novoInicio->equalTo($this->momento($agendamento->inicio)) && $profissional === (int) $agendamento->profissional_id) {
             throw new RegraDeNegocioException('O agendamento já está nesse horário.');
         }
 
-        $servico = $this->servicoDoTenant($agendamento->catalogo_item_id, $tenantId);
         $this->conferirRestrito($servico, $agendamento, $profissional, $autorizacao, $tenantId);
         $novoFim = $this->grade($tenantId)->fim($setor, $servico->categoria, $novoInicio);
         $this->conferirDuracaoMaxima($novoInicio, $novoFim, 'novo horário');
@@ -584,12 +654,14 @@ class AgendaService
     {
         return DB::transaction(function () use ($id, $catalogoItemId, $profissionalId, $inicio, $tenantId, $versao, $autorizacao) {
             $atual = Agendamento::query()->where('tenant_id', $tenantId)->findOrFail($id);
-            $this->travarProfissionais((int) $atual->profissional_id, $this->idValido($profissionalId));
+            // Em branco = "qualquer": trava também todos os candidatos do setor do serviço novo (em ordem de id).
+            $candidatos = blank($profissionalId) ? $this->idsDosCandidatos($this->servicoDoTenant($catalogoItemId, $tenantId)->setor, $tenantId) : [];
+            $this->travarProfissionais((int) $atual->profissional_id, $this->idValido($profissionalId), $candidatos);
             $agendamento = Agendamento::query()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
             $this->conferirVersao($agendamento, $versao);
 
             ['servico' => $servico, 'profissional' => $profissional, 'inicio' => $novoInicio, 'fim' => $novoFim]
-                = $this->conferirTroca($agendamento, $catalogoItemId, $profissionalId, $inicio, $tenantId, $autorizacao);
+                = $this->conferirTroca($agendamento, $catalogoItemId, $profissionalId, $inicio, $tenantId, $autorizacao, travar: true);
 
             $agendamento->update([
                 'catalogo_item_id' => $servico->id,
@@ -623,7 +695,7 @@ class AgendaService
     }
 
     /** @return array{servico: CatalogoItem, profissional: int, inicio: CarbonImmutable, fim: CarbonImmutable} */
-    private function conferirTroca(Agendamento $agendamento, mixed $catalogoItemId, mixed $profissionalId, mixed $inicio, int $tenantId, ?array $autorizacao = null): array
+    private function conferirTroca(Agendamento $agendamento, mixed $catalogoItemId, mixed $profissionalId, mixed $inicio, int $tenantId, ?array $autorizacao = null, bool $travar = false): array
     {
         if (! array_key_exists($agendamento->status, self::TRANSICOES)) {
             throw new RegraDeNegocioException("Um agendamento {$agendamento->status} não troca de serviço: só os que ainda estão em aberto.");
@@ -645,12 +717,20 @@ class AgendaService
         if (in_array($servico->categoria, $restritas, true) || in_array($atual, $restritas, true)) {
             throw new RegraDeNegocioException(self::RECUSA_TROCA_CIRURGIA);
         }
-        $profissional = (int) $this->profissionalDoSetor($profissionalId, $servico->setor, $tenantId)->id;
-        $this->conferirRestrito($servico, $agendamento, $profissional, $autorizacao, $tenantId);
+        $explicito = blank($profissionalId) ? null : (int) $this->profissionalDoSetor($profissionalId, $servico->setor, $tenantId)->id;
+        if ($explicito !== null) {
+            $this->conferirRestrito($servico, $agendamento, $explicito, $autorizacao, $tenantId);
+        }
 
         $novoInicio = $this->momento($inicio);
         if ($novoInicio === null) {
             throw new RegraDeNegocioException('Informe o início com data e hora (AAAA-MM-DD HH:MM).');
+        }
+        // Em branco = "qualquer" (cirurgia e internação já foram recusadas acima; o atual ganha se ficar no mesmo setor e tiver vaga).
+        $mesmoSetor = $servico->setor === (string) $agendamento->setor ? (int) $agendamento->profissional_id : null;
+        $profissional = $explicito ?? $this->escolherProfissional($servico, $novoInicio, $tenantId, (int) $agendamento->id, $travar, $mesmoSetor, $mesmoSetor);
+        if ($explicito === null) {
+            $this->conferirRestrito($servico, $agendamento, $profissional, $autorizacao, $tenantId);
         }
         $this->conferirNaoPassou($servico->setor, $novoInicio, 'trocar o serviço', $tenantId);
         $novoFim = $this->grade($tenantId)->fim($servico->setor, $servico->categoria, $novoInicio);

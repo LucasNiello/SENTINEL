@@ -494,6 +494,7 @@ class AiAgentService
                 'risco' => $definicao['risco'],
                 'segurar' => $this->exigeSegurar($tool, $argumentos),
                 'segurar_quando' => $this->condicaoSegurar($tool),
+                'passo_unico' => $this->confirmaEmUmPasso($tool),
                 'argumentos' => $argumentos,
                 'propostos' => $propostosPelaIa,
                 'formulario' => $this->formulario($tool, $argumentos, [], $loteIds),
@@ -893,12 +894,17 @@ class AiAgentService
                     return $retorno;
                 }
 
+                // 25/11: "qualquer profissional" escolhido pelo servidor: a auditoria registra QUEM ficou, e que foi automático.
+                $escolhido = $this->profissionalEscolhidoPeloServidor($tool, $retorno, $argumentos);
+                $parametros = $escolhido === null ? $argumentos
+                    : [...$argumentos, 'profissional_id' => $escolhido, 'profissional_escolhido_pelo_servidor' => true];
+
                 $this->auditar(
                     $tool,
                     $definicao['acao'],
                     $definicao['entidade'],
                     $retorno instanceof Model ? (int) $retorno->getKey() : null,
-                    $argumentos,
+                    $parametros,
                     'sucesso',
                     null,
                     true,
@@ -955,7 +961,7 @@ class AiAgentService
                 // Frase fixa do servidor, sem valores e sem chamar a IA de novo: o que gravou e o que ficou vazio.
                 'mensagem' => $tool === 'conciliar_lancamentos_em_lote'
                     ? $resultado['conciliados'].($resultado['conciliados'] === 1 ? ' lançamento conciliado.' : ' lançamentos conciliados.')
-                    : $this->fraseDeSucesso($definicao, $argumentos),
+                    : $this->fraseDeSucesso($definicao, $argumentos).$this->fraseDoProfissionalEscolhido($tool, $resultado, $argumentos),
                 // O registro gravado volta ao front com a mesma máscara LGPD da auditoria.
                 'resultado' => $resultado instanceof Model ? AuditoriaService::mascararCamposSensiveis($resultado->toArray()) : $resultado,
             ];
@@ -1199,6 +1205,7 @@ class AiAgentService
             'risco' => $definicao['risco'],
             'segurar' => $this->exigeSegurar($tool, $argumentos),
             'segurar_quando' => $this->condicaoSegurar($tool),
+            'passo_unico' => $this->confirmaEmUmPasso($tool),
             'argumentos' => $argumentos,
             'propostos' => [], // sem IA: nada foi proposto, só os valores atuais
             'formulario' => $this->formulario($tool, $argumentos),
@@ -1428,6 +1435,16 @@ class AiAgentService
         return $tool === 'alterar_status_agendamento' ? ['campo' => 'novo_status', 'valor' => 'cancelado'] : null;
     }
 
+    /**
+     * 25/11: o card dessas tools não tem a etapa Revisar na tela: o Confirmar manda {proposta, valores} direto para
+     * /agente/confirmar (AgenteController::confirmarEmUmPasso), que revisa e grava na mesma requisição; conflito (vaga, versão,
+     * CRMV) volta como 422 com o formulário. Só a agenda; estorno, PIN, lote e exclusão seguem como estão.
+     */
+    public function confirmaEmUmPasso(string $tool): bool
+    {
+        return in_array($tool, ['agendar_atendimento', 'remarcar_agendamento', 'alterar_servico_agendamento', 'alterar_status_agendamento'], true);
+    }
+
     /** Tools cujo Revisar devolve o card refeito com os avisos do que foi revisado (agendar/remarcar: quantos já ocupam o horário). */
     public function avisaNoRevisar(string $tool): bool
     {
@@ -1628,9 +1645,39 @@ class AiAgentService
      * "Cliente cadastrado. Ficou sem e-mail e telefone." / "Cliente cadastrado com todos os dados."
      * Tool sem campo opcional: só "Status do lançamento atualizado.".
      */
+    /** "Qualquer profissional" (agenda): diz quem o servidor escolheu. Vazio nos demais casos. */
+    private function fraseDoProfissionalEscolhido(string $tool, mixed $resultado, array $argumentos): string
+    {
+        $id = $this->profissionalEscolhidoPeloServidor($tool, $resultado, $argumentos);
+        if ($id === null) {
+            return '';
+        }
+        $nome = \App\Models\User::query()->where('tenant_id', $this->contexto->tenantId())->whereKey($id)->value('name');
+
+        return $nome === null ? '' : ' Profissional escolhido: '.$nome.'.';
+    }
+
+    /**
+     * "Qualquer profissional" (25/11): o id do profissional QUE O SERVIDOR escolheu, ou null. Só nas tools de agenda que recebem o
+     * profissional (agendar, remarcar, trocar o serviço), com o profissional em branco. No agendar é sempre escolha dele; no
+     * remarcar e na troca de serviço só conta se o profissional MUDOU (mantendo o atual, ninguém foi escolhido: nada a registrar).
+     */
+    private function profissionalEscolhidoPeloServidor(string $tool, mixed $resultado, array $argumentos): ?int
+    {
+        if (! $resultado instanceof \App\Models\Agendamento || ! blank($argumentos['profissional_id'] ?? null)) {
+            return null;
+        }
+        if ($tool === 'agendar_atendimento' || (in_array($tool, ['remarcar_agendamento', 'alterar_servico_agendamento'], true) && $resultado->wasChanged('profissional_id'))) {
+            return (int) $resultado->profissional_id;
+        }
+
+        return null;
+    }
+
     private function fraseDeSucesso(array $definicao, array $argumentos): string
     {
-        $opcionais = FormularioTool::opcionais($definicao['regras'], $argumentos);
+        // O profissional em branco da agenda é "qualquer" (o servidor escolhe), não um dado que ficou faltando.
+        $opcionais = array_values(array_diff(FormularioTool::opcionais($definicao['regras'], $argumentos), ['profissional_id']));
         $vazios = array_values(array_filter($opcionais, fn (string $campo) => blank($argumentos[$campo] ?? null)));
 
         return match (true) {

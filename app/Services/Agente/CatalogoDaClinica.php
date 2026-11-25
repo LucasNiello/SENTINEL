@@ -241,7 +241,12 @@ trait CatalogoDaClinica
                 propriedades: ['novo_status' => ['type' => 'string', 'enum' => ['confirmado', 'realizado', 'cancelado', 'faltou']]],
                 obrigatorios: ['novo_status'],
                 formRequest: AlterarStatusAgendamentoRequest::class,
-                executar: fn (array $d, int $tenantId, User $ator) => $agenda->alterarStatus($d['id'], $d['novo_status'], $tenantId, $d['versao'], $this->autorizacaoDaAgenda($ator)),
+                executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    // 25/11: o setor do papel também é conferido na EXECUÇÃO (card parado ou token antigo: o papel pode ter mudado).
+                    $this->recusarSeForaDoSetor(Agendamento::query()->where('tenant_id', $tenantId)->find((int) $d['id'])?->setor);
+
+                    return $agenda->alterarStatus($d['id'], $d['novo_status'], $tenantId, $d['versao'], $this->autorizacaoDaAgenda($ator));
+                },
                 mensagemErro: 'Não consegui mudar o status do agendamento. Tente novamente.',
                 titulo: 'Mudar o status do agendamento',
                 sucesso: 'Status do agendamento atualizado',
@@ -278,6 +283,7 @@ trait CatalogoDaClinica
                 obrigatorios: [],
                 formRequest: RemarcarRequest::class,
                 executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    $this->recusarSeForaDoSetor(Agendamento::query()->where('tenant_id', $tenantId)->find((int) $d['id'])?->setor);
                     $agendamento = $agenda->remarcar($d['id'], $d['inicio'], $tenantId, $d['profissional_id'], $d['versao'], $this->autorizacaoDaAgenda($ator));
                     // O "antes" na auditoria: de que horário e de que profissional saiu (o update() guarda em getPrevious()).
                     $campos = ['profissional_id', 'inicio', 'fim'];
@@ -321,6 +327,8 @@ trait CatalogoDaClinica
                 obrigatorios: [],
                 formRequest: AlterarServicoAgendamentoRequest::class,
                 executar: function (array $d, int $tenantId, User $ator) use ($agenda) {
+                    $this->recusarSeForaDoSetor(Agendamento::query()->where('tenant_id', $tenantId)->find((int) $d['id'])?->setor);
+                    $this->recusarSeForaDoSetor(CatalogoItem::query()->where('tenant_id', $tenantId)->find((int) $d['catalogo_item_id'])?->setor);
                     $agendamento = $agenda->trocarServico($d['id'], $d['catalogo_item_id'], $d['profissional_id'], $d['inicio'], $tenantId, $d['versao'],
                         $this->autorizacaoDaAgenda($ator));
                     // O "antes" na auditoria: serviço, setor, profissional, início e fim de antes da troca.
@@ -368,13 +376,18 @@ trait CatalogoDaClinica
                     'profissional_id' => ['type' => 'integer', 'description' => 'Id do veterinário (clínica) ou do atendente (banho e tosa). Em branco se o usuário não disse quem ("qualquer veterinário").'],
                     'inicio' => ['type' => 'string', 'description' => 'AAAA-MM-DD HH:MM'],
                 ],
-                obrigatorios: ['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'],
+                // profissional_id é opcional (25/11): em branco = "qualquer", e o servidor escolhe o de menos atendimentos no dia.
+                obrigatorios: ['pet_id', 'catalogo_item_id', 'inicio'],
                 formRequest: AgendarRequest::class,
                 // O fim não é pedido: o servidor calcula pelo modelo do setor (AgendaService / GradeDaAgenda).
-                executar: fn (array $d, int $tenantId, User $ator) => $agenda->agendar([
-                    ...array_intersect_key($d, array_flip(['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'])),
-                    'origem' => $t['origem'],
-                ], $tenantId, $this->autorizacaoDaAgenda($ator)),
+                executar: function (array $d, int $tenantId, User $ator) use ($agenda, $t) {
+                    $this->recusarSeForaDoSetor(CatalogoItem::query()->where('tenant_id', $tenantId)->find((int) ($d['catalogo_item_id'] ?? 0))?->setor);
+
+                    return $agenda->agendar([
+                        ...array_intersect_key($d, array_flip(['pet_id', 'catalogo_item_id', 'profissional_id', 'inicio'])),
+                        'origem' => $t['origem'],
+                    ], $tenantId, $this->autorizacaoDaAgenda($ator));
+                },
                 mensagemErro: 'Não consegui agendar agora. Nada foi gravado.',
                 titulo: $t['titulo'],
                 sucesso: $t['sucesso'],
@@ -948,6 +961,15 @@ trait CatalogoDaClinica
         return $setor === null || in_array($setor, $this->setoresDaAgenda(), true)
             ? null
             : 'Seu papel só mexe na agenda do banho e tosa. Este atendimento é da clínica: peça à recepção.';
+    }
+
+    /** O mesmo teste do Revisar, na hora de gravar: setor fora do papel recusa (nada é gravado). */
+    private function recusarSeForaDoSetor(?string $setor): void
+    {
+        $motivo = $this->motivoForaDoSetorDaAgenda($setor);
+        if ($motivo !== null) {
+            throw new \App\Exceptions\ToolRecusadaException($motivo);
+        }
     }
 
     /** O agendamento no card: pet, serviço, profissional, horário e situação (só leitura, do tenant). */

@@ -95,7 +95,10 @@ class FormularioTool
                 $campo['opcoes'] = array_map(fn (string $opcao) => ['valor' => $opcao, 'rotulo' => self::ROTULOS_OPCOES[$opcao] ?? Str::ucfirst($opcao)], $opcoes);
             }
             if ($vinculo !== []) {
-                $campo['opcoes'] = $this->referencias($vinculo[0], $vinculo[1] ?? 'id', $tenantId, $valor);
+                // 25/11: o campo catalogo_item_id das fichas de agenda (agendar, trocar o serviço) só oferece SERVIÇO; produto no select dava
+                // "Não encontrei o serviço." no calendário. A recusa de produto continua com a frase do AgendaService ("é um produto").
+                $restricoes = $vinculo[0] === 'catalogo_itens' && $nome === 'catalogo_item_id' ? ['tipo', 'servico'] : [];
+                $campo['opcoes'] = $this->referencias($vinculo[0], $vinculo[1] ?? 'id', $tenantId, $valor, $restricoes);
 
                 // O vínculo proposto não existe neste tenant (ou está na lixeira): o campo avisa, em vez de sumir calado.
                 if (is_scalar($valor) && ! blank($valor) && ! in_array((string) $valor, array_map(fn (array $opcao) => (string) $opcao['valor'], $campo['opcoes']), true)) {
@@ -231,12 +234,19 @@ class FormularioTool
      *
      * @return array<int, array{valor: int, rotulo: string}>
      */
-    private function referencias(string $tabela, string $chave, int $tenantId, mixed $atual): array
+    private function referencias(string $tabela, string $chave, int $tenantId, mixed $atual, array $restricoes = []): array
     {
         $coluna = collect(self::COLUNAS_ROTULO)->first(fn (string $coluna) => Schema::hasColumn($tabela, $coluna));
         // Só as tabelas com lixeira têm deleted_at (agendamentos, cobranças, usuários... não têm).
         $comLixeira = Schema::hasColumn($tabela, 'deleted_at');
-        $escopo = fn () => DB::table($tabela)->where('tenant_id', $tenantId)->when($comLixeira, fn ($query) => $query->whereNull('deleted_at'));
+        $escopo = function () use ($tabela, $tenantId, $comLixeira, $restricoes) {
+            $consulta = DB::table($tabela)->where('tenant_id', $tenantId)->when($comLixeira, fn ($query) => $query->whereNull('deleted_at'));
+            foreach (array_chunk($restricoes, 2) as $par) {
+                $consulta->where($par[0], $par[1] ?? null);
+            }
+
+            return $consulta;
+        };
         $colunas = array_filter([$chave, $coluna]);
 
         $linhas = $escopo()->orderByDesc($chave)->limit(self::LIMITE_REFERENCIAS)->get($colunas);

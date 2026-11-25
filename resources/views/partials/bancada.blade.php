@@ -79,6 +79,12 @@
         }
 
         function adicionarMensagem(texto, classe) {
+            // 25/11: erro e negação fora do chat viram TOAST (topo, centralizado), nunca um bloco na lista da tela. No chat do agente
+            // a mensagem continua na conversa (é o histórico dele).
+            if (classe === 'msg--erro' && !document.querySelector('.agent-workspace')) {
+                popupErro(texto);
+                return;
+            }
             const div = document.createElement('div');
             div.className = 'msg ' + classe;
             const speaker = document.createElement('span');
@@ -678,8 +684,8 @@
                 info: 'Cirurgia: só quem tem CRMV no perfil grava, com o CRMV e a senha de login. A senha só vai junto com a confirmação e não fica guardada.',
                 email: 'Seu CRMV (como está no perfil)',
                 segredo: 'Sua senha',
-                etapa: 'Digite o seu CRMV e a sua senha, escolha o horário (clicar já revisa) e depois clique em Confirmar.',
-                apagado: 'A senha foi apagada. Digite o CRMV e a senha de novo antes de Revisar.',
+                etapa: dados.passo_unico === true ? 'Digite o seu CRMV e a sua senha, escolha o horário e clique em Confirmar.' : 'Digite o seu CRMV e a sua senha, escolha o horário (clicar já revisa) e depois clique em Confirmar.',
+                apagado: dados.passo_unico === true ? 'A senha foi apagada. Digite o CRMV e a senha de novo antes de Confirmar.' : 'A senha foi apagada. Digite o CRMV e a senha de novo antes de Revisar.',
                 falta: 'Informe o seu CRMV e a sua senha.',
             } : formulario.tipo_autorizacao === 'estorno' ? {
                 titulo: 'Autorização do supervisor do setor ou do dono',
@@ -810,7 +816,24 @@
 
             // O prazo do card começa no Revisar: as credenciais são digitadas antes dele.
             // Função (não const): o formulario é trocado em preencherFormulario() e o Editar a chama depois.
+            // 25/11: card da agenda em UM passo (dados.passo_unico): não há Revisar na tela; o Confirmar manda {proposta, valores}
+            // para /agente/confirmar, que revisa e grava na mesma requisição. Conflito volta como 422 com o formulário.
+            const passoUnico = dados.passo_unico === true;
+            // O segurar (2 s) só vale nas destrutivas (decisão B): cancelar agendamento. Depende do valor atual do campo.
+            function segurarAgora() {
+                const q = dados.segurar_quando;
+                if (q && q.campo) {
+                    const el = form.elements.namedItem(q.campo);
+                    if (el) return String(el.value) === String(q.valor);
+                }
+                return dados.segurar === true;
+            }
             function textoPrimeiraEtapa() {
+                if (passoUnico) {
+                    if (segurarAgora()) return 'Confira os dados. Segure Confirmar por 2 segundos para gravar. Se soltar antes, nada é gravado.';
+                    if (formulario.reautenticar) return textosAutorizacao.etapa;
+                    return formulario.ficha ? 'Escolha o horário no calendário e clique em Confirmar.' : 'Confira os dados e clique em Confirmar.';
+                }
                 if (formulario.ficha && !formulario.reautenticar) return 'Escolha o horário no calendário (clicar já revisa) ou, mantendo o horário, clique em Revisar.';
                 return formulario.reautenticar
                     ? textosAutorizacao.etapa
@@ -829,7 +852,8 @@
             historico.appendChild(card);
             // O alvo precisa estar no DOM para receber foco. Assim quem abre
             // Novo/Editar por teclado entra no formulário, sem voltar à tabela.
-            const primeiroCampo = form.querySelector('input:not([type="hidden"]), select');
+            // 25/11: só campo VISÍVEL (na ficha de agenda os campos de profissional e início ficam escondidos atrás do calendário).
+            const primeiroCampo = Array.from(form.querySelectorAll('input:not([type="hidden"]), select')).find((c) => !c.closest('[hidden]'));
             // No /agente (conversa com rolagem própria) quem leva o card à vista é a rolagem do histórico; nas outras telas
             // não há essa rolagem, então o foco continua rolando a página até o card.
             (primeiroCampo || btnRevisar).focus({ preventScroll: !!document.querySelector('.agent-workspace') });
@@ -855,8 +879,33 @@
             let precisaSegurar = true;
             let entrouNaEtapa2Em = 0;
 
+            // 25/11: card da agenda em um passo: sem Revisar nem Editar na tela; o Confirmar já vale desde a abertura. O segurar
+            // (só ao cancelar agendamento) é reavaliado quando o campo muda.
+            function aplicarPassoUnico() {
+                if (!passoUnico) return;
+                precisaSegurar = segurarAgora();
+                entrouNaEtapa2Em = 0;
+                btnRevisar.hidden = true;
+                btnEditar.hidden = true;
+                btnConfirmar.hidden = false;
+                btnConfirmar.disabled = false;
+                etapa.textContent = textoPrimeiraEtapa();
+            }
+            aplicarPassoUnico();
+            form.addEventListener('change', () => { if (passoUnico) { precisaSegurar = segurarAgora(); etapa.textContent = textoPrimeiraEtapa(); } });
+
             // Prazo da proposta: conta desde a proposta e não reinicia no "Editar" (vale também depois do Revisar).
-            const rascunhoTimer = setTimeout(expirarRascunho, PRAZO_RASCUNHO_MS);
+            // 25/11: prazo_s null = card aberto por uma TELA: sem prazo e sem contador (o Confirmar revalida tudo no servidor).
+            // Número = proposta do chat (5 min). Sem o campo (resposta antiga): os 5 min de sempre.
+            const prazoMs = dados.prazo_s === null ? null : (Number.isFinite(dados.prazo_s) ? dados.prazo_s * 1000 : PRAZO_RASCUNHO_MS);
+            const prazoFim = prazoMs === null ? null : Date.now() + prazoMs;
+            let rascunhoTimer = prazoMs === null ? null : setTimeout(expirarRascunho, prazoMs);
+            // Depois de uma recusa que mantém o card aberto, o prazo segue valendo pelo tempo que faltava (não reinicia).
+            function rearmarPrazo() {
+                if (prazoFim === null) return;
+                clearTimeout(rascunhoTimer);
+                rascunhoTimer = setTimeout(expirarRascunho, Math.max(0, prazoFim - Date.now()));
+            }
 
             function encerrarCard() {
                 clearTimeout(rascunhoTimer);
@@ -877,7 +926,10 @@
                 autorizacao.disabled = true;
                 autorizacao.hidden = true;
                 adminSenha.value = '';
-                [btnRevisar, btnConfirmar, btnEditar, btnCancelar].forEach((botao) => { botao.disabled = true; });
+                // 25/11: o Cancelar nunca trava: com o card vencido ele vira "Fechar" e tira o card da tela (nada a gravar).
+                [btnRevisar, btnConfirmar, btnEditar].forEach((botao) => { botao.disabled = true; });
+                btnCancelar.disabled = false;
+                btnCancelar.textContent = 'Fechar';
                 card.classList.add('card--expirado');
                 etapa.textContent = '';
                 const aviso = document.createElement('div');
@@ -890,7 +942,7 @@
             // botões desativados. O aviso ao servidor sai logo depois, quando ele já conta como expirado.
             function expirarRascunho() {
                 const corpo = token ? { token } : { proposta };
-                desativarTudo(token ? 'Confirmação expirada. Nada foi gravado. Peça de novo.' : 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.');
+                desativarTudo(token ? 'Confirmação expirada. Nada foi gravado. Peça de novo.' : (passoUnico ? 'O prazo desta ação terminou. Nada foi gravado. Peça de novo.' : 'O prazo para revisar terminou. Nada foi gravado. Peça de novo.'));
                 setTimeout(() => encerrarSemGravar(corpo), 500);
                 anunciar(token ? 'confirmação expirada, nada foi gravado' : 'prazo para revisar terminou, nada foi gravado');
             }
@@ -1076,9 +1128,14 @@
                 try {
                     // Só o token: os valores confirmados são os revisados, guardados no servidor. Restaurar e
                     // excluir de vez levam também o e-mail e a senha do admin, e a senha sai do card na hora.
-                    const corpo = formulario.reautenticar
-                        ? JSON.stringify({ token, email_admin: adminEmail.value, senha_admin: adminSenha.value })
-                        : JSON.stringify({ token });
+                    // 25/11, card da agenda em UM passo: sem token. Vai {proposta, valores}; o servidor revisa e grava na mesma
+                    // requisição (vaga, horário, versão e CRMV conferidos na hora, dentro da transação).
+                    const credenciais = formulario.reautenticar ? { email_admin: adminEmail.value, senha_admin: adminSenha.value } : {};
+                    const corpo = passoUnico
+                        ? JSON.stringify({ proposta, valores: coletarValores(form, formulario.campos), ...credenciais })
+                        : formulario.reautenticar
+                            ? JSON.stringify({ token, ...credenciais })
+                            : JSON.stringify({ token });
                     adminSenha.value = '';
                     const resp = await fetch('/agente/confirmar', {
                         method: 'POST',
@@ -1090,6 +1147,20 @@
                         return;
                     }
                     const dados = await resp.json().catch(() => ({}));
+                    // 25/11: conflito (vaga, horário, versão, campo inválido) ANTES de gravar: nada foi gravado, o card continua
+                    // aberto e editável, com o motivo no campo e o calendário recarregado. Quem digitou nada perde.
+                    if (passoUnico && resp.status === 422 && dados.formulario && card.isConnected) {
+                        preencherFormulario(dados.formulario);
+                        btnConfirmar.disabled = false;
+                        btnCancelar.disabled = false;
+                        rearmarPrazo();
+                        aplicarPassoUnico();
+                        anunciar('não foi possível gravar, nada foi gravado: ' + (dados.formulario.erro || 'confira os campos destacados'));
+                        // A senha/CRMV saiu do campo ao enviar: quem usa leitor de tela precisa saber que ela é pedida de novo.
+                        if (formulario.reautenticar) anunciar(textosAutorizacao.apagado);
+                        popupErro(dados.formulario.erro || dados.mensagem || 'Confira os campos destacados. Nada foi gravado.');
+                        return;
+                    }
                     encerrarCard();
                     if (!resp.ok || dados.tipo === 'erro') {
                         popupErro(dados.mensagem);
@@ -1141,6 +1212,11 @@
             });
 
             btnCancelar.addEventListener('click', () => {
+                // Card vencido ("Fechar"): o servidor já deu o desfecho "expirado"; só sai da tela.
+                if (card.classList.contains('card--expirado')) {
+                    encerrarCard();
+                    return;
+                }
                 encerrarSemGravar(token ? { token } : { proposta });
                 encerrarCard();
                 popupCancelado();
