@@ -68,7 +68,7 @@ class ExportarCsvTest extends TestCase
 
         $linhas = $this->linhas($csv);
         $this->assertSame(['id', 'nome', 'documento', 'email', 'telefone'], $linhas[0]);
-        $this->assertSame('***.***.789-01', $linhas[1][2], 'CPF mascarado como na tabela');
+        $this->assertSame('123.***.**9-01', $linhas[1][2], 'CPF mascarado como na tabela');
         $this->assertSame('José da Silva', $linhas[1][1], 'acento em UTF-8');
         $this->assertSame('12.345.678/0001-90', $linhas[2][2], 'CNPJ visível como na tabela');
         $this->assertCount(3, $linhas);

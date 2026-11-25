@@ -102,7 +102,7 @@
                             <li class="reveal-step"><span class="audit-time">24/09 · 14:05</span><span class="event-marker" aria-hidden="true"></span><span><span class="audit-role">leitura</span><br>criar_cliente</span><span class="audit-result denied">negado: papel</span></li>
                             <li class="reveal-step"><span class="audit-time">24/09 · 14:07</span><span class="event-marker" aria-hidden="true"></span><span><span class="audit-role">admin</span><br>consultar_funcionarios</span><span class="audit-result">executado ↗</span></li>
                         </ol>
-                        <div class="audit-private"><span>CPF ***.***.789-00</span><span>salário [redigido]</span></div>
+                        <div class="audit-private"><span>CPF 123.***.**9-00</span><span>salário [redigido]</span></div>
                     </div>
                     <p class="section-note">CPF e salário aparecem mascarados também na auditoria.</p>
                 </div>

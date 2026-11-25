@@ -193,8 +193,8 @@ class AuditoriaConsultaTest extends TestCase
         ]);
 
         $resposta = $this->getJson("/auditoria/registros/{$log->id}")->assertOk()
-            ->assertJsonPath('proposto', ['busca' => 'ana', 'cpf' => '***.***.789-01', 'salario' => AuditoriaService::REDIGIDO])
-            ->assertJsonPath('confirmado', ['id' => 7, 'nome' => 'Ana', 'cpf' => '***.***.789-01', 'salario' => AuditoriaService::REDIGIDO, 'documento' => '***.***.321-00'])
+            ->assertJsonPath('proposto', ['busca' => 'ana', 'cpf' => '123.***.**9-01', 'salario' => AuditoriaService::REDIGIDO])
+            ->assertJsonPath('confirmado', ['id' => 7, 'nome' => 'Ana', 'cpf' => '123.***.**9-01', 'salario' => AuditoriaService::REDIGIDO, 'documento' => '987.***.**1-00'])
             ->assertJsonPath('autorizado_por', $autorizou->name)
             ->assertJsonPath('tempo_ia_ms', 812)
             ->assertJsonPath('entidade_id', 7);
@@ -213,11 +213,11 @@ class AuditoriaConsultaTest extends TestCase
         ]);
 
         $resposta = $this->getJson("/auditoria/registros/{$log->id}")->assertOk()
-            ->assertJsonPath('proposto.dados.cpf', '***.***.789-01')
+            ->assertJsonPath('proposto.dados.cpf', '123.***.**9-01')
             ->assertJsonPath('proposto.dados.lista.0.Salario', AuditoriaService::REDIGIDO)
             ->assertJsonPath('proposto.dados.CPF', AuditoriaService::REDIGIDO, 'chave sensível com valor array não desce')
             ->assertJsonPath('proposto.dados.salario', AuditoriaService::REDIGIDO)
-            ->assertJsonPath('confirmado', ['CPF' => '***.***.789-01', 'Documento' => '***.***.321-00', 'nome' => 'Ana']);
+            ->assertJsonPath('confirmado', ['CPF' => '123.***.**9-01', 'Documento' => '987.***.**1-00', 'nome' => 'Ana']);
 
         foreach (['123.456.789-01', '12345678901', '9000', '98765432100', '11122233344', '7777'] as $bruto) {
             $this->assertStringNotContainsString($bruto, $resposta->getContent(), $bruto);

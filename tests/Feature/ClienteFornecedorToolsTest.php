@@ -64,7 +64,7 @@ class ClienteFornecedorToolsTest extends TestCase
 
         $documentos = collect($this->comando($consultar)->assertOk()->json('resultado'))->pluck('documento', 'nome');
 
-        $this->assertSame('***.***.789-00', $documentos['Pessoa Física'], 'CPF sai mascarado (LGPD: a consulta é aberta ao papel leitura)');
+        $this->assertSame('123.***.**9-00', $documentos['Pessoa Física'], 'CPF sai mascarado (LGPD: a consulta é aberta ao papel leitura)');
         $this->assertSame('12.345.678/0001-90', $documentos['Empresa Ltda'], 'CNPJ continua visível');
         $this->assertSame('123.456.789-00', $model::query()->where('nome', 'Pessoa Física')->value('documento'), 'o dado real fica na tabela');
     }
@@ -157,7 +157,7 @@ class ClienteFornecedorToolsTest extends TestCase
                 $this->assertStringNotContainsString($termo, $mensagem, 'sem termo técnico');
             }
 
-            $this->assertSame($i + 1, AuditLog::count());
+            $this->assertSame($i + 1, AuditLog::query()->where('resultado', 'revisao_com_erro')->count());
             $log = AuditLog::query()->latest('id')->first();
             $this->assertSame('revisao_com_erro', $log->resultado);
             $this->assertTrue($log->permitido, 'recusa de regra de negócio não é negação de RBAC');

@@ -1,4 +1,5 @@
 /* SENTINEL / bancada operacional. Fontes locais OFL; sem reset ou bundle da vitrine. */
+@import './painel-agente.css';
 @font-face {
   font-family: 'IBM Plex Mono';
   font-style: normal;
@@ -91,7 +92,7 @@ svg {display:block;flex-shrink:0}
 .sidebar-account button {padding:0;min-height:44px;border:0;background:none;color:var(--sentinel-muted-dark);font-size:15px;text-align:left;display:flex;gap:12px;align-items:center}
 .sidebar-account button:hover {color:var(--sentinel-text-dark)}
 .sidebar-note {margin:32px 12px 24px;color:var(--sentinel-muted-dark);font:12px/1.7 var(--fonte-mono)}
-.workspace-main {margin-left:var(--sidebar);min-width:0;min-height:100svh;display:flex;flex-direction:column}
+.workspace-main {margin-left:var(--sidebar);min-width:0;min-height:calc(100svh / var(--z,1));display:flex;flex-direction:column}
 .workspace-topbar {height:68px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 var(--gutter);border-bottom:1px solid var(--border-soft);background:rgb(255 254 250 / .38)}
 .workspace-context {display:flex;gap:12px;align-items:center;font-size:15px;color:var(--sentinel-ink-muted)}
 .workspace-context span:last-child {color:var(--sentinel-ink)} .context-divider {opacity:.6}
@@ -150,24 +151,43 @@ td:first-child,.mono,.num {font-family:var(--fonte-mono);font-size:15px;font-var
 .paginacao {display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:24px 0}
 #pagina-texto {font:12px var(--fonte-mono);color:var(--sentinel-ink-muted)}
 #historico {display:flex;flex-direction:column;gap:16px;min-width:0}
-#historico>.tabela-rolagem {width:100%} #historico>.btn-exportar {align-self:flex-end}
+#historico>.tabela-rolagem {width:100%} #historico>.tabela-acoes {display:flex;flex-wrap:wrap;gap:8px;align-self:flex-end}
 /* COMMAND WORKSPACE / STRUCTURE, COMMAND, CONTEXT */
-.agent-hero {position:relative;isolation:isolate;max-width:none;padding:8px 0 12px;margin-bottom:28px}
-.agent-hero h1 {font-size:clamp(34px,2.8vw,44px);font-weight:300;line-height:1.2;max-width:850px;margin-bottom:16px}
-.agent-hero h1 span {color:var(--sentinel-blue)}
-.agent-hero .intro {font-size:15px;max-width:65ch}
-.agent-orbit {position:absolute;z-index:-1;right:24px;top:-12px;width:220px;height:190px;opacity:.5;pointer-events:none;overflow:hidden}
-.agent-orbit::before,.agent-orbit::after,.agent-orbit span {content:'';position:absolute;border:1px solid rgb(46 91 133 / .15);border-radius:50%;inset:10px 24px;transform:rotate(-28deg) scaleX(1.45)}
-.agent-orbit::after {inset:30px 40px;transform:rotate(28deg) scaleX(1.45)}
-.agent-orbit span {inset:50px 60px;transform:none}
-.agent-orbit .lighthouse-symbol {position:absolute;width:48px;height:60px;left:86px;top:64px;color:var(--sentinel-blue);opacity:.4}
-.command-layout {display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
-.agent-workspace {display:flex;flex-direction:column;min-width:0;min-height:500px;border:1px solid var(--border-default);border-radius:14px;background:var(--surface-raised);box-shadow:0 8px 28px rgb(29 35 42 / .045),0 1px 2px rgb(29 35 42 / .03);overflow:hidden}
-.deck-header {display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px 24px;border-bottom:1px solid var(--border-soft);background:linear-gradient(110deg,var(--surface-raised),var(--surface-base))}
-.deck-header .eyebrow {display:block;font-size:12px;line-height:1.4;color:var(--sentinel-blue);margin:0}
-.deck-header p {margin:5px 0 0;font-size:15px;color:var(--sentinel-ink-muted)}
-.deck-badge {font:12px var(--fonte-mono);letter-spacing:.04em;white-space:nowrap;border:1px solid var(--border-default);border-radius:4px;padding:6px 8px;color:var(--sentinel-ink-muted)}
-.agent-workspace #historico {padding:28px;flex:1}
+main:has(.command-layout) {max-width:none;padding-top:20px;padding-bottom:24px}
+.command-layout {display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:24px;align-items:stretch;height:max(calc(480px / var(--z,1)),calc(100dvh / var(--z,1) - 205px))}
+.agent-workspace {display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--border-default);border-radius:14px;background:var(--surface-raised);box-shadow:0 8px 28px rgb(29 35 42 / .045),0 1px 2px rgb(29 35 42 / .03);overflow:hidden}
+.deck-header {display:flex;justify-content:space-between;align-items:center;gap:16px;padding:8px 20px;border-bottom:1px solid var(--border-soft);background:linear-gradient(110deg,var(--surface-raised),var(--surface-base))}
+.deck-header .deck-logo {width:36px;height:46px;flex:none;color:var(--sentinel-ink)}
+.deck-header .deck-logo .lighthouse-beam {fill:var(--sentinel-blue);opacity:1}
+.deck-header>div {display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
+.deck-header p {margin:0;font-size:16px;font-weight:500;color:var(--sentinel-ink)}
+.agent-workspace #historico {position:relative;padding:16px 20px;flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.agent-workspace #historico>* {flex-shrink:0}
+/* Tabelas do chat mais compactas (a fonte continua 15px, que é regra do projeto e do seletor A/A+/A++). */
+/* Conversa no padrão do chat do Claude: a sua pergunta em balão à direita, a resposta do agente em texto corrido à esquerda.
+   "Você" e "Sentinel" saem do visual mas ficam para o leitor de tela. Erro e aviso não mudam. */
+.agent-workspace #historico {gap:20px}
+.agent-workspace .msg--usuario {align-self:flex-end;width:fit-content;max-width:min(70%,75ch);padding:12px 16px;border-left:0;border-radius:18px 18px 4px 18px;background:var(--surface-muted)}
+.agent-workspace .msg--agente {max-width:75ch;padding:0;border-bottom:0;font-size:16px;line-height:1.65}
+.agent-workspace :is(.msg--usuario,.msg--agente) .msg__speaker {position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.agent-workspace #historico>.tabela-resumo {justify-content:flex-start;margin-top:0;padding:0 0 8px;border-top:0}
+.agent-workspace #historico>.tabela-resumo::before {content:none}
+/* Copiar / Exportar CSV: discretos (sem borda nem fundo), com ícone + texto de 15px, e a área de toque de 44px que a skill exige. */
+.agent-workspace #historico>.tabela-acoes {align-self:flex-start;gap:4px}
+.agent-workspace #historico>.tabela-acoes button {display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:8px 12px;font:15px var(--fonte-corpo);border-color:transparent;border-radius:8px;background:transparent;color:var(--sentinel-ink-muted)}
+.agent-workspace #historico>.tabela-acoes button::before {content:'';flex:none;width:16px;height:16px;background:currentColor;-webkit-mask:var(--ico) center/contain no-repeat;mask:var(--ico) center/contain no-repeat}
+.agent-workspace #historico>.tabela-acoes button[aria-label^="Copiar"] {--ico:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.6'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Crect%20x%3D'9'%20y%3D'9'%20width%3D'11'%20height%3D'11'%20rx%3D'2'%2F%3E%3Cpath%20d%3D'M5%2015V6a2%202%200%200%201%202-2h9'%2F%3E%3C%2Fsvg%3E")}
+.agent-workspace #historico>.tabela-acoes button:not([aria-label^="Copiar"]) {--ico:url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%20stroke%3D'black'%20stroke-width%3D'1.6'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%3E%3Cpath%20d%3D'M12%204v11m-5-5%205%205%205-5M5%2020h14'%2F%3E%3C%2Fsvg%3E")}
+.agent-workspace #historico>.tabela-acoes button:is(:hover,:focus-visible) {background:var(--sentinel-cream-alt);color:var(--sentinel-ink)}
+.agent-workspace #historico>.tabela-acoes button:focus-visible {outline:2px solid var(--sentinel-blue);outline-offset:2px}
+.agent-workspace #historico :is(th,td) {padding:4px 10px}
+.agent-workspace #historico td:has(.btn-editar-linha,.btn-ver) {padding-block:0}
+.agent-workspace>.deck-header,.agent-conversa>.carregando,.agent-conversa>.agent-composer {flex-shrink:0}
+.agent-corpo {position:relative;display:flex;flex:1 1 0;min-height:0}
+.agent-conversa {display:flex;flex-direction:column;flex:1 1 0;min-width:0;min-height:0}
+/* O .tabela-rolagem (overflow-x) vira o contêiner do sticky; o teto de altura faz o cabeçalho ficar preso nele. */
+.agent-workspace #historico .tabela-rolagem {max-height:min(60dvh,520px);overflow:auto;overscroll-behavior:auto}
+.agent-workspace #historico .tabela-rolagem thead th {position:sticky;top:0;z-index:1}
 .agent-empty {display:flex;flex:1;flex-direction:column;align-items:flex-start;justify-content:flex-start;text-align:left;padding:12px 0 24px}
 .agent-empty .eyebrow {color:var(--sentinel-blue);font-size:12px;margin-bottom:16px}
 .agent-empty h2 {font-size:26px;margin-bottom:12px}
@@ -184,34 +204,19 @@ td:first-child,.mono,.num {font-family:var(--fonte-mono);font-size:15px;font-var
 .msg--agente {background:transparent;border-bottom:1px solid var(--border-soft);border-radius:0;padding-left:0;padding-right:0}
 .msg--erro {background:var(--color-erro-faixa);color:var(--color-erro)} .msg--aviso {background:var(--color-aviso-faixa);color:var(--color-aviso)}
 .linha--aviso td {background:var(--color-aviso-faixa);color:var(--color-aviso)}
-.agent-composer {padding:18px 24px;background:linear-gradient(0deg,var(--surface-base),var(--surface-raised));border-top:1px solid var(--border-soft)}
-form#form-comando {display:flex;align-items:center;gap:8px;border:1px solid var(--color-borda-campo);border-radius:12px;padding:7px;background:var(--surface-raised);box-shadow:0 3px 8px rgb(29 35 42 / .025)}
+.agent-composer {padding:12px 20px;background:linear-gradient(0deg,var(--surface-base),var(--surface-raised));border-top:1px solid var(--border-soft)}
+form#form-comando {display:flex;align-items:center;gap:8px;border:1px solid var(--color-borda-campo);border-radius:28px;padding:4px 4px 4px 20px;background:var(--surface-raised);box-shadow:0 3px 8px rgb(29 35 42 / .025)}
 form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-offset:2px}
-.composer-mark {padding-left:8px;color:var(--sentinel-blue);font-size:20px}
-.composer-key {font:12px var(--fonte-mono);color:var(--sentinel-ink-muted);white-space:nowrap;border:1px solid var(--border-default);border-radius:4px;padding:4px}
 #campo-mensagem {flex:1;min-width:0;width:100%;min-height:44px;padding:10px 4px;font-size:15px;color:var(--sentinel-ink);background:transparent;border:0;outline:none}
 #campo-mensagem::placeholder {color:var(--sentinel-ink-muted)}
-#botao-enviar {display:inline-flex;align-items:center;justify-content:center;gap:12px;padding:10px 16px;background:var(--sentinel-night);border-color:var(--sentinel-night);border-radius:8px}
+#botao-enviar {display:inline-flex;flex:none;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;padding:0;background:var(--sentinel-night);border-color:var(--sentinel-night);border-radius:50%}
+#botao-enviar:disabled {opacity:1;background:var(--sentinel-ink-muted);border-color:var(--sentinel-ink-muted);cursor:not-allowed}
 #botao-enviar svg {width:18px;height:18px}
 .composer-note {display:flex;gap:8px;font:15px/1.6 var(--fonte-corpo);color:var(--sentinel-ink-muted);margin:12px 0 0}
 .composer-note>span {color:var(--sentinel-blue)}
 .carregando {margin:0 0 16px;color:var(--sentinel-ink-muted);font-size:15px}
-.agent-workspace>.carregando {margin:0;padding:0 24px 12px}
+.agent-conversa>.carregando {margin:0;padding:0 24px 12px}
 .carregando__barra {height:1px;margin-top:8px;background:var(--sentinel-blue)}
-.context-rail {padding:22px 0 0 4px;min-width:0}
-.context-rail .eyebrow {font-size:12px;letter-spacing:.12em;margin-bottom:16px}
-.context-rail h2 {font-size:20px;margin-bottom:24px}
-.session-context dl {margin:0;display:grid;grid-template-columns:64px minmax(0,1fr);gap:12px 16px}
-.session-context dt {font:12px/1.8 var(--fonte-mono);letter-spacing:.08em;color:var(--sentinel-ink-muted)}
-.session-context dd {margin:0;font-size:15px;overflow-wrap:anywhere}
-.decision-flow {margin-top:28px;padding-top:24px;border-top:1px solid var(--border-default)}
-.decision-flow ol {list-style:none;margin:0;padding:0;display:grid;gap:20px}
-.decision-flow li {display:flex;gap:16px}
-.decision-flow li>span {font:12px/1.8 var(--fonte-mono);color:var(--sentinel-blue);border-top:1px solid var(--sentinel-blue);padding-top:3px}
-.decision-flow h3 {font:500 15px var(--fonte-corpo);letter-spacing:0;margin:0 0 5px}
-.decision-flow p {font-size:15px;line-height:1.6;color:var(--sentinel-ink-muted);margin:0;max-width:28ch}
-.context-protection {font:15px/1.7 var(--fonte-corpo);color:var(--sentinel-ink-muted);margin:24px 0 0;padding-top:20px;border-top:1px solid var(--border-default)}
-.context-protection>span {color:var(--sentinel-blue);margin-right:4px}
 #historico>.tabela-resumo {padding:12px 0 0;margin-top:8px;border-top:1px solid var(--border-default)}
 #historico>.tabela-resumo::before {content:'RESULTADO';font-size:12px;letter-spacing:.1em;color:var(--sentinel-blue)}
 /* CONFIRMATION */
@@ -243,11 +248,16 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
 .card-lote tr.item-erro td {background:var(--color-erro-faixa)}
 .card-lote .item-erro-texto {display:block;color:var(--color-erro);font-size:15px}
 .card-expirado-texto {margin-top:16px;color:var(--sentinel-ink-muted)}
-#overlay-popup {position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:24px;background:rgb(10 14 19 / .32)}
-#popup {display:flex;flex-wrap:wrap;align-items:center;gap:16px;max-width:480px;width:100%;max-height:calc(100svh - 48px);overflow:auto;padding:24px;background:var(--sentinel-paper);border-radius:var(--radius);border:1px solid var(--sentinel-border);border-left:3px solid var(--sentinel-ink-muted);box-shadow:0 16px 48px rgb(10 14 19 / .12);overflow-wrap:anywhere}
-#popup.sucesso {color:var(--color-sucesso);border-left-color:var(--color-sucesso)}
-#popup.erro {color:var(--color-erro);border-left-color:var(--color-erro)}
-#popup .popup-fechar {margin-left:auto}
+/* TOAST (23/11): resultado da operação no canto inferior direito; sem fundo escurecido, não bloqueia cliques (só o toast os recebe), sem animação. */
+#toasts {position:fixed;right:16px;bottom:16px;z-index:80;display:flex;flex-direction:column;gap:8px;width:max-content;max-width:min(420px,calc(100vw - 32px));pointer-events:none}
+#toasts>div:empty {display:none}
+.toast {pointer-events:auto;display:flex;align-items:flex-start;gap:8px;padding:8px 4px 8px 16px;background:var(--sentinel-paper);color:var(--sentinel-ink);border:1px solid var(--sentinel-border);border-left:4px solid var(--sentinel-ink-muted);border-radius:var(--radius);box-shadow:0 8px 24px rgb(10 14 19 / .14);overflow-wrap:anywhere}
+.toast--sucesso {color:var(--color-sucesso);border-left-color:var(--color-sucesso)}
+.toast--erro {color:var(--color-erro);border-left-color:var(--color-erro)}
+.toast__texto {flex:1;min-width:0;padding:11px 0}
+.toast__fechar {flex:none;width:44px;min-width:44px;padding:0;border:0;background:none;color:inherit;font-size:24px;line-height:1}
+.toast__fechar:hover {background:var(--sentinel-cream-alt)}
+@media (max-width:599px) {#toasts {left:16px;width:auto;max-width:none}}
 /* AUDIT */
 #lista {min-width:0}
 #lista td:first-child {white-space:nowrap}
@@ -268,30 +278,15 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
 .erro-pagina h1 {margin-bottom:24px} .erro-pagina>p:not(.erro-pagina__codigo) {color:var(--sentinel-ink-muted)}
 .erro-pagina a {display:inline-flex;align-items:center;min-height:44px;margin-top:12px;font-size:15px}
 /* RESPONSIVE */
-@media (max-width:1279px) {
-    .command-layout {grid-template-columns:minmax(0,1fr)}
-    .context-rail {display:grid;grid-template-columns:1fr 1fr;gap:24px;padding:16px 0 0}
-    .decision-flow {margin:0;padding:0 0 0 24px;border-top:0;border-left:1px solid var(--border-default)}
-    .context-protection {grid-column:1/-1;margin:0}
-    .agent-orbit {display:none}
-}
 @media (min-width:1280px) and (max-height:800px) {
-    main {padding-top:24px}
-    .agent-hero {margin-bottom:18px;padding-top:0}
-    .agent-hero h1 {font-size:38px;margin-bottom:10px}
-    .agent-hero .eyebrow {margin-bottom:12px}
-    .agent-workspace {min-height:430px}
-    .agent-workspace #historico {padding:16px 24px}
     .agent-empty {padding:4px 0 8px}
     .agent-empty>p:not(.eyebrow) {font-size:15px;margin-bottom:16px}
     .agent-empty .eyebrow {margin-bottom:12px}
     .agent-empty h2 {font-size:24px;margin-bottom:8px}
     .agent-suggestions button {padding-top:10px;padding-bottom:10px}
     .agent-suggestions small {margin-bottom:4px}
-    .deck-header {padding:14px 24px}
     .agent-composer {padding:12px 20px}
     .composer-note {margin-top:8px}
-    .context-rail {padding-top:16px}
 }
 
 @media (min-width:1600px) {main {padding-top:40px}}
@@ -309,7 +304,7 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
     .workspace-backdrop {position:fixed;inset:0;z-index:35;background:rgb(10 14 19 / .4)}
     .workspace-topbar {justify-content:flex-start;height:64px}
     .workspace--guest .workspace-sidebar {transform:none;max-width:none}
-    .agent-workspace {min-height:480px}.agent-orbit {display:none}
+    .command-layout {height:max(calc(480px / var(--z,1)),calc(100dvh / var(--z,1) - 255px))}
 }
 @media (max-width:599px) {
     :root {--gutter:20px}
@@ -319,11 +314,10 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
     .agent-workspace #historico {padding:20px;gap:16px}
     .agent-empty {padding:24px 0}.agent-empty h2 {font-size:22px}.agent-empty>p:not(.eyebrow) {font-size:15px}
     .agent-suggestions {width:100%;display:grid;grid-template-columns:minmax(0,1fr);text-align:left}.agent-suggestions button {text-align:left;font-size:15px}
-    .agent-composer {padding:12px}form#form-comando {padding:5px;gap:4px}.composer-key,.composer-mark {display:none}
-    .agent-hero h1 {font-size:30px}.agent-hero .intro {font-size:15px}.deck-header {padding:16px;gap:8px}.deck-badge {font-size:12px;padding:5px}.deck-header p {font-size:15px}
-    .context-rail {grid-template-columns:minmax(0,1fr);gap:24px}.decision-flow {padding:24px 0 0;border-left:0;border-top:1px solid var(--border-default)}.context-protection {grid-column:auto}
+    .agent-composer {padding:12px}form#form-comando {padding:4px 4px 4px 16px;gap:4px}
+   .deck-header {padding:8px 16px;gap:8px}
     .workspace-topbar__note {display:none}
-    #campo-mensagem {padding:8px;font-size:15px}#botao-enviar {padding:10px 12px;gap:8px}#botao-enviar svg {display:none}
+    #campo-mensagem {padding:8px;font-size:15px}
     .composer-note {font-size:12px}.msg {padding:16px}.msg--usuario {max-width:90%}
     .painel {padding:16px;gap:16px}.painel>.campo,.filtros>.campo {flex-basis:100%}
     .painel__acoes {width:100%;margin:0}.painel__acoes button {flex:1}
@@ -336,8 +330,11 @@ form#form-comando:focus-within {outline:2px solid var(--sentinel-blue);outline-o
     th,td {padding:12px}.rodape {font-size:15px}
 }
 /* TAMANHO DO TEXTO (F4, 14/11): 3 níveis. O zoom aumenta texto, campos e alvos de toque juntos; o layout continua fluido. */
+/* --z: o dvh não acompanha o zoom do A+/A++, então a altura do chat divide por ele. */
 html[data-texto="2"] {zoom:1.125}
+html[data-texto="2"] {--z:1.125}
 html[data-texto="3"] {zoom:1.25}
+html[data-texto="3"] {--z:1.25}
 .texto-tamanho {margin:auto 4px 0;padding:16px 0 0;border-top:1px solid var(--sentinel-line-dark);display:grid;gap:8px;color:var(--sentinel-muted-dark);font:12px var(--fonte-mono);letter-spacing:.1em;text-transform:uppercase}
 .texto-tamanho__botoes {display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .texto-tamanho button {min-height:44px;padding:4px;border:1px solid var(--sentinel-line-dark);background:var(--sentinel-surface);color:var(--sentinel-text-dark);font:500 15px var(--fonte-corpo);letter-spacing:0;text-transform:none}
@@ -442,11 +439,11 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
 /* T3: celular (Android, 360 px). Corpo >= 15 px (rótulos em mono e caixa alta podem ficar em 12 px, sentinel-visual §3),
    toque >= 44 px, nada só no hover, nada além da largura da tela (tabelas largas rolam dentro do contêiner). */
 @media (max-width:599px) {
-    .intro,.agent-hero .intro,.agent-empty>p:not(.eyebrow),.composer-note,.msg,.decision-flow p,.decision-flow li,
-    .context-rail dd,.context-rail p,.rodape,.campo-info,.campo-falta,.campo-erro,.card-etapa,
+    .intro,.agent-empty>p:not(.eyebrow),.composer-note,.msg,
+    .rodape,.campo-info,.campo-falta,.campo-erro,.card-etapa,
     .supervisao-secao>p,.sidebar-note,.usuario,.papel-tag,.deck-header p {font-size:15px}
     .agent-suggestions button {font-size:15px;min-height:44px}
-    .deck-badge,.agent-suggestions button small {font-size:12px}
+    .agent-suggestions button small {font-size:12px}
     #campo-mensagem {font-size:16px}
     th,td {font-size:15px}
     button,.menu a,.sidebar-account button,select,input:not([type=checkbox]):not([type=radio]),textarea {min-height:44px}
@@ -473,14 +470,14 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
 
 /* T3, 2ª rodada das capturas: rótulos em caixa alta no mínimo 12 px; rótulos de campo, células, topo e botões em 15 px. */
 @media (max-width:599px) {
-    .eyebrow,.sidebar-caption,.marca small,.card-overline span,.card-risco,.context-rail dt,.tabela-resumo,
+    .eyebrow,.sidebar-caption,.marca small,.card-overline span,.card-risco,.tabela-resumo,
     .agent-suggestions small,.account-initials {font-size:12px}
     .campo label,.campo-obrigatorio,.card-registro dt,.card-registro dd,.workspace-context span,.sidebar-account button,
     .btn-editar-linha,.btn-ver,main td,main th,.card-confirmacao .acoes button {font-size:15px}
 }
 @media (max-width:599px) {
-    .workspace .eyebrow,.workspace .decision-flow span {font-size:12px}
-    .workspace .decision-flow h3,.workspace main td,.workspace main th,.workspace .autorizacao-titulo {font-size:15px}
+    .workspace .eyebrow {font-size:12px}
+    .workspace main td,.workspace main th,.workspace .autorizacao-titulo {font-size:15px}
 }
 
 /* T3: a tabela da /supervisao vira um bloco por pessoa no celular (as ações ficavam fora da tela, à direita). */
@@ -522,3 +519,46 @@ a.botao:hover {background:var(--sentinel-cream-alt)}
 @media (max-width:599px) {.ficha-passo {padding:12px}.ficha-mes,.ficha-busca,.ficha-profissional {max-width:none}}
 /* REDUCED MOTION */
 @media (prefers-reduced-motion:reduce) {*,*::before,*::after {scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Dados de leitura da clínica e do petshop. */
+.workspace main .tabela-empilha td,
+.workspace main .tabela-empilha :is(.mono, .link-linha),
+#tabela-supervisores :is(td, label),
+.dia-agenda h2 .mono,
+.ficha .mono,
+.kpi :is(p, dd.kpi-note),
+.workspace main .supervisao-secao > p {font-size:1rem}
+@media (max-width:599px) {
+    main:has(.barra-periodo, .kpis, .ficha-grade, .supervisao-secao) .intro {font-size:1rem}
+}
+
+/* CHAT COM BARRA FIXA (23/11) — só na tela /agente (body:has(.agent-workspace)). Só a conversa rola; o compositor é o último item da coluna.
+   Regras novas no fim do arquivo: as de cima (toast, card) não foram tocadas. Rodapé e coluna de contexto saem desta tela para a coluna caber na janela. */
+body:has(.agent-workspace) .workspace-main {height:100vh;height:100dvh;min-height:0;overflow:hidden}
+body:has(.agent-workspace) .rodape {display:none}
+body:has(.agent-workspace) main {display:flex;flex-direction:column;min-height:0;padding-bottom:20px}
+body:has(.agent-workspace) .agent-hero {flex-shrink:0}
+body:has(.agent-workspace) .command-layout {flex:1;min-height:0;align-items:stretch;grid-template-rows:minmax(0,1fr)}
+body:has(.agent-workspace) .agent-workspace {min-height:0}
+body:has(.agent-workspace) .agent-workspace>:not(#historico) {flex-shrink:0}
+body:has(.agent-workspace) #historico {min-height:0;overflow-y:auto;overscroll-behavior:contain}
+body:has(.agent-workspace) #historico>* {flex-shrink:0}
+body:has(.agent-workspace) .agent-composer {padding-bottom:calc(18px + env(safe-area-inset-bottom,0px))}
+body:has(.agent-workspace) .context-rail {min-height:0;overflow-y:auto}
+.novas-wrap {position:relative;height:0;flex:none}
+#novas-mensagens {position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:2;display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:var(--sentinel-night);border-color:var(--sentinel-night);color:var(--sentinel-paper);box-shadow:0 3px 8px rgb(29 35 42 / .18)}
+#novas-mensagens:hover {background:var(--sentinel-night);opacity:.92}
+#novas-mensagens[hidden] {display:none}
+@media (min-width:1280px) and (max-height:800px) {body:has(.agent-workspace) .agent-composer {padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}}
+@media (max-width:1279px) {body:has(.agent-workspace) .context-rail {display:none}}
+@media (max-width:1023px) {body:has(.agent-workspace) main {padding-top:16px;padding-bottom:12px}}
+@media (max-width:599px) {body:has(.agent-workspace) .agent-composer {padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}}
+@media (max-height:820px) {body:has(.agent-workspace) .agent-hero {position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}}
+@media (max-height:700px) {body:has(.agent-workspace) .composer-note {display:none}}
+@media (max-height:560px) {body:has(.agent-workspace) .deck-header {display:none}}
+/* Toast acima do compositor (o compositor agora fica sempre no pé da janela); anel de foco do histórico por dentro (a coluna corta o de fora). */
+body:has(.agent-workspace) #toasts {bottom:112px}
+body:has(.agent-workspace) #historico:focus-visible {outline-offset:-3px}
+/* Texto A+/A++: o zoom do html multiplica as unidades de viewport; compensa a altura da coluna para o compositor não sair da janela (a verificar no navegador). */
+html[data-texto="2"] body:has(.agent-workspace) .workspace-main {height:calc(100vh / 1.125);height:calc(100dvh / 1.125)}
+html[data-texto="3"] body:has(.agent-workspace) .workspace-main {height:calc(100vh / 1.25);height:calc(100dvh / 1.25)}

@@ -4,6 +4,7 @@ import Workspace from '../Layouts/Workspace';
 import Farol from '../Components/Farol';
 import Confirmacao from '../Components/Confirmacao';
 import TabelaConsulta from '../Components/TabelaConsulta';
+import './Agente.css';
 
 const errosHttp = {
     403: 'Você não tem permissão para esta operação.',
@@ -145,13 +146,13 @@ export default function Agente({ historico = [] }) {
 
     return (
         <Workspace titulo="Agente">
-            <header className="page-header agent-hero">
+            <header className="page-header agent-hero react-agent-hero">
                 <p className="eyebrow">Workspace / Inteligência assistida</p>
                 <h1>Converse com seus dados.<br /><span>Decida com contexto.</span></h1>
                 <p className="intro">Consulte informações e prepare operações em linguagem natural.</p>
                 <div className="agent-orbit" aria-hidden="true"><span /><Farol /></div>
             </header>
-            <div className="command-layout">
+            <div className="command-layout react-command-layout">
                 <section className="agent-workspace" aria-label="Conversa com o Sentinel">
                     <header className="deck-header"><div><span className="eyebrow">SENTINEL AGENT</span><p>Consulta e operações assistidas</p></div><span className="deck-badge">REVISÃO HUMANA</span></header>
                     <div id="historico" role="log" aria-live="polite" aria-relevant="additions">

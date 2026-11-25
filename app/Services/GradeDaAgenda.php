@@ -27,9 +27,31 @@ final class GradeDaAgenda
     /** @param  array<string, mixed>  $config  a seção sentinel.agenda */
     public function __construct(private array $config, private string $fuso) {}
 
-    public static function daConfiguracao(): self
+    /** Sem tenant, só a config (padrão); com tenant, a configuração do painel do dono por cima (ConfiguracaoDaAgenda). */
+    public static function daConfiguracao(?int $tenantId = null): self
     {
-        return new self((array) config('sentinel.agenda', []), (string) config('app.timezone'));
+        $config = $tenantId === null ? (array) config('sentinel.agenda', []) : app(ConfiguracaoDaAgenda::class)->agendaDoTenant($tenantId);
+
+        return new self($config, (string) config('app.timezone'));
+    }
+
+    /** @return array{0: CarbonImmutable, 1: CarbonImmutable}|null o intervalo (almoço) do dia, ou null se não há */
+    public function intervalo(CarbonInterface $dia): ?array
+    {
+        $i = (array) (((array) ($this->config['expediente'] ?? []))['intervalo'] ?? []);
+        $local = CarbonImmutable::instance($dia)->setTimezone($this->fuso);
+        $inicio = $this->naHora($local, (string) ($i['inicio'] ?? ''));
+        $fim = $this->naHora($local, (string) ($i['fim'] ?? ''));
+
+        return $inicio === null || $fim === null || $fim->lte($inicio) ? null : [$inicio, $fim];
+    }
+
+    /** O trecho [de, até) encosta no intervalo do dia? */
+    private function noIntervalo(CarbonImmutable $de, CarbonImmutable $ate): bool
+    {
+        $intervalo = $this->intervalo($de);
+
+        return $intervalo !== null && $de->lt($intervalo[1]) && $ate->gt($intervalo[0]);
     }
 
     /** @return array{0: CarbonImmutable, 1: CarbonImmutable}|null o começo e o fim do expediente do dia, ou null se não abre */
@@ -114,7 +136,9 @@ final class GradeDaAgenda
         }
         $blocos = [];
         for ($b = $exp[0]; $b->addMinutes($this->minutosDoBloco())->lte($exp[1]); $b = $b->addMinutes($this->minutosDoBloco())) {
-            $blocos[] = $b;
+            if (! $this->noIntervalo($b, $b->addMinutes($this->minutosDoBloco()))) {
+                $blocos[] = $b; // o bloco que encosta no intervalo não existe
+            }
         }
 
         return $blocos;
@@ -263,6 +287,11 @@ final class GradeDaAgenda
         if (count($cobertos) < $exclusivos) {
             return 'Este atendimento ocupa '.$exclusivos.' blocos e não cabe antes do fim do expediente. Escolha um bloco mais cedo.';
         }
+        foreach ($cobertos as $i => $bloco) {
+            if ($i > 0 && ! $bloco->equalTo($cobertos[$i - 1]->addMinutes($this->minutosDoBloco()))) {
+                return 'Este atendimento ocupa '.$exclusivos.' blocos seguidos e o intervalo do expediente está no meio. Escolha um horário antes ou depois do intervalo.';
+            }
+        }
         foreach ($cobertos as $bloco) {
             if ($this->vagasNoBloco($bloco, $ocupados) < $this->vagasPorBloco()) {
                 return 'Este atendimento ocupa o bloco inteiro do veterinário ('.(count($cobertos) === 1 ? 'o das ' : 'os das ')
@@ -284,6 +313,11 @@ final class GradeDaAgenda
         $fim = $inicio->addMinutes($this->duracaoPetshop($categoria));
         if ($inicio->lt($exp[0]) || $fim->gt($exp[1])) {
             return 'O atendimento precisa caber inteiro no expediente ('.$exp[0]->format('H:i').' às '.$exp[1]->format('H:i').').';
+        }
+        if ($this->noIntervalo($inicio, $fim)) {
+            $i = $this->intervalo($inicio);
+
+            return 'O atendimento não pode passar pelo intervalo do expediente ('.$i[0]->format('H:i').' às '.$i[1]->format('H:i').').';
         }
         foreach ($ocupados as $o) {
             if ($o['inicio']->lt($fim) && $o['fim']->gt($inicio)) {
@@ -316,7 +350,10 @@ final class GradeDaAgenda
         $quando = count($dias) === 1 ? 'só '.self::DIAS[$dias[0]]
             : ($contiguos ? 'de '.self::DIAS[$dias[0]].' a '.self::DIAS[end($dias)] : implode(', ', array_map(fn (int $d) => self::DIAS[$d], $dias)));
 
-        return $quando.', das '.($exp['inicio'] ?? '?').' às '.($exp['fim'] ?? '?');
+        $intervalo = (array) ($exp['intervalo'] ?? []);
+        $pausa = isset($intervalo['inicio'], $intervalo['fim']) ? ' (intervalo das '.$intervalo['inicio'].' às '.$intervalo['fim'].')' : '';
+
+        return $quando.', das '.($exp['inicio'] ?? '?').' às '.($exp['fim'] ?? '?').$pausa;
     }
 
     /** @param  CarbonImmutable[]  $blocos */

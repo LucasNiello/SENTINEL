@@ -56,7 +56,7 @@ class ModoManualTest extends TestCase
 
         $busca = $this->consultar('consultar_clientes', ['nome' => 'silva'])->assertOk();
         $this->assertSame(['José da Silva'], array_column($busca->json('resultado'), 'nome'));
-        $this->assertSame('***.***.789-01', $busca->json('resultado.0.documento'));
+        $this->assertSame('123.***.**9-01', $busca->json('resultado.0.documento'));
 
         // Cadastro pelo formulário, com o mesmo Revisar → segurar.
         $this->freezeTime();
@@ -67,7 +67,7 @@ class ModoManualTest extends TestCase
         $this->assertDatabaseHas('clientes', ['nome' => 'Padaria Nova', 'tenant_id' => 1]);
 
         $csv = $this->post('/agente/exportar', ['consulta' => $busca->json('exportar')], ['Accept' => 'application/json'])->assertOk()->getContent();
-        $this->assertStringContainsString('***.***.789-01', $csv);
+        $this->assertStringContainsString('123.***.**9-01', $csv);
 
         $this->assertCount($chamadasAntes, Http::recorded(), 'nenhum passo do modo manual chamou a IA');
 

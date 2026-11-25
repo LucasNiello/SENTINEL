@@ -59,13 +59,17 @@ class TelasDaClinicaTest extends TestCase
     {
         $this->logarComo('recepcao', 3);
 
-        $this->get('/agente')->assertOk()->assertSee('window.pedirAoAgente = (texto) =>', false)->assertSee("'Pedir ao agente'", false);
-        // O botão só põe o texto no campo (prévia): quem envia é o usuário.
-        $pedir = str($this->get('/agente')->getContent())->after('window.pedirAoAgente = (texto) =>')->before('};');
-        $this->assertStringContainsString('campoMensagem.focus()', (string) $pedir);
-        $this->assertStringNotContainsString('requestSubmit', (string) $pedir);
+        $this->get('/agente')->assertOk()->assertSee('window.pedirAoAgente = (texto, enviar = false) =>', false)->assertSee("'Pedir ao agente'", false);
+        // O botão "Pedir ao agente" da tabela só põe o texto no campo (prévia): quem envia é o usuário. O envio direto existe só
+        // com o segundo argumento (o painel lateral, para leitura), e é protegido por card aberto/campo preenchido.
+        $html = $this->get('/agente')->getContent();
+        $pedir = (string) str($html)->after('window.pedirAoAgente = (texto, enviar = false) =>')->before('};');
+        $this->assertStringContainsString('campoMensagem.focus()', $pedir);
+        $this->assertStringContainsString('if (enviar) form.requestSubmit()', $pedir);
+        $this->assertStringContainsString('.card-confirmacao:not(.card--expirado)', $pedir);
+        $this->assertStringContainsString('window.pedirAoAgente(l.pedido));', $html, 'o botão da tabela chama sem o segundo argumento');
         // Cadastros usa a mesma tabela, mas não tem o chat: lá a função não existe e o botão não aparece.
-        $this->get('/cadastros')->assertOk()->assertDontSee('window.pedirAoAgente = (texto) =>', false);
+        $this->get('/cadastros')->assertOk()->assertDontSee('window.pedirAoAgente = (texto, enviar = false) =>', false);
     }
 
     public function test_contabilidade_continua_com_as_telas_de_antes(): void

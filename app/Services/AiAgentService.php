@@ -84,6 +84,10 @@ class AiAgentService
         'fornecedor_id.prohibited_if' => 'Nota fiscal de saída não leva fornecedor — informe o cliente.',
         'data_demissao.after_or_equal' => 'A data de demissão não pode ser anterior à data de admissão.',
         'valor.gt' => 'O valor deve ser maior que zero.',
+        // Dinheiro do catálogo: o card fala em reais; as regras seguem em centavos inteiros.
+        'preco_centavos.integer' => 'Informe o preço em reais, com no máximo 2 casas (ex.: 45,90).',
+        'preco_centavos.min' => 'O preço não pode ser negativo.',
+        'preco_centavos.max' => 'O preço passa do limite de R$ 1.000.000,00 por item.',
     ];
 
     /** Como cada campo aparece nas frases acima. */
@@ -121,7 +125,7 @@ class AiAgentService
         'setor' => 'o setor',
         'categoria' => 'a categoria',
         'nome_comercial' => 'o nome comercial',
-        'preco_centavos' => 'o preço em centavos',
+        'preco_centavos' => 'o preço',
         'cobranca_por' => 'a forma de cobrança',
         'controla_estoque' => 'o controle de estoque',
         'estoque' => 'o estoque',
@@ -488,6 +492,8 @@ class AiAgentService
                 'tipo' => 'confirmacao_pendente',
                 'tool' => $tool,
                 'risco' => $definicao['risco'],
+                'segurar' => $this->exigeSegurar($tool, $argumentos),
+                'segurar_quando' => $this->condicaoSegurar($tool),
                 'argumentos' => $argumentos,
                 'propostos' => $propostosPelaIa,
                 'formulario' => $this->formulario($tool, $argumentos, [], $loteIds),
@@ -580,6 +586,17 @@ class AiAgentService
                     ? "Regra para o pedido atual (a última mensagem do usuário; o \"histórico\" são as mensagens anteriores a ela):\n".$conteudo
                     : $conteudo;
             } elseif ($papel === 'user' || $papel === 'assistant') {
+                // Rede de segurança (23/11): dois turnos seguidos do mesmo papel viram UMA mensagem na API, e o modelo atende
+                // o primeiro pedido. O último vale (é o pedido atual); o anterior é descartado, nunca fundido. Se isto
+                // disparar, o histórico perdeu um fechamento de turno: é sinal de outro bug (ver o log).
+                if ($mensagens !== [] && $mensagens[array_key_last($mensagens)]['role'] === $papel) {
+                    array_pop($mensagens);
+                    Log::warning('AiAgentService: histórico com dois turnos seguidos do mesmo papel (o anterior foi descartado)', [
+                        'correlation_id' => (string) Str::uuid(),
+                        'categoria' => 'history_alternation_error',
+                        'papel' => $papel,
+                    ]);
+                }
                 $mensagens[] = ['role' => $papel, 'content' => $conteudo];
                 $houveConversa = true;
             }
@@ -860,6 +877,9 @@ class AiAgentService
             ];
         }
 
+        // Máscara não é dado: a IA (que só lê valores mascarados) ou o card podem devolver "(19) 9****-*321" ou
+        // "123.***.**9-00"; isso nunca é gravado. O campo some e vale o atual (atualizar) ou vazio (criar).
+        $argumentos = AuditoriaService::semValoresMascarados($argumentos);
         $argumentos['tenant_id'] = $this->contexto->tenantId();
 
         try {
@@ -1040,7 +1060,7 @@ class AiAgentService
             return ['resposta' => [
                 'tipo' => 'resultado_leitura',
                 'tool' => $tool,
-                'resultado' => $encontrados->map(fn (Model $m) => [...AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)), ...$acao])->values()->all(),
+                'resultado' => $encontrados->map(fn (Model $m) => [...AuditoriaService::mascararCamposSensiveis(Arr::only($m->toArray(), $colunas)), ...$this->colunasCalculadasDaLista($m, $colunas), ...$acao])->values()->all(),
                 'colunas' => $colunas,
                 ...($acao === [] ? ['editar' => $tool] : []),
                 'aviso' => 'Encontrei mais de um registro com esse nome. Escolha um na lista ou peça de novo com o número.',
@@ -1048,6 +1068,30 @@ class AiAgentService
         }
 
         return ['argumentos' => $this->valoresDoFormulario($definicao, $encontrados->first(), $argumentos)];
+    }
+
+    /**
+     * 24/11 (R4): a lista de escolha de cobranças/vendas pagas distingue os candidatos com a data (pago em, ou criação) e o
+     * total, formatados. Só dado que o registro já tem; coluna que já é atributo do modelo (ex.: "data" do lançamento) não é sobrescrita.
+     *
+     * @param  string[]  $colunas
+     * @return array<string, string>
+     */
+    private function colunasCalculadasDaLista(Model $m, array $colunas): array
+    {
+        $extra = [];
+
+        if (in_array('data', $colunas, true) && ! array_key_exists('data', $m->getAttributes())) {
+            $quando = $m->getAttribute('pago_em') ?? $m->getAttribute('created_at');
+            if ($quando instanceof \DateTimeInterface) {
+                $extra['data'] = $quando->format('d/m/Y H:i');
+            }
+        }
+        if (in_array('total', $colunas, true) && ! array_key_exists('total', $m->getAttributes()) && is_numeric($m->getAttribute('total_centavos'))) {
+            $extra['total'] = ResultadosClinica::reais((int) $m->getAttribute('total_centavos'));
+        }
+
+        return $extra;
     }
 
     /**
@@ -1153,6 +1197,8 @@ class AiAgentService
             'tipo' => 'confirmacao_pendente',
             'tool' => $tool,
             'risco' => $definicao['risco'],
+            'segurar' => $this->exigeSegurar($tool, $argumentos),
+            'segurar_quando' => $this->condicaoSegurar($tool),
             'argumentos' => $argumentos,
             'propostos' => [], // sem IA: nada foi proposto, só os valores atuais
             'formulario' => $this->formulario($tool, $argumentos),
@@ -1361,9 +1407,25 @@ class AiAgentService
      */
     public function exigeSegurar(string $tool, array $argumentos): bool
     {
-        return $this->risco($tool) === 'exclusao'
-            || $tool === 'conciliar_lancamentos_em_lote'
-            || ($tool === 'alterar_status_agendamento' && ($argumentos['novo_status'] ?? null) === 'cancelado');
+        if ($this->risco($tool) === 'exclusao' || $tool === 'conciliar_lancamentos_em_lote') {
+            return true;
+        }
+
+        $condicao = $this->condicaoSegurar($tool);
+
+        return $condicao !== null && ($argumentos[$condicao['campo']] ?? null) === $condicao['valor'];
+    }
+
+    /**
+     * 23/11 (Confirmar em um passo): o card já abre sabendo se vai pedir o segurar. Quando isso depende de um campo
+     * que o humano pode mudar no card, a condição vai junto: { campo, valor } — segura quando o campo vale o valor.
+     * null = sem condição (o "segurar" booleano da abertura vale sozinho). Única fonte da regra condicional.
+     *
+     * @return array{campo: string, valor: string}|null
+     */
+    public function condicaoSegurar(string $tool): ?array
+    {
+        return $tool === 'alterar_status_agendamento' ? ['campo' => 'novo_status', 'valor' => 'cancelado'] : null;
     }
 
     /** Tools cujo Revisar devolve o card refeito com os avisos do que foi revisado (agendar/remarcar: quantos já ocupam o horário). */
@@ -1542,11 +1604,21 @@ class AiAgentService
 
             $vazio = $valores[$campo] === null || $valores[$campo] === '';
 
-            if ($vazio && in_array($campo, AuditoriaService::camposSensiveis(), true)) {
+            $sensivel = in_array($campo, AuditoriaService::camposSensiveis(), true);
+
+            // Vazio ou a própria máscara que o card mostrou: "manter" o valor da proposta.
+            if ($sensivel && ($vazio || \App\Support\Mascara::mascarado($valores[$campo]))) {
                 continue;
             }
 
-            $proposta[$campo] = $vazio ? null : $valores[$campo];
+            // Dinheiro: o card trabalha em reais ("80,00"); a proposta e as regras, em centavos inteiros. Texto que não
+            // é dinheiro continua como veio, e a validação responde com a frase do campo.
+            $novo = $vazio ? null : $valores[$campo];
+            if (is_string($novo) && str_ends_with($campo, '_centavos')) {
+                $novo = \App\Support\Dinheiro::paraCentavos($novo) ?? $novo;
+            }
+
+            $proposta[$campo] = $novo;
         }
 
         return $proposta;
@@ -1582,6 +1654,14 @@ class AiAgentService
      *
      * @return array<string, array<string, mixed>>
      */
+    /** Título legível da tool (o mesmo dos cards), para telas de leitura que mostram ações sem expor o identificador interno. */
+    public function tituloDaTool(string $tool): ?string
+    {
+        $titulo = $this->catalogo()[$tool]['titulo'] ?? null;
+
+        return is_string($titulo) && $titulo !== '' ? $titulo : null;
+    }
+
     private function catalogo(): array
     {
         // O catálogo é o do domínio do tenant do usuário logado (config sentinel.tenants_clinica). Tenant fora da
@@ -2028,6 +2108,7 @@ class AiAgentService
             propriedades: [
                 'tipo' => ['type' => 'string', 'enum' => array_keys($lixeiras)],
                 'situacao' => ['type' => 'string', 'enum' => ['lixeira', 'arquivado']],
+                'nome' => ['type' => 'string', 'description' => 'Parte do nome (ou da descrição/número) do registro, quando o pedido cita um específico (ex.: "Fábio Rocha"). Sem isso, lista tudo.'],
             ],
             obrigatorios: [],
             executar: fn (array $a) => $this->itensDaLixeira($lixeiras, $a),
@@ -2139,6 +2220,7 @@ class AiAgentService
     {
         $tipo = $filtros['tipo'] ?? null;
         $situacao = $filtros['situacao'] ?? null;
+        $nome = is_string($filtros['nome'] ?? null) ? trim($filtros['nome']) : '';
 
         // Filtro fora da lista (a IA não segue o enum à risca): nada, como numa consulta com filtro que não casa.
         if (($tipo !== null && ! array_key_exists($tipo, $lixeiras)) || ! in_array($situacao, [null, 'lixeira', 'arquivado'], true)) {
@@ -2151,6 +2233,9 @@ class AiAgentService
         foreach ($tipo === null ? $lixeiras : [$tipo => $lixeiras[$tipo]] as $sufixo => $lixeira) {
             $registros = ($situacao === null ? $lixeira['modelo']::onlyTrashed() : $lixeira['modelo']::query()->naSituacao($situacao))
                 ->where('tenant_id', (int) $filtros['tenant_id'])
+                // 23/11: "a lixeira do Fábio Rocha" filtra pelo nome (coluna fixa da entidade; %, _ e ! escapados, como nos services).
+                ->when($nome !== '', fn ($consulta) => $consulta->whereRaw($lixeira['coluna_rotulo']." like ? escape '!'",
+                    ['%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $nome).'%']))
                 ->orderByDesc('deleted_at')
                 ->limit(self::LIMITE_LIXEIRA)
                 ->get();
