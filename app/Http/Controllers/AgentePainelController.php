@@ -80,7 +80,9 @@ class AgentePainelController extends Controller
         }
         if ($this->agente->podeExecutar('consultar_mensagens')) {
             // "origem": de onde elas vêm (o e-mail de contato, lido no Mailpit na demo); o painel a mostra sob o rótulo.
-            $itens[] = ['chave' => 'mensagens', 'rotulo' => 'Mensagens novas', 'origem' => (string) config('sentinel.contato.email'),
+            // Só o tenant do contato importa dessa caixa: os outros não mostram a origem.
+            $itens[] = ['chave' => 'mensagens', 'rotulo' => 'Mensagens novas',
+                ...($tenant === (int) config('sentinel.contato.tenant') ? ['origem' => (string) config('sentinel.contato.email')] : []),
                 'pedido' => 'mostre as mensagens novas da caixa de entrada',
                 'total' => Mensagem::query()->where('tenant_id', $tenant)->where('status', 'nova')->count()];
         }

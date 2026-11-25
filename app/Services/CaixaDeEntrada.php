@@ -163,7 +163,7 @@ class CaixaDeEntrada
     /** UTF-8 válido, sem controle, espaços colapsados, até $max caracteres. */
     private function limpo(string $valor, int $max): string
     {
-        $valor = trim((string) preg_replace('/[\p{C}\s]+/u', ' ', mb_scrub($valor, 'UTF-8')));
+        $valor = trim((string) preg_replace('/[\p{Cc}\x{202A}-\x{202E}\x{2066}-\x{2069}\s]+/u', ' ', mb_scrub($valor, 'UTF-8')));
 
         return Str::limit($valor, $max, '');
     }
@@ -171,7 +171,8 @@ class CaixaDeEntrada
     private function momento(mixed $valor): ?CarbonImmutable
     {
         try {
-            $momento = is_string($valor) && $valor !== '' ? CarbonImmutable::parse($valor) : null;
+            // O Date do e-mail vem com o fuso de quem enviou (Z, +0000...): converte para o da aplicação antes de gravar.
+            $momento = is_string($valor) && $valor !== '' ? CarbonImmutable::parse($valor)->setTimezone((string) config('app.timezone')) : null;
 
             return $momento !== null && $momento->lessThanOrEqualTo(now()->addMinute()) ? $momento : null;
         } catch (Throwable) {

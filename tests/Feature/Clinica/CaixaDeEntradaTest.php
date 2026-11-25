@@ -276,6 +276,55 @@ class CaixaDeEntradaTest extends TestCase
         $this->assertSame(self::CONTATO, $item['origem']);
     }
 
+    public function test_painel_de_outro_tenant_de_clinica_nao_mostra_a_origem(): void
+    {
+        config(['sentinel.tenants_clinica' => [self::T, self::OUTRO_TENANT]]);
+        $this->logarComo('recepcao', self::OUTRO_TENANT);
+
+        $item = collect($this->getJson('/agente/painel')->assertOk()->json('pendentes'))->firstWhere('chave', 'mensagens');
+
+        $this->assertArrayNotHasKey('origem', $item);
+    }
+
+    /** Achado #1: o Date do e-mail vem com o fuso de quem enviou (Z); grava na hora local da aplicação. */
+    public function test_a_hora_do_email_em_utc_e_convertida_para_o_fuso_da_aplicacao(): void
+    {
+        $this->email('utc', extra: ['date' => '2026-11-10T20:00:00Z']);
+
+        app(CaixaDeEntrada::class)->importar();
+
+        $this->assertSame('2026-11-10 17:00:00', Mensagem::sole()->fresh()->created_at->format('Y-m-d H:i:s'));
+    }
+
+    /** Achado #8: só controle e overrides bidi saem; ZWJ e seletor de variação (emoji composto) ficam. */
+    public function test_texto_do_email_mantem_emoji_composto_e_tira_override_bidi(): void
+    {
+        $familia = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        $this->email('emoji', extra: ['subject' => '', 'text' => "Obrigado {$familia} \u{2764}\u{FE0F} fim\u{202E}evil\x00"]);
+
+        app(CaixaDeEntrada::class)->importar();
+
+        $texto = Mensagem::sole()->texto;
+        $this->assertStringContainsString("Obrigado {$familia} \u{2764}\u{FE0F} fim", $texto);
+        $this->assertStringNotContainsString("\u{202E}", $texto);
+        $this->assertStringNotContainsString("\x00", $texto);
+    }
+
+    /** Achado #2: o card de Confirmar também mostra o remetente real (não verificado), nunca só o nome do tutor vinculado. */
+    public function test_card_de_marcar_tratada_mostra_o_remetente_nao_verificado_em_email(): void
+    {
+        $this->logarComo('recepcao', self::T);
+        $this->tutorComEmail('ana@exemplo.com', self::T, 'Dra. Verdadeira');
+        $this->email('forjado', 'ana@exemplo.com', ['from' => ['Name' => 'Golpista', 'Address' => 'ana@exemplo.com']]);
+        $this->postJson('/agente/caixa/importar')->assertOk();
+        $email = Mensagem::sole();
+
+        $card = json_encode($this->comando('marcar_mensagem_tratada', ['id' => $email->id])->assertOk()->json(), JSON_UNESCAPED_UNICODE);
+
+        $this->assertStringContainsString('Golpista <ana@exemplo.com> (remetente não verificado)', $card);
+        $this->assertStringNotContainsString('Dra. Verdadeira', $card);
+    }
+
     /**
      * E-mail malicioso: o texto é DADO. Importar não executa nada; ler as mensagens pelo agente também não; e mesmo que o
      * "modelo" obedecesse e propusesse a escrita, nada grava antes de Revisar → Confirmar.

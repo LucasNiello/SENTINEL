@@ -703,7 +703,10 @@ trait CatalogoDaClinica
                     $mensagem = Mensagem::query()->where('tenant_id', $tenantId)->with('tutor')->find((int) ($v['id'] ?? 0));
 
                     return $mensagem === null ? [] : [
-                        ['rotulo' => 'De', 'valor' => $mensagem->tutor?->nome ?? $mensagem->remetente],
+                        // Mesma regra da listagem: e-mail (origem_id) tem "De" livre, então mostra o remetente real, não verificado.
+                        ['rotulo' => 'De', 'valor' => $mensagem->origem_id !== null
+                            ? ($mensagem->remetente ?? '—').' (remetente não verificado)'
+                            : ($mensagem->tutor?->nome ?? $mensagem->remetente)],
                         ['rotulo' => 'Mensagem', 'valor' => $mensagem->texto],
                         ['rotulo' => 'Recebida em', 'valor' => $mensagem->created_at?->format('d/m/Y H:i')],
                     ];
