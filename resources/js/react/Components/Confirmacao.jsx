@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import CamposProposta, { coletarValores, valoresIniciais } from './CamposProposta';
 import CalendarioAgendamento from './CalendarioAgendamento';
 import Reautenticacao from './Reautenticacao';
+import ItensLote from './ItensLote';
 
 const exibir = (valor) => valor == null || valor === '' ? 'Não informado' : typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
 
@@ -18,10 +19,12 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const [encerrado, setEncerrado] = useState(false);
     const [etapa, setEtapa] = useState('Confira a proposta e clique em Revisar. Nada foi gravado.');
     const montado = useRef(true);
+    const loteComErro = (dados.formulario?.itens ?? []).some((item) => item.erro);
     useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
 
     async function executar(acao, alteracoes = null) {
         if (trava.current || encerrado || (acao === 'confirmar' && !token)
+            || (loteComErro && acao !== 'cancelar')
             || (acao === 'revisar' && (token || edicaoPendente))
             || (acao === 'editar' && !token && !tokenEdicao.current)) return;
         const atuais = alteracoes ? { ...valores, ...alteracoes } : valores;
@@ -67,6 +70,10 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                 if (acao === 'revisar' && resultado?.formulario) {
                     setDados((anterior) => ({ ...anterior, formulario: resultado.formulario }));
                     setValores((anteriores) => ({ ...valoresIniciais(resultado.formulario.campos ?? []), ...anteriores }));
+                    if ((resultado.formulario.itens ?? []).some((item) => item.erro)) {
+                        setToken(null);
+                        setEtapa('Peça de novo para montar outro plano, ou clique em Cancelar.');
+                    }
                 }
                 if (['AI_PROPOSAL_EXPIRED', 'AI_PROPOSAL_UNAVAILABLE', 'AI_CONFIRMATION_INVALID', 'AI_CONFIRMATION_USED',
                     'AI_REAUTH_REQUIRED', 'AI_REAUTH_FAILED', 'AI_REAUTH_RATE_LIMIT'].includes(resultado?.codigo) || resultado?.tipo === 'negado') {
@@ -132,6 +139,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             {(campos.length ? [] : Object.entries(dados.argumentos ?? {})).map(([nome, valor], i) =>
                 <div key={i} style={{ display: 'contents' }}><dt>{nome}</dt><dd>{exibir(valor)}</dd></div>)}
         </dl>
+        <ItensLote itens={formulario.itens} />
         <form ref={form} className="card-form" onSubmit={(evento) => { evento.preventDefault(); executar('revisar'); }}>
             <CamposProposta campos={formulario.ficha ? campos.filter((c) => !['profissional_id', 'inicio'].includes(c.nome)) : campos} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
                 alterar={(nome, valor) => { if (!token && !edicaoPendente && !ocupado && !encerrado) setValores((anteriores) => ({ ...anteriores, [nome]: valor, ...(formulario.ficha && nome === 'catalogo_item_id' ? { profissional_id: '', inicio: '' } : {}) })); }} />
@@ -144,9 +152,9 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         <p className="card-etapa" role="status">{processando ? 'Processando…' : etapa}</p>
         {erro && <p className="msg msg--erro" role="alert">{erro}</p>}
         {!encerrado && <div className="acoes">
-            {!token && !edicaoPendente && <button type="button" className="btn-revisar" disabled={ocupado} onClick={() => executar('revisar')}>Revisar</button>}
-            {(token || edicaoPendente) && <button type="button" className="btn-editar" disabled={ocupado} onClick={() => executar('editar')}>Editar</button>}
-            <button type="button" className="btn-confirmar" disabled={ocupado || !token} onClick={() => executar('confirmar')}>Confirmar</button>
+            {!token && !edicaoPendente && !loteComErro && <button type="button" className="btn-revisar" disabled={ocupado} onClick={() => executar('revisar')}>Revisar</button>}
+            {(token || edicaoPendente) && !loteComErro && (!(formulario.itens?.length) || campos.length > 0 || formulario.reautenticar) && <button type="button" className="btn-editar" disabled={ocupado} onClick={() => executar('editar')}>Editar</button>}
+            {!loteComErro && <button type="button" className="btn-confirmar" disabled={ocupado || !token} onClick={() => executar('confirmar')}>Confirmar</button>}
             <button type="button" className="btn-cancelar" disabled={ocupado} onClick={() => executar('cancelar')}>Cancelar</button>
         </div>}
     </section>;
