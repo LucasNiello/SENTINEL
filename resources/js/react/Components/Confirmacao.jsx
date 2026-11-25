@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import CamposProposta, { coletarValores, valoresIniciais } from './CamposProposta';
 import CalendarioAgendamento from './CalendarioAgendamento';
+import Reautenticacao from './Reautenticacao';
 
 const exibir = (valor) => valor == null || valor === '' ? 'Não informado' : typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
 
@@ -11,6 +12,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const [edicaoPendente, setEdicaoPendente] = useState(false);
     const tokenEdicao = useRef(null);
     const form = useRef(null);
+    const autorizacao = useRef(null);
     const [processando, setProcessando] = useState(false);
     const [erro, setErro] = useState('');
     const [encerrado, setEncerrado] = useState(false);
@@ -25,6 +27,8 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         const atuais = alteracoes ? { ...valores, ...alteracoes } : valores;
         if (alteracoes) setValores(atuais);
         if (acao === 'revisar' && !form.current?.reportValidity()) return;
+        if (['revisar', 'confirmar'].includes(acao) && dados.formulario?.reautenticar
+            && !autorizacao.current?.validar()) return;
         const controller = new AbortController();
         trava.current = controller;
         setProcessando(true);
@@ -32,6 +36,8 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         setErro('');
         const corpo = acao === 'revisar' ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) }
             : acao === 'confirmar' ? { token } : acao === 'editar' ? { token: token || tokenEdicao.current } : { proposta: proposta.proposta };
+        if (acao === 'confirmar' && dados.formulario?.reautenticar) Object.assign(corpo, autorizacao.current.consumir());
+        if (['editar', 'cancelar'].includes(acao)) autorizacao.current?.limpar();
         if (acao === 'editar') {
             tokenEdicao.current = corpo.token;
             setToken(null);
@@ -40,13 +46,17 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         // Uma tentativa de confirmação pode consumir o token mesmo quando falha.
         if (acao === 'confirmar') setToken(null);
         const timeout = setTimeout(() => controller.abort(), 35000);
+        let propostaEncerrada = false;
         try {
-            const resposta = await fetch(`/agente/${acao}`, {
+            const pedido = fetch(`/agente/${acao}`, {
                 method: 'POST', credentials: 'same-origin', signal: controller.signal,
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json',
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '' },
                 body: JSON.stringify(corpo),
             });
+            delete corpo.email_admin;
+            delete corpo.senha_admin;
+            const resposta = await pedido;
             if (resposta.status === 401 || resposta.status === 419) {
                 window.location.assign('/login');
                 return;
@@ -58,7 +68,9 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                     setDados((anterior) => ({ ...anterior, formulario: resultado.formulario }));
                     setValores((anteriores) => ({ ...valoresIniciais(resultado.formulario.campos ?? []), ...anteriores }));
                 }
-                if (['AI_PROPOSAL_EXPIRED', 'AI_PROPOSAL_UNAVAILABLE', 'AI_CONFIRMATION_INVALID', 'AI_CONFIRMATION_USED'].includes(resultado?.codigo) || resultado?.tipo === 'negado') {
+                if (['AI_PROPOSAL_EXPIRED', 'AI_PROPOSAL_UNAVAILABLE', 'AI_CONFIRMATION_INVALID', 'AI_CONFIRMATION_USED',
+                    'AI_REAUTH_REQUIRED', 'AI_REAUTH_FAILED', 'AI_REAUTH_RATE_LIMIT'].includes(resultado?.codigo) || resultado?.tipo === 'negado') {
+                    propostaEncerrada = true;
                     setEncerrado(true);
                     setToken(null);
                 }
@@ -96,8 +108,12 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             const mensagem = falha.name === 'AbortError' || falha instanceof TypeError
                 ? 'Não foi possível obter a resposta. A ação pode ter sido processada; confira a situação antes de tentar novamente.' : falha.message;
             setErro(mensagem);
-            if (acao === 'confirmar') setEtapa('Confirmação não concluída nesta tela. É necessário revisar novamente antes de confirmar.');
+            if (acao === 'confirmar') setEtapa(propostaEncerrada
+                ? 'Proposta encerrada. Faça um novo pedido para tentar novamente.'
+                : 'Confirmação não concluída nesta tela. É necessário revisar novamente antes de confirmar.');
         } finally {
+            delete corpo.email_admin;
+            delete corpo.senha_admin;
             clearTimeout(timeout);
             trava.current = null;
             if (montado.current) { setProcessando(false); definirOcupado(false); }
@@ -122,6 +138,8 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             {formulario.ficha && <CalendarioAgendamento ficha={formulario.ficha} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
                 selecionar={(selecao) => executar('revisar', selecao)} erros={[formulario.erro, ...campos.filter((c) => ['inicio', 'profissional_id'].includes(c.nome)).map((c) => c.erro)]} />}
         </form>
+        {formulario.reautenticar && !encerrado && <Reautenticacao key={formulario.tipo_autorizacao || 'admin'}
+            ref={autorizacao} tipo={formulario.tipo_autorizacao} bloqueado={ocupado || edicaoPendente} />}
         {(formulario.avisos ?? []).map((aviso, i) => <p key={i} className="msg msg--aviso">{exibir(aviso)}</p>)}
         <p className="card-etapa" role="status">{processando ? 'Processando…' : etapa}</p>
         {erro && <p className="msg msg--erro" role="alert">{erro}</p>}
