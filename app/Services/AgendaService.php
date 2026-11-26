@@ -1021,26 +1021,35 @@ class AgendaService
             ->filter(fn (Agendamento $a) => array_key_exists((string) $a->status, self::TRANSICOES)
                 && in_array((string) $a->setor, $setoresDoPapel, true)
                 && ($exeto === null || $a->inicio->format('Y-m-d') !== $exeto))
-            ->map(function (Agendamento $a) use ($tenantId) {
-                $motivo = $this->exigeCrmv((int) $a->id, null, $tenantId)
-                    ? 'Cirurgia ou internação: cancele um a um (exige CRMV e senha).'
-                    : $this->motivoParaNaoAlterarStatus((int) $a->id, 'cancelado', $tenantId, null, null);
+            ->map(fn (Agendamento $a) => $this->linhaParaCancelar($a, $tenantId))->values()->all();
+    }
 
-                return [
-                    'id' => (int) $a->id,
-                    'horario' => $a->inicio->format('d/m/Y H:i').'–'.$a->fim->format('H:i'),
-                    'pet' => $a->getAttribute('pet'),
-                    'tutor' => $a->getAttribute('tutor'),
-                    'servico' => $a->getAttribute('servico'),
-                    'profissional' => $a->getAttribute('profissional'),
-                    'setor' => $a->setor,
-                    'status' => $a->status,
-                    'observacao' => $motivo ?? '',
-                    'bloqueado' => $motivo !== null,
-                    // Só para o servidor guardar (a versão de quando o usuário viu a linha); o navegador não a recebe.
-                    'versao' => (string) $a->getRawOriginal('updated_at'),
-                ];
-            })->values()->all();
+    /**
+     * Uma linha da lista de cancelar (com caixa de marcar): o que o usuário vê, se pode ser marcada e a versão de quando ele a viu.
+     * O agendamento vem com pet, tutor, serviço e profissional (comColunasDaAgenda). Serve à lista do lote e à de "qual deles?".
+     *
+     * @return array<string, mixed>
+     */
+    public function linhaParaCancelar(Agendamento $a, int $tenantId): array
+    {
+        $motivo = $this->exigeCrmv((int) $a->id, null, $tenantId)
+            ? 'Cirurgia ou internação: cancele um a um (exige CRMV e senha).'
+            : $this->motivoParaNaoAlterarStatus((int) $a->id, 'cancelado', $tenantId, null, null);
+
+        return [
+            'id' => (int) $a->id,
+            'horario' => $a->inicio->format('d/m/Y H:i').'–'.$a->fim->format('H:i'),
+            'pet' => $a->getAttribute('pet'),
+            'tutor' => $a->getAttribute('tutor'),
+            'servico' => $a->getAttribute('servico'),
+            'profissional' => $a->getAttribute('profissional'),
+            'setor' => $a->setor,
+            'status' => $a->status,
+            'observacao' => $motivo ?? '',
+            'bloqueado' => $motivo !== null,
+            // Só para o servidor guardar (a versão de quando o usuário viu a linha); o navegador não a recebe.
+            'versao' => (string) $a->getRawOriginal('updated_at'),
+        ];
     }
 
     /** @param  string[]  $palavras */

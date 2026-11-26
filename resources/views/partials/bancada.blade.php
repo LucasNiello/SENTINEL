@@ -108,6 +108,18 @@
         // "exportar": id da consulta guardada no servidor (A3); com ele, a tabela ganha o botão Exportar.
         // 25/11 ("selecao"): lista com CHECKBOX para o usuário marcar quais registros cancelar (cancelar agendamentos em lote).
         // Nada é gravado ao marcar: o botão (segurar 2 s) envia só os marcados, e o servidor só aceita ids que estavam na lista.
+        // Segurar para confirmar com mouse, toque e caneta (Pointer Events). A captura do ponteiro faz o soltar valer em qualquer
+        // lugar da tela, então o gesto nunca fica "preso"; o toque longo não abre o menu do navegador. Teclado: cada botão trata o seu.
+        function ligarGestoDeSegurar(botao, iniciar, soltar) {
+            botao.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                try { botao.setPointerCapture(e.pointerId); } catch (erro) { /* sem captura, o pointerleave cobre */ }
+                iniciar();
+            });
+            ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave', 'blur'].forEach((ev) => botao.addEventListener(ev, soltar));
+            botao.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+
         function montarSelecaoDeLinhas({ linhas, colunas, tbody, trCabecalho, selecao }) {
             const posStatus = colunas.indexOf('status');
             const posObs = colunas.indexOf('observacao');
@@ -158,13 +170,14 @@
 
             const marcados = () => caixas.filter((c) => c.caixa.checked && !c.caixa.disabled);
             let concluido = false;
+            let segurando = false;
             function atualizar() {
                 const n = marcados().length;
                 const livres = caixas.filter((c) => !c.caixa.disabled);
                 caixaGeral.checked = livres.length > 0 && livres.every((c) => c.caixa.checked);
                 caixaGeral.disabled = concluido || livres.length === 0;
                 botao.disabled = concluido || n === 0;
-                rotuloBotao.textContent = n === 0 ? 'Marque para cancelar' : 'Cancelar ' + n + (n === 1 ? ' marcado' : ' marcados');
+                if (!segurando) rotuloBotao.textContent = n === 0 ? 'Marque para cancelar' : 'Segure para cancelar ' + n + (n === 1 ? ' marcado' : ' marcados');
                 aviso.textContent = concluido ? '' : (n === 0 ? 'Marque os agendamentos que você quer cancelar. Eu só cancelo o que estiver marcado, e só depois que você segurar o botão.'
                     : 'Confere a lista: vou cancelar só os ' + n + ' que você marcou. Segure o botão por 2 segundos para confirmar; se soltar antes, não faço nada.');
             }
@@ -175,6 +188,7 @@
                 const escolhidos = marcados();
                 if (!escolhidos.length) return;
                 botao.disabled = true;
+                rotuloBotao.textContent = 'Cancelando…';
                 caixas.forEach((c) => { c.caixa.disabled = true; });
                 caixaGeral.disabled = true;
                 const reabrir = () => caixas.forEach((c) => { c.caixa.disabled = c.l.bloqueado === true; });
@@ -220,14 +234,14 @@
             }
 
             // Segurar 2 s (decisão B): mouse, toque e teclado. Soltar antes do fim não envia nada.
-            let segurando = false;
             let inicioHold = 0;
             let rafId = null;
             function passo() {
                 if (!segurando) return;
                 const pct = Math.min(100, ((performance.now() - inicioHold) / DURACAO_HOLD_MS) * 100);
                 fill.style.width = pct + '%';
-                if (pct >= 100) { segurando = false; fill.style.width = '0%'; enviar(); return; }
+                rotuloBotao.textContent = 'Segurando… ' + Math.floor(pct) + '%';
+                if (pct >= 100) { segurando = false; botao.classList.remove('segurando'); fill.style.width = '0%'; enviar(); return; }
                 rafId = requestAnimationFrame(passo);
             }
             function iniciar() {
@@ -244,12 +258,11 @@
                 if (rafId) cancelAnimationFrame(rafId);
                 fill.style.width = '0%';
                 botao.classList.remove('segurando');
-                aviso.textContent = 'Você soltou antes da hora, então não cancelei nada. Se quiser, é só segurar de novo.';
+                atualizar();
+                aviso.textContent = 'Você soltou antes da hora, então não cancelei nada. Se quiser, é só segurar de novo até o botão encher.';
                 anunciar('você soltou antes do fim, nada foi cancelado');
             }
-            botao.addEventListener('mousedown', iniciar);
-            botao.addEventListener('touchstart', iniciar);
-            ['mouseup', 'mouseleave', 'blur', 'touchend', 'touchcancel'].forEach((ev) => botao.addEventListener(ev, soltar));
+            ligarGestoDeSegurar(botao, iniciar, soltar);
             botao.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); iniciar(); } });
             botao.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') soltar(); });
 
@@ -270,7 +283,9 @@
             // Front de 14/11 (F2): a tela pode dar um link por linha (Cadastros › Pets: a ficha do pet). Só navegação (GET).
             const linkDaLinha = typeof window.linkDaLinha === 'function' ? window.linkDaLinha : null;
             const temLink = !!linkDaLinha && linhas.some((l) => linkDaLinha(l));
-            const temAcao = editar || temPedido || temLink || linhas.some((l) => l.acao && l.acao.tool);
+            // 25/11: lista de "qual deles?" (botão "Escolher"): vira uma caixa de marcar à ESQUERDA da linha, antes do número. Marcar abre a ficha daquela linha.
+            const escolherPorCaixa = !selecao && linhas.length > 0 && linhas.every((l) => l.acao && l.acao.tool && l.acao.rotulo === 'Escolher');
+            const temAcao = !escolherPorCaixa && (editar || temPedido || temLink || linhas.some((l) => l.acao && l.acao.tool));
             const table = document.createElement('table');
             const thead = document.createElement('thead');
             const trCabecalho = document.createElement('tr');
@@ -350,8 +365,31 @@
                     }
                     tr.appendChild(td);
                 }
+                if (escolherPorCaixa) {
+                    const td = document.createElement('td');
+                    td.className = 'selecao-celula';
+                    const rotulo = document.createElement('label');
+                    const caixa = document.createElement('input');
+                    caixa.type = 'checkbox';
+                    caixa.className = 'selecao-caixa selecao-caixa--unica';
+                    caixa.setAttribute('aria-label', 'Escolher este: ' + [l.pet, l.horario, 'registro ' + l.id].filter(Boolean).join(', '));
+                    caixa.addEventListener('change', () => {
+                        tr.classList.toggle('linha-escolhida', caixa.checked);
+                        if (caixa.checked) abrirFormulario(l.acao.tool, l.id, caixa);
+                    });
+                    rotulo.appendChild(caixa);
+                    td.appendChild(rotulo);
+                    tr.insertBefore(td, tr.firstChild);
+                }
                 tbody.appendChild(tr);
             });
+            if (escolherPorCaixa) {
+                const th = document.createElement('th');
+                th.scope = 'col';
+                th.className = 'selecao-celula';
+                th.setAttribute('aria-label', 'Marque o que você quer');
+                trCabecalho.insertBefore(th, trCabecalho.firstChild);
+            }
             // Lista com checkbox (cancelar em lote): a 1ª coluna vira a de marcar; a barra com o botão (segurar) vai depois da tabela.
             const barraSelecao = selecao && selecao.url ? montarSelecaoDeLinhas({ linhas, colunas, tbody, trCabecalho, selecao }) : null;
             thead.appendChild(trCabecalho);
@@ -1034,12 +1072,17 @@
             // Vem do /agente/revisar: true só nas ações destrutivas. Antes da resposta, o padrão seguro é segurar.
             let precisaSegurar = true;
             let entrouNaEtapa2Em = 0;
+            // O botão diz o que fazer: onde é preciso segurar, "Segure para confirmar" (preenche enquanto segura); senão, "Confirmar".
+            function rotuloParado() {
+                if (!segurando) label.textContent = precisaSegurar ? 'Segure para confirmar' : 'Confirmar';
+            }
 
             // 25/11: card da agenda em um passo: sem Revisar nem Editar na tela; o Confirmar já vale desde a abertura. O segurar
             // (só ao cancelar agendamento) é reavaliado quando o campo muda.
             function aplicarPassoUnico() {
                 if (!passoUnico) return;
                 precisaSegurar = segurarAgora();
+                rotuloParado();
                 entrouNaEtapa2Em = 0;
                 btnRevisar.hidden = true;
                 btnEditar.hidden = true;
@@ -1048,7 +1091,7 @@
                 etapa.textContent = textoPrimeiraEtapa();
             }
             aplicarPassoUnico();
-            form.addEventListener('change', () => { if (passoUnico) { precisaSegurar = segurarAgora(); etapa.textContent = textoPrimeiraEtapa(); } });
+            form.addEventListener('change', () => { if (passoUnico) { precisaSegurar = segurarAgora(); rotuloParado(); etapa.textContent = textoPrimeiraEtapa(); } });
 
             // Prazo da proposta: conta desde a proposta e não reinicia no "Editar" (vale também depois do Revisar).
             // 25/11: prazo_s null = card aberto por uma TELA: sem prazo e sem contador (o Confirmar revalida tudo no servidor).
@@ -1107,6 +1150,7 @@
             function entrarNoSegurar(novoToken, segurar) {
                 token = novoToken;
                 precisaSegurar = segurar !== false;
+                rotuloParado();
                 entrouNaEtapa2Em = performance.now();
                 campos.disabled = true;
                 // 15/11: a ficha pode passar a pedir CRMV + senha só no Revisar (cirurgia escolhida no card): aí os campos ficam abertos.
@@ -1134,7 +1178,7 @@
                 precisaSegurar = true;
                 avisoSoltou.hidden = true;
                 fill.style.width = '0%';
-                label.textContent = 'Confirmar';
+                rotuloParado();
                 btnConfirmar.classList.remove('segurando');
                 btnConfirmar.hidden = true;
                 btnEditar.hidden = true;
@@ -1261,7 +1305,7 @@
                 segurando = false;
                 if (rafId) cancelAnimationFrame(rafId);
                 fill.style.width = '0%';
-                label.textContent = 'Confirmar';
+                rotuloParado();
                 btnConfirmar.classList.remove('segurando');
                 avisoSoltou.hidden = false;
                 anunciar('você soltou antes do fim, nada foi gravado');
@@ -1336,13 +1380,7 @@
             btnRevisar.addEventListener('click', revisar);
             btnEditar.addEventListener('click', voltarAoFormulario);
 
-            btnConfirmar.addEventListener('mousedown', iniciarHold);
-            btnConfirmar.addEventListener('touchstart', iniciarHold);
-            btnConfirmar.addEventListener('mouseup', soltarHold);
-            btnConfirmar.addEventListener('blur', soltarHold);
-            btnConfirmar.addEventListener('mouseleave', soltarHold);
-            btnConfirmar.addEventListener('touchend', soltarHold);
-            btnConfirmar.addEventListener('touchcancel', soltarHold);
+            ligarGestoDeSegurar(btnConfirmar, iniciarHold, soltarHold);
             // Clique simples (mouse, toque, Enter ou Espaço) confirma as ações não destrutivas. O Confirmar aparece no
             // lugar do Revisar: o 2º clique de um duplo clique (detail > 1) ou um clique logo depois de entrar na etapa 2
             // não confirma, para ninguém gravar sem ver "Dados conferidos".

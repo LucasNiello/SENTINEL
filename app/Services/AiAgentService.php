@@ -513,6 +513,7 @@ class AiAgentService
                     // Vários com esse nome: a lista que o usuário vai escolher também vale para "o segundo".
                     if (($encontrados['tipo'] ?? null) === 'resultado_leitura') {
                         $encontrados['lista'] = $this->listaParaGuardar($tool, $definicao, $encontrados['resultado'] ?? []);
+                        $encontrados = $this->semVersaoNasLinhas($encontrados);
                     }
 
                     return $this->comAviso($encontrados, $aviso);
@@ -565,9 +566,7 @@ class AiAgentService
             if (($resposta['tipo'] ?? null) === 'resultado_leitura') {
                 $resposta['lista'] = $this->listaParaGuardar($tool, $definicao, $resposta['resultado'] ?? []);
                 // A "versao" fica só no servidor (na lista guardada): as linhas que vão ao navegador não a levam.
-                if ($tool === 'cancelar_agendamentos_em_lote' && is_array($resposta['resultado'] ?? null)) {
-                    $resposta['resultado'] = array_map(fn ($l) => is_array($l) ? Arr::except($l, 'versao') : $l, $resposta['resultado']);
-                }
+                $resposta = $this->semVersaoNasLinhas($resposta);
             }
 
             // 26/11: a agenda responde em frase (montada aqui, só com o que o servidor leu) e diz qual linha a tela realça.
@@ -799,15 +798,37 @@ class AiAgentService
             'entidade' => self::ENTIDADE_DO_ID[$tool] ?? $definicao['entidade'] ?? null,
             'linhas' => $linhas,
             // 25/11: a tabela de cancelar em lote tem checkboxes; só os ids dela entram no endpoint de gravação.
-            'selecionavel' => $tool === 'cancelar_agendamentos_em_lote' ? $tool : null,
+            // Também a lista de "qual deles cancelar?" (alterar_status_agendamento → cancelado): ela traz a "versao" de cada linha.
+            'selecionavel' => $this->ehListaParaMarcar($tool, $resultado) ? 'cancelar_agendamentos_em_lote' : null,
             // A versão de cada linha como o usuário a VIU (a gravação recusa o que mudou depois); nunca vai ao navegador.
-            'versoes' => $tool === 'cancelar_agendamentos_em_lote'
+            'versoes' => $this->ehListaParaMarcar($tool, $resultado)
                 ? collect($resultado)->filter(fn ($l) => is_array($l) && isset($l['id'], $l['versao']))->mapWithKeys(fn (array $l) => [(int) $l['id'] => (string) $l['versao']])->all()
                 : [],
             'frase' => $n === 0
                 ? "A consulta ({$tool}) não encontrou registros."
                 : "Mostrei ao usuário uma tabela com {$n} ".($n === 1 ? 'linha' : 'linhas')." ({$tool}). Ela fica guardada no servidor: para alterar uma linha dela (\"edite o segundo\", \"a última\"), use o campo posicao (1 = primeira, -1 = última), nunca o número da linha como id.",
         ];
+    }
+
+    /** A lista tem caixa de marcar (cancelar agendamentos): a tool do lote, ou o "qual deles?" do cancelamento, cujas linhas levam a "versao". */
+    private function ehListaParaMarcar(string $tool, mixed $resultado): bool
+    {
+        if ($tool === 'cancelar_agendamentos_em_lote') {
+            return true;
+        }
+
+        return $tool === 'alterar_status_agendamento' && is_array($resultado) && $resultado !== []
+            && collect($resultado)->every(fn ($l) => is_array($l) && isset($l['id'], $l['versao']));
+    }
+
+    /** A "versao" fica só no servidor (na lista guardada): as linhas que vão ao navegador não a levam. */
+    private function semVersaoNasLinhas(array $resposta): array
+    {
+        if (is_array($resposta['resultado'] ?? null)) {
+            $resposta['resultado'] = array_map(fn ($l) => is_array($l) ? Arr::except($l, 'versao') : $l, $resposta['resultado']);
+        }
+
+        return $resposta;
     }
 
     /**
@@ -1213,6 +1234,23 @@ class AiAgentService
             if ($naTabela->isNotEmpty()) {
                 $encontrados = $naTabela;
             }
+        }
+
+        // 25/11: "cancela a consulta do Thor" com mais de um Thor: em vez de "Escolher", a MESMA lista com caixa de marcar do cancelar em
+        // lote (pode marcar mais de um; nada às cegas: o usuário marca e segura o botão). Só para cancelamento de agendamento.
+        if ($encontrados->count() > 1 && $tool === 'alterar_status_agendamento' && ($argumentos['novo_status'] ?? null) === 'cancelado') {
+            $agenda = app(AgendaService::class);
+            $tenantId = $this->contexto->tenantId();
+
+            return ['resposta' => [
+                'tipo' => 'resultado_leitura',
+                'tool' => $tool,
+                'resultado' => $encontrados->map(fn (Model $m) => $agenda->linhaParaCancelar($m, $tenantId))->values()->all(),
+                'colunas' => ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'status', 'observacao'],
+                'selecao' => ['url' => '/agente/agenda/cancelar-lote', 'rotulo' => 'Cancelar selecionados', 'segurar' => true],
+                'aviso' => 'Achei '.$encontrados->count().' agendamentos'.($busca !== null && $busca !== '' ? ' que batem com “'.$busca.'”' : '')
+                    .'. Marque na caixinha o que você quer cancelar (pode ser mais de um) e segure o botão para confirmar.',
+            ]];
         }
 
         if ($encontrados->count() > 1) {
