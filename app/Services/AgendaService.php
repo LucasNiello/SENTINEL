@@ -213,6 +213,174 @@ class AgendaService
             ->get(['agendamentos.*', 'pets.nome as pet', 'tutores.nome as tutor', 'users.name as profissional', 'catalogo_itens.nome_comercial as servico']);
     }
 
+    /** Tipos de data da consulta: o dia marcado do atendimento, o momento em que foi gravado e o da última alteração. */
+    public const TIPOS_DE_DATA = ['marcado' => 'agendamentos.inicio', 'gravacao' => 'agendamentos.created_at', 'alteracao' => 'agendamentos.updated_at'];
+
+    /** Teto de linhas de uma consulta da agenda (e do "quantos" pedido). */
+    public const LIMITE_DA_CONSULTA = 200;
+
+    /**
+     * Consulta da agenda com todos os filtros (26/11): período pelo TIPO de data (dia marcado, gravação ou última alteração), hora,
+     * dia da semana, passado/futuro, serviço (nome ou categoria), pet, tutor, profissional, status, origem, cobrado, id, ordenar e
+     * quantos. O tenant é sempre o do chamador; filtros combinam (E). Sem datas, o padrão é hoje + 6 dias — a não ser que o pedido
+     * já limite por si ("o último realizado", status fechado, passado/futuro, outro tipo de data): aí vale o histórico todo.
+     *
+     * @param  array<string, mixed>  $f
+     * @return Collection<int, Agendamento>
+     */
+    public function buscarAvancado(array $f, int $tenantId): Collection
+    {
+        $f = self::sanearFiltros($f);
+        $fuso = (string) config('app.timezone');
+        $texto = fn (string $chave): ?string => is_string($f[$chave] ?? null) && trim($f[$chave]) !== '' ? trim($f[$chave]) : null;
+        $tipo = isset(self::TIPOS_DE_DATA[$f['tipo_data'] ?? null]) ? $f['tipo_data'] : 'marcado';
+        $ordem = isset(self::TIPOS_DE_DATA[$f['ordenar'] ?? null]) ? $f['ordenar'] : null;
+        $sentido = ($f['sentido'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
+        $limite = isset($f['limite']) && is_numeric($f['limite']) ? max(1, min((int) $f['limite'], 50)) : null;
+        $quando = in_array($f['quando'] ?? null, ['passado', 'futuro'], true) ? $f['quando'] : null;
+        $status = $texto('status');
+
+        $dia = $texto('dia');
+        $ini = $dia ?? $texto('data_inicio');
+        $fim = $dia ?? $texto('data_fim');
+        foreach (['de início' => $ini, 'de fim' => $fim] as $qual => $informada) {
+            if ($informada !== null && $this->dia($informada) === null) {
+                throw new RegraDeNegocioException("A data {$qual} da agenda deve estar no formato AAAA-MM-DD (ex.: 2026-12-15).");
+            }
+        }
+        // Sem período e sem dizer a ordem: status fechado ("os realizados") mostra os MAIS RECENTES primeiro, e só um "quantos"
+        // ("os 3 próximos") vale para o que ainda vai acontecer — nunca os mais antigos de toda a história.
+        $fechado = in_array($status, ['realizado', 'faltou', 'cancelado'], true);
+        $semPeriodoPedido = $ini === null && $fim === null;
+        $sentido = self::sentidoEfetivo($f);
+        if ($quando === null && $semPeriodoPedido && $ordem === null && $limite !== null && ! $fechado && $tipo === 'marcado' && ! isset($f['id']) && $sentido === 'asc') {
+            $quando = 'futuro';
+        }
+        // O pedido já se limita sozinho: sem período, a consulta olha o histórico todo (o teto e o "quantos" seguram o tamanho).
+        $limitaSozinho = $tipo !== 'marcado' || $ordem !== null || $limite !== null || $quando !== null || isset($f['id'])
+            || in_array($status, ['realizado', 'faltou', 'cancelado'], true);
+        if ($ini === null && $fim === null && ! $limitaSozinho) {
+            $inicioDia = CarbonImmutable::now($fuso)->startOfDay();
+            $inicio = $inicioDia;
+            $fimDia = $inicioDia->addDays(6)->endOfDay();
+        } else {
+            $inicio = $ini === null ? null : $this->dia($ini);
+            $fimDia = $fim !== null ? $this->dia($fim)->endOfDay() : ($inicio !== null && ! $limitaSozinho ? $inicio->addDays(6)->endOfDay() : null);
+        }
+        $coluna = self::TIPOS_DE_DATA[$tipo];
+        $horaDe = $this->horaDoFiltro($texto('hora_de'));
+        $horaAte = $this->horaDoFiltro($texto('hora_ate'));
+        $servico = $texto('servico');
+        $palavrasDoServico = $servico === null ? [] : ($this->palavrasDaBusca($servico) ?: [$servico]);
+        $semana = $this->diaDaSemana($texto('dia_semana'));
+
+        $linhas = Agendamento::query()
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')
+            ->join('tutores', 'tutores.id', '=', 'pets.tutor_id')
+            ->join('users', 'users.id', '=', 'agendamentos.profissional_id')
+            ->join('catalogo_itens', 'catalogo_itens.id', '=', 'agendamentos.catalogo_item_id')
+            ->where('agendamentos.tenant_id', $tenantId)
+            ->when($inicio !== null, fn ($q) => $q->where($coluna, '>=', $inicio))
+            ->when($fimDia !== null, fn ($q) => $q->where($coluna, '<=', $fimDia))
+            ->when($quando === 'passado', fn ($q) => $q->where('agendamentos.inicio', '<', CarbonImmutable::now($fuso)))
+            ->when($quando === 'futuro', fn ($q) => $q->where('agendamentos.inicio', '>=', CarbonImmutable::now($fuso)))
+            ->when($horaDe !== null, fn ($q) => $q->whereRaw('time(agendamentos.inicio) >= ?', [$horaDe]))
+            ->when($horaAte !== null, fn ($q) => $q->whereRaw('time(agendamentos.inicio) <= ?', [$horaAte]))
+            // Dia da semana no SQL (0 = domingo), antes do teto de linhas: o corte nunca esconde resultado em silêncio.
+            ->when($semana !== null, fn ($q) => $q->whereRaw((DB::getDriverName() === 'sqlite' ? "cast(strftime('%w', agendamentos.inicio) as integer)" : '(dayofweek(agendamentos.inicio) - 1)').' = ?', [$semana]))
+            ->when(isset($f['id']) && is_numeric($f['id']), fn ($q) => $q->where('agendamentos.id', (int) $f['id']))
+            ->when($texto('setor'), fn ($q, $setor) => $q->where('agendamentos.setor', $setor))
+            ->when(isset($f['profissional_id']), fn ($q) => $q->where('agendamentos.profissional_id', (int) $f['profissional_id']))
+            ->when(isset($f['pet_id']), fn ($q) => $q->where('agendamentos.pet_id', (int) $f['pet_id']))
+            ->tap(fn (Builder $q) => $this->comPalavrasDoNome($q, $texto('pet'), 'pets.nome'))
+            ->tap(fn (Builder $q) => $this->comPalavrasDoNome($q, $texto('tutor'), 'tutores.nome'))
+            ->tap(fn (Builder $q) => $this->comPalavrasDoNome($q, $texto('profissional'), 'users.name'))
+            ->when($status !== null, fn ($q) => $q->where('agendamentos.status', $status))
+            ->when(in_array($f['origem'] ?? null, Agendamento::ORIGENS, true), fn ($q) => $q->where('agendamentos.origem', $f['origem']))
+            ->when(in_array($f['cobrado'] ?? null, ['sim', 'nao'], true), function ($q) use ($f, $tenantId) {
+                $existe = fn ($sub) => $sub->select(DB::raw(1))->from('cobrancas')->whereColumn('cobrancas.agendamento_id', 'agendamentos.id')
+                    ->where('cobrancas.tenant_id', $tenantId)->where('cobrancas.status', '!=', 'cancelada');
+
+                return $f['cobrado'] === 'sim' ? $q->whereExists($existe) : $q->whereNotExists($existe);
+            })
+            ->tap(function (Builder $q) use ($palavrasDoServico) {
+                // "banho", "consulta", "cirurgia": casa com o nome do serviço OU com a categoria dele.
+                foreach ($palavrasDoServico as $palavra) {
+                    $nome = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $palavra);
+                    $categoria = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], Str::ascii($palavra));
+                    $q->where(fn ($w) => $w->whereRaw("catalogo_itens.nome_comercial like ? escape '!'", ["%{$nome}%"])
+                        ->orWhereRaw("catalogo_itens.categoria like ? escape '!'", ["%{$categoria}%"]));
+                }
+            })
+            ->orderBy($ordem !== null ? self::TIPOS_DE_DATA[$ordem] : 'agendamentos.inicio', $sentido)
+            ->orderBy('agendamentos.id', $sentido)
+            ->limit(self::LIMITE_DA_CONSULTA)
+            ->get(['agendamentos.*', 'pets.nome as pet', 'tutores.nome as tutor', 'users.name as profissional', 'catalogo_itens.nome_comercial as servico']);
+
+        return $limite === null ? $linhas : $linhas->take($limite)->values();
+    }
+
+    /** O sentido que a consulta realmente usa (a frase usa o mesmo): o pedido, ou "mais recentes primeiro" para status fechado sem período nem ordem. */
+    public static function sentidoEfetivo(array $f): string
+    {
+        $f = self::sanearFiltros($f);
+        if (isset($f['sentido'])) {
+            return $f['sentido'];
+        }
+        $fechado = in_array($f['status'] ?? null, ['realizado', 'faltou', 'cancelado'], true);
+
+        return $fechado && ! isset($f['ordenar']) && ! isset($f['dia']) && ! isset($f['data_inicio']) && ! isset($f['data_fim']) ? 'desc' : 'asc';
+    }
+
+    /**
+     * Só chaves conhecidas e com o tipo certo (a IA pode mandar array ou texto onde se espera número). O que não serve é descartado.
+     *
+     * @param  array<string, mixed>  $f
+     * @return array<string, mixed>
+     */
+    public static function sanearFiltros(array $f): array
+    {
+        $limpo = [];
+        foreach (['dia', 'data_inicio', 'data_fim', 'setor', 'pet', 'tutor', 'profissional', 'servico', 'hora_de', 'hora_ate', 'dia_semana'] as $chave) {
+            if (is_string($f[$chave] ?? null) && trim($f[$chave]) !== '') {
+                $limpo[$chave] = mb_substr(trim($f[$chave]), 0, 100);
+            }
+        }
+        $enums = ['tipo_data' => array_keys(self::TIPOS_DE_DATA), 'ordenar' => array_keys(self::TIPOS_DE_DATA), 'sentido' => ['asc', 'desc'],
+            'quando' => ['passado', 'futuro'], 'origem' => Agendamento::ORIGENS, 'cobrado' => ['sim', 'nao'], 'status' => Agendamento::STATUS];
+        foreach ($enums as $chave => $validos) {
+            if (is_string($f[$chave] ?? null) && in_array($f[$chave], $validos, true)) {
+                $limpo[$chave] = $f[$chave];
+            }
+        }
+        foreach (['id', 'limite', 'profissional_id', 'pet_id'] as $chave) {
+            $valor = $f[$chave] ?? null;
+            if ((is_int($valor) || (is_string($valor) && preg_match('/^\d{1,18}$/', $valor) === 1)) && (int) $valor >= 1) {
+                $limpo[$chave] = (int) $valor;
+            }
+        }
+
+        return $limpo;
+    }
+
+    /** "9", "09:30", "9h30" → "09:30:00"; fora disso, sem filtro de hora. */
+    private function horaDoFiltro(?string $valor): ?string
+    {
+        if ($valor !== null && preg_match('/^(\d{1,2})(?:[:h](\d{2}))?h?$/', $valor, $m) === 1 && (int) $m[1] <= 23 && (int) ($m[2] ?? 0) <= 59) {
+            return sprintf('%02d:%02d:00', (int) $m[1], (int) ($m[2] ?? 0));
+        }
+
+        return null;
+    }
+
+    /** "segunda", "sáb", "domingo" → 0 (domingo) a 6 (sábado); desconhecido → null. */
+    private function diaDaSemana(?string $valor): ?int
+    {
+        $chave = $valor === null ? '' : substr(Str::ascii(mb_strtolower($valor)), 0, 3);
+
+        return ['dom' => 0, 'seg' => 1, 'ter' => 2, 'qua' => 3, 'qui' => 4, 'sex' => 5, 'sab' => 6][$chave] ?? null;
+    }
+
     /**
      * Para mudar o status: agendamento ainda em aberto (agendado ou confirmado), por id ou pelo nome do pet. Até 6.
      * $setores (15/11): só os setores que o papel vê na agenda; fora deles o agendamento é tratado como inexistente.

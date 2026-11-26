@@ -56,7 +56,7 @@ class IsolamentoDeTenantTest extends TestCase
             'CatalogoService::baixarEstoque', 'CatalogoService::devolverEstoque', 'CatalogoService::avisosDeSaldoNegativo', 'CatalogoService::excluir',
             'CatalogoService::restaurarDaLixeira', 'CatalogoService::excluirDefinitivo',
             'AgendaService::agendar', 'AgendaService::motivoParaNaoAgendar', 'AgendaService::alterarStatus',
-            'AgendaService::motivoParaNaoAlterarStatus', 'AgendaService::buscarPorFiltro', 'AgendaService::localizarEmAberto',
+            'AgendaService::motivoParaNaoAlterarStatus', 'AgendaService::buscarPorFiltro', 'AgendaService::buscarAvancado', 'AgendaService::sanearFiltros', 'AgendaService::sentidoEfetivo', 'AgendaService::localizarEmAberto',
             'AgendaService::remarcar', 'AgendaService::motivoParaNaoRemarcar', 'AgendaService::localizarParaRemarcar',
             'AgendaService::trocarServico', 'AgendaService::motivoParaNaoTrocarServico', 'AgendaService::disponibilidadeDoDia',
             'AgendaService::disponibilidadeDoMes', 'AgendaService::exigeCrmv', 'AgendaService::exigeCrmvNoStatus',
@@ -220,6 +220,12 @@ class IsolamentoDeTenantTest extends TestCase
             'AgendaService::buscarPorFiltro' => fn () => $this->soNoProprioTenant(
                 fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
                 fn (int $t) => $agenda->buscarPorFiltro(null, null, null, null, null, null, $t)),
+            // Função pura (sem tenant nem banco): só limpa o tipo dos filtros; tenant_id nunca sobrevive a ela.
+            'AgendaService::sanearFiltros' => fn () => $this->assertSame(['id' => 5], AgendaService::sanearFiltros(['id' => '5', 'tenant_id' => 9, 'limite' => [1], 'ordenar' => ['x']])),
+            'AgendaService::sentidoEfetivo' => fn () => $this->assertSame('desc', AgendaService::sentidoEfetivo(['status' => 'realizado'])),
+            'AgendaService::buscarAvancado' => fn () => $this->soNoProprioTenant(
+                fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
+                fn (int $t) => $agenda->buscarAvancado(['ordenar' => 'gravacao', 'sentido' => 'desc'], $t)),
             // 25/11: a lista de cancelar em lote só traz os agendamentos em aberto do PRÓPRIO tenant (e do setor do papel).
             'AgendaService::candidatosParaCancelarEmLote' => fn () => $this->soNoProprioTenant(
                 fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),

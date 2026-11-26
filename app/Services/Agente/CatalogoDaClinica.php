@@ -296,7 +296,7 @@ trait CatalogoDaClinica
             // ---------------------------------------------------------------- agenda
             $this->definirTool(
                 nome: 'consultar_agenda',
-                descricao: 'Mostra a agenda da clínica e do banho e tosa num período (padrão: de hoje até 6 dias depois), com horário, pet, tutor, serviço, profissional e status. Datas no formato AAAA-MM-DD. Ação de leitura — não exige confirmação.',
+                descricao: 'Mostra a agenda da clínica e do banho e tosa num período (padrão: de hoje até 6 dias depois), com horário, pet, tutor, serviço, profissional e status. Datas no formato AAAA-MM-DD. Também responde perguntas pontuais: "qual foi o último agendamento realizado" (status realizado, ordenar marcado, sentido desc, limite 1), "o próximo do Thor" (pet, quando futuro, ordenar marcado, limite 1), "o último que foi gravado" (ordenar gravacao, sentido desc, limite 1), "os banhos de outubro" (servico banho, datas), "o que foi agendado ontem" (tipo_data gravacao, dia de ontem). Sem pedir só "o último", mostre a lista inteira. Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
                 risco: 'leitura',
                 acao: 'consultar',
@@ -313,11 +313,22 @@ trait CatalogoDaClinica
                     'tutor' => ['type' => 'string', 'description' => 'Nome do CLIENTE (tutor, o dono do animal): "os agendamentos do Diego". Filtra só os agendamentos dele.'],
                     'profissional' => ['type' => 'string', 'description' => 'Nome do veterinário ou atendente ("os da estetica1"), quando o número não é conhecido.'],
                     'status' => ['type' => 'string', 'enum' => Agendamento::STATUS],
+                    // 26/11: filtros para o pedido ser entendido ("o último realizado", "banhos do Thor em outubro", "gravados ontem").
+                    'tipo_data' => ['type' => 'string', 'enum' => array_keys(AgendaService::TIPOS_DE_DATA), 'description' => 'A que data se referem dia/data_inicio/data_fim: "marcado" = o dia marcado do atendimento (padrão); "gravacao" = quando o agendamento foi criado no sistema ("gravados ontem", "marcados ontem"); "alteracao" = a última vez que foi mudado (ex.: quando virou realizado).'],
+                    'servico' => ['type' => 'string', 'description' => 'Nome ou categoria do serviço: "banho", "tosa", "consulta", "cirurgia", "vacina".'],
+                    'hora_de' => ['type' => 'string', 'description' => 'Horário do atendimento a partir de (HH:MM, 24 h): "à tarde" = 12:00.'],
+                    'hora_ate' => ['type' => 'string', 'description' => 'Horário do atendimento até (HH:MM, 24 h): "de manhã" = até 11:59.'],
+                    'dia_semana' => ['type' => 'string', 'enum' => ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado', 'domingo']],
+                    'quando' => ['type' => 'string', 'enum' => ['passado', 'futuro'], 'description' => 'Só os que já passaram ou só os que ainda vão acontecer (em relação a agora).'],
+                    'ordenar' => ['type' => 'string', 'enum' => array_keys(AgendaService::TIPOS_DE_DATA), 'description' => 'Por qual data ordenar: "marcado" (dia do atendimento), "gravacao" (ordem em que foram criados) ou "alteracao" (última mudança). "O último realizado" = ordenar marcado, sentido desc, limite 1, status realizado; "o último gravado" = ordenar gravacao.'],
+                    'sentido' => ['type' => 'string', 'enum' => ['asc', 'desc'], 'description' => 'asc = do mais antigo ao mais novo; desc = do mais novo ao mais antigo ("último", "mais recente").'],
+                    'limite' => ['type' => 'integer', 'description' => 'Quantos mostrar (1 a 50): "o último" = 1, "os 3 próximos" = 3. Sem dizer, mostra todos.'],
+                    'id' => ['type' => 'integer', 'description' => 'Número de um agendamento específico.'],
+                    'origem' => ['type' => 'string', 'enum' => Agendamento::ORIGENS, 'description' => 'encaixe_emergencia = os encaixes de emergência.'],
+                    'cobrado' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'sim = já tem cobrança; nao = ainda sem cobrança ("realizados sem cobrança").'],
                 ],
                 obrigatorios: [],
-                executar: fn (array $a) => $agenda->buscarPorFiltro($a['dia'] ?? $a['data_inicio'] ?? null, $a['dia'] ?? $a['data_fim'] ?? null, $this->setorDaAgendaPedido($a['setor'] ?? null),
-                    isset($a['profissional_id']) ? (int) $a['profissional_id'] : null, isset($a['pet_id']) ? (int) $a['pet_id'] : null, $a['status'] ?? null, $a['tenant_id'],
-                    is_string($a['pet'] ?? null) ? $a['pet'] : null, is_string($a['tutor'] ?? null) ? $a['tutor'] : null, is_string($a['profissional'] ?? null) ? $a['profissional'] : null)
+                executar: fn (array $a) => $agenda->buscarAvancado([...$a, 'setor' => $this->setorDaAgendaPedido($a['setor'] ?? null)], (int) $a['tenant_id'])
                     ->map(fn (Agendamento $ag) => [
                         'id' => (int) $ag->id,
                         'horario' => $ag->inicio->format('d/m/Y H:i').'–'.$ag->fim->format('H:i'),
@@ -327,6 +338,12 @@ trait CatalogoDaClinica
                         'profissional' => $ag->getAttribute('profissional'),
                         'setor' => $ag->setor,
                         'status' => $ag->status,
+                        // Só no pedido pontual ("o último", "o gravado ontem"): a frase usa a gravação, e a tabela a mostra quando o pedido a usa
+                        // (AiAgentService::apresentarAgenda). A consulta comum mantém as colunas de sempre.
+                        ...(isset($a['ordenar']) || isset($a['limite']) || isset($a['id']) || isset($a['tipo_data']) ? [
+                            'gravado_em' => $ag->created_at?->format('d/m/Y H:i'),
+                            'alterado_em' => $ag->updated_at?->format('d/m/Y H:i'),
+                        ] : []),
                     ])->all(),
                 mensagemErro: 'Não consegui consultar a agenda agora. Tente novamente.',
                 colunas: ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'setor', 'status'],

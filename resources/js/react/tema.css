@@ -390,3 +390,15 @@ html[data-tema] .pet-item--foco {outline: 3px solid var(--cor-marca-forte); outl
 @keyframes pet-foco {from {background: var(--cor-marca-suave)} to {background: var(--cor-superficie-suave)}}
 html[data-tema] .pets-arquivados {margin-top: 8px}
 html[data-tema] .pets-arquivados > summary {cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--cor-texto-suave); font-weight: 600}
+/* Linha que o pedido apontou ("o último realizado"): acende uma vez, 0,5 s subindo e 0,5 s descendo, com o brilho dos cometas do login.
+   Fica um realce fixo (sem piscar) para quem pede menos movimento. */
+html[data-tema] tr.linha-destaque td {background: color-mix(in srgb, var(--cor-marca) 22%, transparent); box-shadow: inset 0 1px 0 var(--cor-marca-forte), inset 0 -1px 0 var(--cor-marca-forte)}
+html[data-tema] tr.linha-destaque td:first-child {box-shadow: inset 3px 0 0 var(--cor-marca-forte), inset 0 1px 0 var(--cor-marca-forte), inset 0 -1px 0 var(--cor-marca-forte)}
+@media (prefers-reduced-motion: no-preference) {
+    html[data-tema] tr.linha-destaque td {animation: linha-pulso 1s ease-in-out 1}
+}
+@keyframes linha-pulso {
+    0% {background: transparent; box-shadow: 0 0 0 0 transparent}
+    50% {background: color-mix(in srgb, var(--cor-marca) 55%, transparent); box-shadow: 0 0 8px 2px color-mix(in srgb, var(--cor-marca) 90%, transparent)}
+    100% {background: color-mix(in srgb, var(--cor-marca) 22%, transparent); box-shadow: 0 0 0 0 transparent}
+}

@@ -570,6 +570,11 @@ class AiAgentService
                 }
             }
 
+            // 26/11: a agenda responde em frase (montada aqui, só com o que o servidor leu) e diz qual linha a tela realça.
+            if ($tool === 'consultar_agenda' && ($resposta['tipo'] ?? null) === 'resultado_leitura') {
+                $resposta = $this->apresentarAgenda($resposta, $argumentos);
+            }
+
             // A3 (RF02): tabela de consulta pode ser exportada. Os argumentos voltam para o controller
             // guardar no servidor; ele tira esta chave antes de responder (o front só recebe um id).
             if (($resposta['tipo'] ?? null) === 'resultado_leitura' && ($definicao['tipo'] ?? null) === 'leitura' && $definicao['colunas'] !== []) {
@@ -1040,6 +1045,29 @@ class AiAgentService
             // RF02 "editável": a linha abre o formulário de atualizar (sem IA), se o papel permitir.
             ...($this->podeEditar($definicao['editavel_por']) ? ['editar' => $definicao['editavel_por']] : []),
         ];
+    }
+
+    /**
+     * Agenda (26/11): acrescenta a frase da resposta e as linhas a realçar; pedido por gravação ou alteração mostra essa coluna.
+     *
+     * @param  array<string, mixed>  $resposta
+     * @param  array<string, mixed>  $filtros
+     * @return array<string, mixed>
+     */
+    private function apresentarAgenda(array $resposta, array $filtros): array
+    {
+        $linhas = is_array($resposta['resultado'] ?? null) ? array_values($resposta['resultado']) : [];
+        $filtros = \App\Services\AgendaService::sanearFiltros($filtros);
+        $apresentacao = \App\Services\Agente\FraseDaAgenda::montar($linhas, $filtros);
+        $colunas = is_array($resposta['colunas'] ?? null) ? $resposta['colunas'] : [];
+        foreach (['gravacao' => 'gravado_em', 'alteracao' => 'alterado_em'] as $tipo => $coluna) {
+            if (($filtros['tipo_data'] ?? null) === $tipo || ($filtros['ordenar'] ?? null) === $tipo) {
+                $depois = array_search('horario', $colunas, true);
+                array_splice($colunas, $depois === false ? 1 : $depois + 1, 0, [$coluna]);
+            }
+        }
+
+        return [...$resposta, 'colunas' => $colunas, 'frase' => $apresentacao['frase'], 'destacar' => $apresentacao['destacar']];
     }
 
     /** A tool de atualizar existe e o papel atual chega no mínimo dela. */

@@ -120,7 +120,8 @@ export default function Agente({ historico = [] }) {
                         || (dados.colunas != null && (!Array.isArray(dados.colunas) || dados.colunas.some((coluna) => typeof coluna !== 'string')))) {
                         throw new Error('O servidor retornou uma consulta inválida. Tente novamente.');
                     }
-                    setMensagens((atuais) => [...atuais, { consulta: dados }]);
+                    // A resposta em frase (montada pelo servidor) vem antes da tabela.
+                    setMensagens((atuais) => [...atuais, ...(typeof dados.frase === 'string' && dados.frase ? [{ texto: dados.frase, classe: 'msg--agente' }] : []), { consulta: dados }]);
                     break;
                 case 'confirmacao_pendente':
                     if (typeof dados.proposta !== 'string' || !dados.proposta) throw new Error('Proposta inválida. Peça novamente.');
