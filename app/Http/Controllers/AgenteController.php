@@ -677,7 +677,7 @@ class AgenteController extends Controller
      */
     public function formulario(Request $request)
     {
-        $validador = Validator::make($request->all(), ['tool' => 'required|string|max:64', 'id' => 'nullable|integer|min:1']);
+        $validador = Validator::make($request->all(), ['tool' => 'required|string|max:64', 'id' => 'nullable|integer|min:1', 'tutor_id' => 'nullable|integer|min:1']);
 
         if ($validador->fails()) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
@@ -687,7 +687,7 @@ class AgenteController extends Controller
         $dados = $validador->validated();
 
         try {
-            $resposta = $this->aiAgentService->abrirFormulario($dados['tool'], isset($dados['id']) ? (int) $dados['id'] : null);
+            $resposta = $this->aiAgentService->abrirFormulario($dados['tool'], isset($dados['id']) ? (int) $dados['id'] : null, isset($dados['tutor_id']) ? (int) $dados['tutor_id'] : null);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {

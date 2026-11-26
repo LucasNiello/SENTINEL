@@ -241,13 +241,19 @@ class FormularioTool
         $comLixeira = Schema::hasColumn($tabela, 'deleted_at');
         $escopo = function () use ($tabela, $tenantId, $comLixeira, $restricoes) {
             $consulta = DB::table($tabela)->where('tenant_id', $tenantId)->when($comLixeira, fn ($query) => $query->whereNull('deleted_at'));
+            // Pet arquivado no cadastro some dos seletores (agendar, vender); o histórico segue mostrando o nome.
+            if ($tabela === 'pets' && Schema::hasColumn('pets', 'inativado_em')) {
+                $consulta->whereNull('inativado_em');
+            }
             foreach (array_chunk($restricoes, 2) as $par) {
                 $consulta->where($par[0], $par[1] ?? null);
             }
 
             return $consulta;
         };
-        $colunas = array_filter([$chave, $coluna]);
+        // Pet: o rótulo traz o tutor ("Thor · Maria Souza · #12"), para achar o animal certo entre nomes iguais.
+        $comTutor = $tabela === 'pets' && Schema::hasColumn('pets', 'tutor_id');
+        $colunas = array_filter([$chave, $coluna, $comTutor ? 'tutor_id' : null]);
 
         $linhas = $escopo()->orderByDesc($chave)->limit(self::LIMITE_REFERENCIAS)->get($colunas);
 
@@ -255,11 +261,17 @@ class FormularioTool
             $linhas = $escopo()->where($chave, $atual)->get($colunas)->concat($linhas);
         }
 
+        $tutores = $comTutor
+            ? DB::table('tutores')->where('tenant_id', $tenantId)->whereIn('id', $linhas->pluck('tutor_id')->filter()->unique()->all())->pluck('nome', 'id')
+            : collect();
+
         return $linhas
             ->map(fn (object $linha) => [
                 'valor' => $linha->{$chave},
                 // Nome primeiro ("Retorno · #2"): digitar no select acha pelo começo do rótulo, e o número ficava na frente.
-                'rotulo' => $coluna ? $linha->{$coluna}.' · #'.$linha->{$chave} : '#'.$linha->{$chave},
+                'rotulo' => $coluna
+                    ? $linha->{$coluna}.($comTutor && ($tutores[$linha->tutor_id ?? 0] ?? null) ? ' · '.$tutores[$linha->tutor_id] : '').' · #'.$linha->{$chave}
+                    : '#'.$linha->{$chave},
             ])
             ->all();
     }

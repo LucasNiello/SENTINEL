@@ -27,7 +27,7 @@ class CalendarioReactTest extends TestCase
         $proposta = $resposta->json('proposta');
         $this->getJson('/agenda/disponibilidade?servico='.$servico->id.'&mes=2026-11')
             ->assertOk()->assertJsonPath('dias.2026-11-11', true);
-        $dia = $this->getJson('/agenda/disponibilidade?servico='.$servico->id.'&dia=2026-11-11')->assertOk();
+        $dia = $this->getJson('/agenda/disponibilidade?servico='.$servico->id.'&dia=2026-11-11')->assertOk()->assertJsonPath('exige_profissional', false);
         $horario = collect($dia->json('horarios'))->first(fn ($h) => $h['vagas'] > 0);
         $token = $this->postJson('/agente/revisar', ['proposta' => $proposta, 'valores' => ['profissional_id' => (string) $vet->id, 'inicio' => $horario['inicio']]])
             ->assertOk()->assertJsonPath('tipo', 'revisada')->json('token');

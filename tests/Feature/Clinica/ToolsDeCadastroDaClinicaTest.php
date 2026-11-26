@@ -71,7 +71,7 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
             'pet' => [
                 'model' => Pet::class, 'tipo' => 'Pet', 'campoNome' => 'nome',
                 'consultar' => 'consultar_pets', 'criar' => 'criar_pet', 'atualizar' => 'atualizar_pet',
-                'colunas' => ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas'],
+                'colunas' => ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas', 'observacoes', 'inativado_em'],
                 'criarDados' => fn () => ['tutor_id' => $tutor()->id, 'nome' => 'Thor', 'especie' => 'cao', 'raca' => 'Labrador', 'sexo' => 'macho',
                     'data_nascimento' => '2019-03-10', 'peso_gramas' => 32000, 'microchip' => '985112003456781', 'alertas' => 'Puxa forte na guia'],
                 'semNada' => fn () => ['tutor_id' => $tutor()->id, 'nome' => 'Só o Básico', 'especie' => 'gato'],
@@ -85,7 +85,7 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
                     [fn () => ['tutor_id' => Tutor::create(['nome' => 'Dono de fora', 'tenant_id' => 4])->id, 'nome' => 'Rex', 'especie' => 'cao'], 'Não encontrei o tutor informado.'],
                     [fn () => ['tutor_id' => $tutor()->id, 'nome' => 'Rex', 'especie' => 'cao', 'data_nascimento' => '10/03/2019'], 'data de nascimento'],
                 ],
-                'propriedadesCriar' => ['tutor_id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'microchip', 'alertas'], 'obrigatorios' => ['tutor_id', 'nome', 'especie'],
+                'propriedadesCriar' => ['tutor_id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'microchip', 'observacoes', 'alertas'], 'obrigatorios' => ['tutor_id', 'nome', 'especie'],
                 'papelSemEscrita' => null,
             ],
             'catalogo' => [

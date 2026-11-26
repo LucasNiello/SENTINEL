@@ -15,6 +15,7 @@ class OperacaoSolicitada
         'cadastre' => 'criar', 'cadastrar' => 'criar', 'crie' => 'criar', 'criar' => 'criar',
         'registre' => 'criar', 'registrar' => 'criar', 'adicione' => 'criar', 'adicionar' => 'criar',
         'altere' => 'atualizar', 'alterar' => 'atualizar', 'atualize' => 'atualizar', 'atualizar' => 'atualizar',
+        'arquive' => 'arquivar', 'arquivar' => 'arquivar', 'reative' => 'reativar', 'reativar' => 'reativar',
         'edite' => 'atualizar', 'editar' => 'atualizar', 'restaure' => 'restaurar', 'restaurar' => 'restaurar',
     ];
 

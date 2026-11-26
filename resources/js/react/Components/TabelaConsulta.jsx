@@ -104,7 +104,11 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
         if (coluna === 'observacao' && (feitos.has(linha.id) || motivos[String(linha.id)])) return motivos[String(linha.id)] ?? '';
         return textoCelula(linha[coluna]);
     };
+    const destacar = Array.isArray(consulta.destacar) ? consulta.destacar : [];
+    // A linha que o pedido apontou entra à vista (e pisca uma vez, pelo CSS).
+    useEffect(() => { if (destacar.length) tabela.current?.querySelector('.linha-destaque')?.scrollIntoView({ block: 'nearest' }); }, []);
     const classeLinha = (linha) => [
+        destacar.includes(linha.id) ? 'linha-destaque' : '',
         linha.destaque === 'aviso' || motivos[String(linha.id)] ? 'linha--aviso' : '',
         selecao && feitos.has(linha.id) ? 'linha-cancelada' : '',
         selecao && linha.bloqueado === true ? 'linha-bloqueada' : '',

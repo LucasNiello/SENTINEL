@@ -69,6 +69,7 @@ class HandleInertiaRequests extends Middleware
         if ($naClinica) {
             $podeTool = fn (string $tool) => rescue(fn () => app(AiAgentService::class)->podeExecutar($tool), false, false);
             $daClinica = [];
+            if ($podeTool('consultar_tutores') && $podeTool('consultar_pets')) array_splice($itens, 1, 0, [['clientes', 'Clientes', 'M16 11a3 3 0 1 0-6 0 3 3 0 0 0 6 0M5 20c0-3.3 3.1-5 7-5s7 1.7 7 5']]);
             if ($podeTool('consultar_agenda') && $papel !== 'vendedor') $daClinica[] = ['agenda', 'Agenda', 'M5 5h14v15H5zM5 10h14M9 3v4m6-4v4'];
             if ($podeTool('consultar_cobrancas')) $daClinica[] = ['cobrancas', 'Cobranças', 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6m-6 4h6'];
             if ($podeTool('consultar_vendas')) $daClinica[] = ['vendas', 'Vendas', 'M4 6h2l2 10h10l2-7H8m1 11h.01M17 20h.01'];

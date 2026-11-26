@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import Campo from './ui/Campo';
+import Combobox from './ui/Combobox';
 
 export const valoresIniciais = (campos) => Object.fromEntries(campos.map((c) => [c.nome, c.sensivel ? '' : String(c.valor ?? '')]));
 
@@ -34,7 +35,8 @@ export default function CamposProposta({ campos, valores, alterar, bloqueado }) 
                     {campo.tipo === 'numero' && <p className="campo-info">{campo.inteiro ? 'Informe um número inteiro.' : 'Use ponto nos centavos (ex.: 4567.89).'}{campo.min != null && ` Mínimo: ${campo.min}.`}{campo.max != null && ` Máximo: ${campo.max}.`}</p>}
                 </>}>
                 {['opcoes', 'referencia'].includes(campo.tipo)
-                    ? <select {...props}><option value="">— escolha —</option>{(campo.opcoes ?? []).map((opcao) => <option key={opcao.valor} value={String(opcao.valor)}>{opcao.rotulo}</option>)}</select>
+                    ? <Combobox id={id} name={campo.nome} value={valores[campo.nome] ?? ''} opcoes={(campo.opcoes ?? []).map((o) => ({ valor: String(o.valor), rotulo: o.rotulo }))}
+                        aoMudar={(valor) => alterar(campo.nome, valor)} required={props.required} disabled={proibido} invalido={!!campo.erro} descrito={props['aria-describedby']} />
                     : <input {...props} type={{ email: 'email', data: 'date' }[campo.tipo] || 'text'}
                         inputMode={campo.tipo === 'numero' ? campo.inteiro ? 'numeric' : 'decimal' : undefined}
                         minLength={campo.tipo === 'numero' ? undefined : campo.min}
