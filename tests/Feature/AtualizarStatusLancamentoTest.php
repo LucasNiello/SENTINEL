@@ -84,20 +84,19 @@ class AtualizarStatusLancamentoTest extends TestCase
         $this->assertSame('pendente', $lancamento->fresh()->status);
     }
 
-    public function test_confirmar_fora_do_prazo_nao_altera_nada_e_sem_espera_altera(): void
+    public function test_confirmar_sem_espera_ou_muito_depois_altera(): void
     {
-        // Decisão B (13/11): não há mais espera mínima; o limite é o prazo da proposta (5 min).
+        // Decisão B (13/11): não há espera mínima. 25/11 (Lucas): nem prazo máximo.
         $lancamento = $this->lancamento('pendente');
-        $token = $this->proporAtualizacao($lancamento->id, 'conciliado');
-        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-
-        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
-        $this->assertSame('pendente', $lancamento->fresh()->status);
-
-        // Um clique, no mesmo instante do Revisar: altera.
         $token = $this->proporAtualizacao($lancamento->id, 'conciliado');
         $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
         $this->assertSame('conciliado', $lancamento->fresh()->status);
+
+        $outro = $this->lancamento('pendente');
+        $token = $this->proporAtualizacao($outro->id, 'conciliado');
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
+        $this->assertSame('conciliado', $outro->fresh()->status);
     }
 
     // ---- Recusas de regra de negócio: frase amigável, sem termo técnico ----

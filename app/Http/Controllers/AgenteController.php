@@ -7,6 +7,7 @@ use App\Services\AuditoriaService;
 use App\Services\ConfirmacoesPendentes;
 use App\Services\ConsultasExportaveis;
 use App\Services\ConversaAgente;
+use App\Support\Front;
 use App\Services\PlanilhaCsv;
 use App\Services\ReautenticacaoAdmin;
 use Illuminate\Http\JsonResponse;
@@ -29,6 +30,17 @@ class AgenteController extends Controller
         private ReautenticacaoAdmin $reautenticacao,
         private ConsultasExportaveis $exportaveis,
     ) {
+    }
+
+    public function index(Request $request)
+    {
+        if (app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica()) {
+            return redirect('/supervisao');
+        }
+
+        return Front::tela('agente', 'Agente', Front::react()
+            ? ['historico' => $this->conversa->ler($request->session())]
+            : []);
     }
 
     /**
@@ -162,8 +174,8 @@ class AgenteController extends Controller
      * Bloco 2b: o humano revisa o formulário e o servidor valida sem gravar (RBAC,
      * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
      * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
-     * revisados ficam na sessão e sai o token de confirmação (uso único, até o fim
-     * dos 5 min da proposta), e o /confirmar com {token} só usa estes valores (no passo único, o Confirmar revalida os do card). "segurar" diz à
+     * revisados ficam na sessão e sai o token de confirmação (uso único, sem
+     * prazo desde 25/11), e o /confirmar com {token} só usa estes valores (no passo único, o Confirmar revalida os do card). "segurar" diz à
      * tela se o Confirmar pede o gesto de 2 s (ações destrutivas; decisão B, 13/11).
      *
      * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.
@@ -665,7 +677,7 @@ class AgenteController extends Controller
      */
     public function formulario(Request $request)
     {
-        $validador = Validator::make($request->all(), ['tool' => 'required|string|max:64', 'id' => 'nullable|integer|min:1']);
+        $validador = Validator::make($request->all(), ['tool' => 'required|string|max:64', 'id' => 'nullable|integer|min:1', 'tutor_id' => 'nullable|integer|min:1']);
 
         if ($validador->fails()) {
             return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR',
@@ -675,7 +687,7 @@ class AgenteController extends Controller
         $dados = $validador->validated();
 
         try {
-            $resposta = $this->aiAgentService->abrirFormulario($dados['tool'], isset($dados['id']) ? (int) $dados['id'] : null);
+            $resposta = $this->aiAgentService->abrirFormulario($dados['tool'], isset($dados['id']) ? (int) $dados['id'] : null, isset($dados['tutor_id']) ? (int) $dados['tutor_id'] : null);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable $e) {

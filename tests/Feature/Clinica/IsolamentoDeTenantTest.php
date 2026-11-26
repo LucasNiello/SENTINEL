@@ -48,14 +48,15 @@ class IsolamentoDeTenantTest extends TestCase
     {
         $nomes = [
             'TutorService::criar', 'TutorService::atualizar', 'TutorService::localizar', 'TutorService::buscarPorFiltro', 'TutorService::excluir',
-            'TutorService::restaurarDaLixeira', 'TutorService::excluirDefinitivo',
+            'TutorService::restaurarDaLixeira', 'TutorService::excluirDefinitivo', 'TutorService::criarComPets',
             'PetService::criar', 'PetService::atualizar', 'PetService::localizar', 'PetService::buscarPorFiltro', 'PetService::excluir',
             'PetService::restaurarDaLixeira', 'PetService::excluirDefinitivo',
+            'PetService::motivoParaNaoArquivar', 'PetService::arquivarCadastro', 'PetService::reativarCadastro', 'PetService::localizarPorCadastro',
             'CatalogoService::criar', 'CatalogoService::atualizar', 'CatalogoService::localizar', 'CatalogoService::buscarPorFiltro', 'CatalogoService::entradaDeEstoque',
             'CatalogoService::baixarEstoque', 'CatalogoService::devolverEstoque', 'CatalogoService::avisosDeSaldoNegativo', 'CatalogoService::excluir',
             'CatalogoService::restaurarDaLixeira', 'CatalogoService::excluirDefinitivo',
             'AgendaService::agendar', 'AgendaService::motivoParaNaoAgendar', 'AgendaService::alterarStatus',
-            'AgendaService::motivoParaNaoAlterarStatus', 'AgendaService::buscarPorFiltro', 'AgendaService::localizarEmAberto',
+            'AgendaService::motivoParaNaoAlterarStatus', 'AgendaService::buscarPorFiltro', 'AgendaService::buscarAvancado', 'AgendaService::sanearFiltros', 'AgendaService::sentidoEfetivo', 'AgendaService::localizarEmAberto',
             'AgendaService::remarcar', 'AgendaService::motivoParaNaoRemarcar', 'AgendaService::localizarParaRemarcar',
             'AgendaService::trocarServico', 'AgendaService::motivoParaNaoTrocarServico', 'AgendaService::disponibilidadeDoDia',
             'AgendaService::disponibilidadeDoMes', 'AgendaService::exigeCrmv', 'AgendaService::exigeCrmvNoStatus',
@@ -69,7 +70,7 @@ class IsolamentoDeTenantTest extends TestCase
             'VendaService::registrar', 'VendaService::registrarPagamento', 'VendaService::cancelar', 'VendaService::previa',
             'VendaService::estornar', 'VendaService::planoDoEstorno', 'VendaService::linhasParaEstornar', 'VendaService::buscarPorFiltro', 'VendaService::localizar',
             'MensagemService::buscarPorFiltro', 'MensagemService::localizar', 'MensagemService::marcarTratada',
-            'SupervisaoService::marcarSupervisor', 'SupervisaoService::gerarPin', 'SupervisaoService::revogarPin',
+            'SupervisaoService::marcarSupervisor', 'SupervisaoService::gerarPin', 'SupervisaoService::revogarPin', 'SupervisaoService::definirAtivo',
         ];
 
         return array_combine($nomes, array_map(fn (string $n) => [$n], $nomes));
@@ -136,6 +137,10 @@ class IsolamentoDeTenantTest extends TestCase
                 $this->inexistente(fn () => $tutores->excluir($tutor->id, self::B), Tutor::class, 'deleted_at');
             },
             'TutorService::restaurarDaLixeira' => fn () => $this->inexistente(fn () => $tutores->restaurarDaLixeira($this->naLixeira($this->tutor())->id, self::B, true)),
+            'TutorService::criarComPets' => function () use ($tutores) {
+                $this->assertSame(self::B, $tutores->criarComPets(['nome' => 'Maria'], [['nome' => 'Rex', 'especie' => 'cao']], self::B)['pets'][0]->tenant_id);
+                $this->assertSame(0, Pet::where('tenant_id', self::T)->count());
+            },
             'TutorService::excluirDefinitivo' => fn () => $this->inexistente(fn () => $tutores->excluirDefinitivo($this->arquivado($this->tutor())->id, self::B, $this->usuarioClinica('dono', self::B)->id)),
 
             'PetService::criar' => fn () => $this->inexistente(fn () => $pets->criar(['tutor_id' => $this->tutor()->id, 'nome' => 'Rex', 'especie' => 'cao'], self::B), Pet::class),
@@ -149,6 +154,17 @@ class IsolamentoDeTenantTest extends TestCase
                 $pet = $this->pet();
                 $this->inexistente(fn () => $pets->excluir($pet->id, self::B), Pet::class, 'deleted_at');
             },
+            'PetService::motivoParaNaoArquivar' => fn () => $this->assertNotNull($pets->motivoParaNaoArquivar($this->pet()->id, self::B)),
+            'PetService::arquivarCadastro' => function () use ($pets) {
+                $pet = $this->pet();
+                $this->inexistente(fn () => $pets->arquivarCadastro($pet->id, 'x', self::B), Pet::class, 'inativado_em');
+            },
+            'PetService::reativarCadastro' => function () use ($pets) {
+                $pet = $this->pet();
+                $pet->forceFill(['inativado_em' => now()])->save();
+                $this->inexistente(fn () => $pets->reativarCadastro($pet->id, self::B), Pet::class, 'inativado_em');
+            },
+            'PetService::localizarPorCadastro' => fn () => $this->vazio($pets->localizarPorCadastro($this->pet()->id, null, self::B, false)),
             'PetService::restaurarDaLixeira' => fn () => $this->inexistente(fn () => $pets->restaurarDaLixeira($this->naLixeira($this->pet())->id, self::B, true)),
             'PetService::excluirDefinitivo' => fn () => $this->inexistente(fn () => $pets->excluirDefinitivo($this->arquivado($this->pet())->id, self::B, $this->usuarioClinica('dono', self::B)->id)),
 
@@ -204,6 +220,12 @@ class IsolamentoDeTenantTest extends TestCase
             'AgendaService::buscarPorFiltro' => fn () => $this->soNoProprioTenant(
                 fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
                 fn (int $t) => $agenda->buscarPorFiltro(null, null, null, null, null, null, $t)),
+            // Função pura (sem tenant nem banco): só limpa o tipo dos filtros; tenant_id nunca sobrevive a ela.
+            'AgendaService::sanearFiltros' => fn () => $this->assertSame(['id' => 5], AgendaService::sanearFiltros(['id' => '5', 'tenant_id' => 9, 'limite' => [1], 'ordenar' => ['x']])),
+            'AgendaService::sentidoEfetivo' => fn () => $this->assertSame('desc', AgendaService::sentidoEfetivo(['status' => 'realizado'])),
+            'AgendaService::buscarAvancado' => fn () => $this->soNoProprioTenant(
+                fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
+                fn (int $t) => $agenda->buscarAvancado(['ordenar' => 'gravacao', 'sentido' => 'desc'], $t)),
             // 25/11: a lista de cancelar em lote só traz os agendamentos em aberto do PRÓPRIO tenant (e do setor do papel).
             'AgendaService::candidatosParaCancelarEmLote' => fn () => $this->soNoProprioTenant(
                 fn () => $this->agendamentoDireto($this->pet(), $this->usuarioClinica('veterinario'), $this->item(), ['inicio' => now()->addHour(), 'fim' => now()->addHours(2), 'status' => 'agendado']),
@@ -443,6 +465,13 @@ class IsolamentoDeTenantTest extends TestCase
                 $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
                 $this->inexistente(fn () => $supervisao->gerarPin($usuario->id, $this->usuarioClinica('admin', self::B)->id, self::B));
                 $this->assertNull($usuario->fresh()->pin_autorizacao);
+            },
+            // 26/11: o Administrador de OUTRA clínica não liga nem desliga a conta de um usuário de T.
+            'SupervisaoService::definirAtivo' => function () use ($supervisao) {
+                config(['sentinel.tenants_clinica' => [self::T, self::B]]);
+                $usuario = $this->usuarioClinica('recepcao');
+                $this->inexistente(fn () => $supervisao->definirAtivo($usuario->id, false, $this->usuarioClinica('admin', self::B)->id, self::B));
+                $this->assertTrue($usuario->fresh()->ativo);
             },
             'SupervisaoService::revogarPin' => function () use ($supervisao) {
                 config(['sentinel.tenants_clinica' => [self::T, self::B]]);

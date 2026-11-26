@@ -25,6 +25,7 @@ class PetRequest extends FormRequest
             'peso_gramas' => 'nullable|integer|min:0|max:500000',
             'microchip' => 'nullable|string|max:32',
             'alertas' => 'nullable|string|max:500',
+            'observacoes' => 'nullable|string|max:500',
             'tenant_id' => 'required|integer',
         ];
     }

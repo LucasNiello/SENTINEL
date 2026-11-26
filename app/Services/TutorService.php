@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Exceptions\RegraDeNegocioException;
 use App\Models\Tutor;
+use Closure;
+use Illuminate\Support\Facades\DB;
 use App\Services\Concerns\ExclusaoSegura;
 use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Arr;
@@ -26,6 +28,50 @@ class TutorService
         $this->exigirNome($dados['nome'] ?? null);
 
         return Tutor::create([...Arr::only($dados, self::CAMPOS), 'tenant_id' => $tenantId]);
+    }
+
+    /**
+     * Cadastro unificado (27/11): o tutor e os pets dele numa transação só, tudo ou nada. Erro de um pet recusa o conjunto e
+     * aponta qual ("Pet 2 (Rex): ..."). $aoGravar($registro, $tipo) roda dentro da transação, uma vez por registro (auditoria).
+     *
+     * @param  array<int, array<string, mixed>>  $pets
+     * @return array{tutor: Tutor, pets: array<int, Pet>}
+     */
+    public function criarComPets(array $dados, array $pets, int $tenantId, ?Closure $aoGravar = null): array
+    {
+        $this->exigirNome($dados['nome'] ?? null);
+        $pets = array_values($pets);
+        $chips = [];
+        foreach ($pets as $i => $pet) {
+            $chip = is_array($pet) ? trim((string) ($pet['microchip'] ?? '')) : '';
+            if ($chip !== '') {
+                if (isset($chips[$chip])) {
+                    throw new RegraDeNegocioException('Pet '.($i + 1).': o microchip repete o do pet '.($chips[$chip] + 1).'.');
+                }
+                $chips[$chip] = $i;
+            }
+        }
+
+        return DB::transaction(function () use ($dados, $pets, $tenantId, $aoGravar) {
+            $tutor = $this->criar($dados, $tenantId);
+            $aoGravar?->__invoke($tutor, 'tutor');
+            $gravados = [];
+            foreach ($pets as $i => $pet) {
+                $pet = is_array($pet) ? array_map(fn ($v) => is_string($v) && trim($v) === '' ? null : $v, $pet) : [];
+                if (isset($pet['peso_gramas']) && is_string($pet['peso_gramas']) && preg_match('/^\d+$/',trim($pet['peso_gramas'])) === 1) {
+                    $pet['peso_gramas'] = (int) trim($pet['peso_gramas']);
+                }
+                try {
+                    $novo = app(PetService::class)->criar([...$pet, 'tutor_id' => $tutor->id], $tenantId);
+                } catch (RegraDeNegocioException $e) {
+                    throw new RegraDeNegocioException('Pet '.($i + 1).(isset($pet['nome']) ? " ({$pet['nome']})" : '').': '.$e->getMessage());
+                }
+                $aoGravar?->__invoke($novo, 'pet');
+                $gravados[] = $novo;
+            }
+
+            return ['tutor' => $tutor, 'pets' => $gravados];
+        });
     }
 
     /** Registro de outro tenant ou na lixeira: ModelNotFoundException (inexistente). */

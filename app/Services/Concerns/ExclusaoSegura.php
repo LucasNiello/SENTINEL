@@ -105,7 +105,7 @@ trait ExclusaoSegura
      */
     protected function excluirDeVez(Model $registro, ?int $autorizadoPor): array
     {
-        $adminDoTenant = $autorizadoPor !== null && User::query()->whereKey($autorizadoPor)
+        $adminDoTenant = $autorizadoPor !== null && User::query()->whereKey($autorizadoPor)->where('ativo', true)
             ->whereIn('papel', \App\Services\ContextoUsuario::papeisAdministrativosDoTenant((int) $registro->getAttribute('tenant_id')))->where('tenant_id', $registro->getAttribute('tenant_id'))->exists();
 
         if (! $adminDoTenant) {

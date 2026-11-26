@@ -191,6 +191,9 @@ trait EstornoPorItens
         }
 
         $autorizador = $this->doTenant(User::class, $autorizadorId, $tenantId, 'quem autorizou o estorno');
+        if ($autorizador->ativo === false) {
+            throw new RegraDeNegocioException('Quem autorizou o estorno está com a conta desativada.');
+        }
         if ($autorizador->id === $solicitante->id && ! $dono) {
             throw new RegraDeNegocioException('Quem pede o estorno não pode autorizá-lo: chame o dono ou outro supervisor do setor.');
         }

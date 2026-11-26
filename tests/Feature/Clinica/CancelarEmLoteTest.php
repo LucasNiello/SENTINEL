@@ -273,16 +273,56 @@ class CancelarEmLoteTest extends TestCase
             ->assertJsonPath('resultado.0.acao.rotulo', 'Escolher');
     }
 
-    public function test_a_lista_com_checkbox_vale_5_minutos_mas_a_tabela_segue_valendo_para_referencias(): void
+    public function test_a_lista_com_checkbox_nao_vence_e_continua_valendo_um_envio_so(): void
+    {
+        // 26/11 (Lucas, opção b): como a proposta, a lista de marcar não vence. Quem volta horas depois ainda cancela o que marcou;
+        // o freio é o segurar 2 s na tela, a versão de cada linha e o envio único.
+        $a = $this->marcar('2026-11-11');
+        $b = $this->marcar('2026-11-12');
+        $this->listar();
+        $this->travel(2)->hours();
+
+        $this->cancelar([$a->id])->assertOk();
+        $this->assertSame(['cancelado', 'agendado'], [$a->fresh()->status, $b->fresh()->status]);
+        $this->cancelar([$b->id])->assertStatus(422)->assertJsonPath('codigo', 'AI_BATCH_LIST_EXPIRED');
+        $this->assertSame('agendado', $b->fresh()->status, 'a lista vale para um envio só');
+    }
+
+    public function test_lista_do_lote_parada_horas_nao_vale_para_referencia_por_posicao(): void
+    {
+        // A lista sem prazo vale só para o envio do lote: "o segundo" volta a ser resolvido contra tabela de até 30 min.
+        $a = $this->marcar('2026-11-11');
+        $this->marcar('2026-11-12');
+        $this->listar();
+        $this->travel(2)->hours();
+
+        $this->comando('remarcar_agendamento', ['posicao' => 2])->assertStatus(422)
+            ->assertJsonPath('mensagem', fn ($m) => str_contains($m, 'Não tenho uma tabela recente'));
+
+        // E a mensagem no chat não apaga a lista: ela continua valendo para o envio do lote (decisão de 26/11).
+        $this->cancelar([$a->id])->assertOk();
+    }
+
+    public function test_lista_sem_prazo_de_outro_usuario_ou_tenant_nao_vale(): void
     {
         $a = $this->marcar('2026-11-11');
         $this->listar();
-        $this->travel(6)->minutes();
+        $this->travel(2)->hours();
+        $this->logarComo('recepcao', self::OUTRO_TENANT);
 
         $this->cancelar([$a->id])->assertStatus(422)->assertJsonPath('codigo', 'AI_BATCH_LIST_EXPIRED');
         $this->assertSame('agendado', $a->fresh()->status);
-        // A tabela de 1 linha ainda é a "dele/esse" (30 min): não é a lista de marcar, é só a referência.
-        $this->comando('remarcar_agendamento', [])->assertOk()->assertJsonPath('formulario.ficha.agendamento_id', $a->id);
+    }
+
+    public function test_lista_parada_horas_ainda_recusa_o_que_mudou_depois_de_aparecer(): void
+    {
+        $visto = $this->marcar('2026-11-11');
+        $this->listar();
+        $this->travel(3)->hours();
+        Agendamento::query()->whereKey($visto->id)->update(['updated_at' => now()]);
+
+        $this->cancelar([$visto->id])->assertStatus(422)->assertJsonPath('codigo', 'AI_BATCH_REFUSED');
+        $this->assertSame('agendado', $visto->fresh()->status);
     }
 
     public function test_papel_rebaixado_com_a_lista_aberta_nao_cancela_agendamento_de_outro_setor(): void

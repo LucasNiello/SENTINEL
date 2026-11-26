@@ -163,16 +163,18 @@ class ConfirmarEmUmPassoTest extends TestCase
         $this->assertSame(1, AuditLog::query()->where('tool', 'criar_lancamento')->where('resultado', 'sucesso')->count());
     }
 
-    public function test_proposta_expirada_nao_grava_e_o_expirado_e_auditado_uma_vez_so(): void
+    public function test_proposta_parada_muito_tempo_ainda_grava_uma_vez_so(): void
     {
+        // 25/11 (Lucas): a proposta não vence. Confirmar em um passo, 5 min depois, grava; o segundo envio não grava de novo.
         $this->logarComo('admin', 1);
         $proposta = $this->proporLancamento();
         $this->travel(301)->seconds();
 
-        $this->postJson('/agente/confirmar', ['proposta' => $proposta])->assertStatus(422)->assertJsonPath('codigo', 'AI_PROPOSAL_EXPIRED');
+        $this->postJson('/agente/confirmar', ['proposta' => $proposta])->assertOk();
+        $this->postJson('/agente/confirmar', ['proposta' => $proposta])->assertStatus(422);
 
-        $this->assertSame(0, Lancamento::count());
-        $this->assertSame(1, AuditLog::query()->where('tool', 'criar_lancamento')->where('resultado', 'expirado')->count(), 'a varredura audita uma vez');
+        $this->assertSame(1, Lancamento::count());
+        $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
         $this->assertSame([], (array) session('confirmacoes', []));
     }
 

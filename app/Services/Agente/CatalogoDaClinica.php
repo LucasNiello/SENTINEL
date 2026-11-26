@@ -13,6 +13,7 @@ use App\Http\Requests\PetRequest;
 use App\Http\Requests\ReceberCobrancaRequest;
 use App\Http\Requests\RemarcarRequest;
 use App\Http\Requests\RegistrarVendaRequest;
+use App\Http\Requests\ArquivarPetRequest;
 use App\Http\Requests\RegistroIdRequest;
 use App\Http\Requests\TutorRequest;
 use App\Models\Agendamento;
@@ -46,6 +47,9 @@ trait CatalogoDaClinica
     private const PAPEIS_EQUIPE = ['atendente', 'vendedor', 'recepcao', 'veterinario', 'dono'];
 
     private const PAPEIS_DO_DONO = ['dono'];
+
+    /** Arquivar/reativar o cadastro do pet (27/11, sugestão a confirmar com o Lucas): recepção, veterinário e dono. */
+    private const PAPEIS_DO_ARQUIVO_DE_PET = ['recepcao', 'veterinario', 'dono'];
 
     /** Quem vê e mexe na agenda (tabela da FASE oito, 15/11): o vendedor não. Mesma lista no chat e na tela /agenda. */
     private const PAPEIS_DA_AGENDA = ['atendente', 'recepcao', 'veterinario', 'dono'];
@@ -110,7 +114,7 @@ trait CatalogoDaClinica
                 ],
                 buscar: fn (array $a) => $pets->buscarPorFiltro($a['nome'] ?? null, isset($a['tutor_id']) ? (int) $a['tutor_id'] : null, $a['tenant_id']),
                 gravar: fn (array $dados, int $tenantId) => $pets->criar($dados, $tenantId),
-                colunas: ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas'],
+                colunas: ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas', 'observacoes', 'inativado_em'],
                 colunaRotulo: 'nome',
                 papeisLeitura: self::PAPEIS_EQUIPE,
                 papeisEscrita: self::PAPEIS_EQUIPE,
@@ -119,6 +123,96 @@ trait CatalogoDaClinica
                 tituloAtualizar: 'Alterar pet',
                 sucessoAtualizar: 'Pet atualizado',
                 resumirAtualizar: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
+            ),
+            // 27/11: cadastro unificado do cliente: o tutor e os pets dele de uma vez, tudo ou nada. Auditoria: uma linha por registro,
+            // todas com o mesmo lote_id.
+            $this->definirAcao(
+                nome: 'cadastrar_cliente_com_pets',
+                descricao: 'Cadastra um cliente (tutor) e, de uma vez, os pets dele (de 0 a 10). Use quando o pedido traz o tutor e os animais juntos ("cadastre a Maria com o cachorro Thor e a gata Mel"); para só um tutor ou só um pet de tutor que já existe, use criar_tutor ou criar_pet. Tudo é gravado junto ou nada é gravado. Nunca invente dados: o que faltar fica em branco e o card marca o campo.',
+                acao: 'cadastrar',
+                entidade: 'Tutor',
+                papeis: self::PAPEIS_EQUIPE,
+                propriedades: [
+                    ...$this->propriedadesDoTutor(),
+                    'pets' => ['type' => 'array', 'description' => 'Os pets do cliente.', 'items' => ['type' => 'object', 'properties' => [
+                        'nome' => ['type' => 'string'],
+                        'especie' => ['type' => 'string', 'enum' => Pet::ESPECIES],
+                        'raca' => ['type' => 'string'],
+                        'sexo' => ['type' => 'string', 'enum' => Pet::SEXOS],
+                        'data_nascimento' => ['type' => 'string', 'format' => 'date'],
+                        'peso_gramas' => ['type' => 'integer', 'description' => 'Peso em GRAMAS inteiros (6200 = 6,2 kg).'],
+                        'microchip' => ['type' => 'string'],
+                        'alertas' => ['type' => 'string'],
+                        'observacoes' => ['type' => 'string'],
+                    ]]],
+                ],
+                obrigatorios: ['nome'],
+                formRequest: \App\Http\Requests\ClienteComPetsRequest::class,
+                executar: function (array $d, int $tenantId) use ($tutores) {
+                    $loteId = (string) \Illuminate\Support\Str::uuid();
+                    // O lote vale também para a linha geral da tool (o escopo é o do executor): N+1 linhas, todas com o mesmo lote_id.
+                    app(\App\Services\DetalhesAuditoria::class)->anotar('lote_id', $loteId);
+                    $gravado = $tutores->criarComPets(
+                        \Illuminate\Support\Arr::except($d, ['pets', 'tenant_id']), $d['pets'] ?? [], $tenantId,
+                        fn ($registro, string $tipo) => app(\App\Services\AuditoriaService::class)->registrar(
+                            tool: $tipo === 'tutor' ? 'criar_tutor' : 'criar_pet', acao: 'criar', entidadeTipo: $tipo === 'tutor' ? 'Tutor' : 'Pet',
+                            entidadeId: $registro->id, parametros: ['id' => $registro->id, 'nome' => $registro->nome], resultado: 'sucesso',
+                            mensagem: 'Cadastro unificado do cliente (lote '.$loteId.').', papel: $this->contexto->papel(), permitido: true));
+
+                    return $gravado['tutor'];
+                },
+                mensagemErro: 'Não consegui cadastrar o cliente. Nada foi gravado.',
+                titulo: 'Cadastrar cliente e pets',
+                sucesso: 'Cliente cadastrado',
+            ),
+            // 27/11: arquivar o cadastro do pet (sem apagar; sai dos seletores, o histórico fica). Segurar 2 s (risco exclusao).
+            $this->definirAcao(
+                nome: 'arquivar_pet',
+                descricao: 'Arquiva o cadastro de um pet (falecido, mudou etc.) sem apagar nada: ele sai das listas de escolha e o histórico continua. Exige o motivo em observacoes. Pet com agendamento futuro em aberto não é arquivado. Achado pelo id ou pelo nome do pet.',
+                acao: 'arquivar',
+                entidade: 'Pet',
+                papeis: self::PAPEIS_DO_ARQUIVO_DE_PET,
+                propriedades: ['observacoes' => ['type' => 'string', 'description' => 'Motivo do arquivamento (ex.: falecido, mudou de cidade).']],
+                obrigatorios: ['observacoes'],
+                formRequest: ArquivarPetRequest::class,
+                executar: fn (array $d, int $tenantId) => $pets->arquivarCadastro((int) $d['id'], (string) $d['observacoes'], $tenantId),
+                mensagemErro: 'Não consegui arquivar o pet. Nada foi gravado.',
+                titulo: 'Arquivar o cadastro do pet',
+                sucesso: 'Pet arquivado',
+                conferir: function (array $a) use ($pets): ?array {
+                    $motivo = $pets->motivoParaNaoArquivar((int) ($a['id'] ?? 0), (int) $a['tenant_id']);
+
+                    return $motivo === null ? null : ['campo' => 'id', 'motivo' => $motivo];
+                },
+                risco: 'exclusao',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $pets->localizarPorCadastro($id, $busca, $tenantId, false),
+                rotulo: 'o pet',
+                colunaRotulo: 'nome',
+                rotuloAcao: 'Arquivar',
+                campos: ['observacoes'],
+                resumir: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
+            ),
+            $this->definirAcao(
+                nome: 'reativar_pet',
+                descricao: 'Reativa o cadastro de um pet arquivado: ele volta às listas de escolha. Achado pelo id ou pelo nome do pet.',
+                acao: 'reativar',
+                entidade: 'Pet',
+                papeis: self::PAPEIS_DO_ARQUIVO_DE_PET,
+                propriedades: [],
+                obrigatorios: [],
+                formRequest: RegistroIdRequest::class,
+                executar: fn (array $d, int $tenantId) => $pets->reativarCadastro((int) $d['id'], $tenantId),
+                mensagemErro: 'Não consegui reativar o pet. Nada foi gravado.',
+                titulo: 'Reativar o cadastro do pet',
+                sucesso: 'Pet reativado',
+                conferir: fn (array $a) => $pets->localizarPorCadastro((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], true)->isEmpty()
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei o pet arquivado #'.(int) ($a['id'] ?? 0).'.'] : null,
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $pets->localizarPorCadastro($id, $busca, $tenantId, true),
+                rotulo: 'o pet arquivado',
+                colunaRotulo: 'nome',
+                rotuloAcao: 'Reativar',
+                campos: [],
+                resumir: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
             ),
             ...$this->definirCadastro(
                 entidade: 'CatalogoItem',
@@ -202,7 +296,7 @@ trait CatalogoDaClinica
             // ---------------------------------------------------------------- agenda
             $this->definirTool(
                 nome: 'consultar_agenda',
-                descricao: 'Mostra a agenda da clínica e do banho e tosa num período (padrão: de hoje até 6 dias depois), com horário, pet, tutor, serviço, profissional e status. Datas no formato AAAA-MM-DD. Ação de leitura — não exige confirmação.',
+                descricao: 'Mostra a agenda da clínica e do banho e tosa num período (padrão: de hoje até 6 dias depois), com horário, pet, tutor, serviço, profissional e status. Datas no formato AAAA-MM-DD. Também responde perguntas pontuais: "qual foi o último agendamento realizado" (status realizado, ordenar marcado, sentido desc, limite 1), "o próximo do Thor" (pet, quando futuro, ordenar marcado, limite 1), "o último que foi gravado" (ordenar gravacao, sentido desc, limite 1), "os banhos de outubro" (servico banho, datas), "o que foi agendado ontem" (tipo_data gravacao, dia de ontem). Sem pedir só "o último", mostre a lista inteira. Ação de leitura — não exige confirmação.',
                 tipo: 'leitura',
                 risco: 'leitura',
                 acao: 'consultar',
@@ -219,11 +313,22 @@ trait CatalogoDaClinica
                     'tutor' => ['type' => 'string', 'description' => 'Nome do CLIENTE (tutor, o dono do animal): "os agendamentos do Diego". Filtra só os agendamentos dele.'],
                     'profissional' => ['type' => 'string', 'description' => 'Nome do veterinário ou atendente ("os da estetica1"), quando o número não é conhecido.'],
                     'status' => ['type' => 'string', 'enum' => Agendamento::STATUS],
+                    // 26/11: filtros para o pedido ser entendido ("o último realizado", "banhos do Thor em outubro", "gravados ontem").
+                    'tipo_data' => ['type' => 'string', 'enum' => array_keys(AgendaService::TIPOS_DE_DATA), 'description' => 'A que data se referem dia/data_inicio/data_fim: "marcado" = o dia marcado do atendimento (padrão); "gravacao" = quando o agendamento foi criado no sistema ("gravados ontem", "marcados ontem"); "alteracao" = a última vez que foi mudado (ex.: quando virou realizado).'],
+                    'servico' => ['type' => 'string', 'description' => 'Nome ou categoria do serviço: "banho", "tosa", "consulta", "cirurgia", "vacina".'],
+                    'hora_de' => ['type' => 'string', 'description' => 'Horário do atendimento a partir de (HH:MM, 24 h): "à tarde" = 12:00.'],
+                    'hora_ate' => ['type' => 'string', 'description' => 'Horário do atendimento até (HH:MM, 24 h): "de manhã" = até 11:59.'],
+                    'dia_semana' => ['type' => 'string', 'enum' => ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado', 'domingo']],
+                    'quando' => ['type' => 'string', 'enum' => ['passado', 'futuro'], 'description' => 'Só os que já passaram ou só os que ainda vão acontecer (em relação a agora).'],
+                    'ordenar' => ['type' => 'string', 'enum' => array_keys(AgendaService::TIPOS_DE_DATA), 'description' => 'Por qual data ordenar: "marcado" (dia do atendimento), "gravacao" (ordem em que foram criados) ou "alteracao" (última mudança). "O último realizado" = ordenar marcado, sentido desc, limite 1, status realizado; "o último gravado" = ordenar gravacao.'],
+                    'sentido' => ['type' => 'string', 'enum' => ['asc', 'desc'], 'description' => 'asc = do mais antigo ao mais novo; desc = do mais novo ao mais antigo ("último", "mais recente").'],
+                    'limite' => ['type' => 'integer', 'description' => 'Quantos mostrar (1 a 50): "o último" = 1, "os 3 próximos" = 3. Sem dizer, mostra todos.'],
+                    'id' => ['type' => 'integer', 'description' => 'Número de um agendamento específico.'],
+                    'origem' => ['type' => 'string', 'enum' => Agendamento::ORIGENS, 'description' => 'encaixe_emergencia = os encaixes de emergência.'],
+                    'cobrado' => ['type' => 'string', 'enum' => ['sim', 'nao'], 'description' => 'sim = já tem cobrança; nao = ainda sem cobrança ("realizados sem cobrança").'],
                 ],
                 obrigatorios: [],
-                executar: fn (array $a) => $agenda->buscarPorFiltro($a['dia'] ?? $a['data_inicio'] ?? null, $a['dia'] ?? $a['data_fim'] ?? null, $this->setorDaAgendaPedido($a['setor'] ?? null),
-                    isset($a['profissional_id']) ? (int) $a['profissional_id'] : null, isset($a['pet_id']) ? (int) $a['pet_id'] : null, $a['status'] ?? null, $a['tenant_id'],
-                    is_string($a['pet'] ?? null) ? $a['pet'] : null, is_string($a['tutor'] ?? null) ? $a['tutor'] : null, is_string($a['profissional'] ?? null) ? $a['profissional'] : null)
+                executar: fn (array $a) => $agenda->buscarAvancado([...$a, 'setor' => $this->setorDaAgendaPedido($a['setor'] ?? null)], (int) $a['tenant_id'])
                     ->map(fn (Agendamento $ag) => [
                         'id' => (int) $ag->id,
                         'horario' => $ag->inicio->format('d/m/Y H:i').'–'.$ag->fim->format('H:i'),
@@ -233,6 +338,12 @@ trait CatalogoDaClinica
                         'profissional' => $ag->getAttribute('profissional'),
                         'setor' => $ag->setor,
                         'status' => $ag->status,
+                        // Só no pedido pontual ("o último", "o gravado ontem"): a frase usa a gravação, e a tabela a mostra quando o pedido a usa
+                        // (AiAgentService::apresentarAgenda). A consulta comum mantém as colunas de sempre.
+                        ...(isset($a['ordenar']) || isset($a['limite']) || isset($a['id']) || isset($a['tipo_data']) ? [
+                            'gravado_em' => $ag->created_at?->format('d/m/Y H:i'),
+                            'alterado_em' => $ag->updated_at?->format('d/m/Y H:i'),
+                        ] : []),
                     ])->all(),
                 mensagemErro: 'Não consegui consultar a agenda agora. Tente novamente.',
                 colunas: ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'setor', 'status'],
@@ -1438,6 +1549,7 @@ trait CatalogoDaClinica
             'data_nascimento' => ['type' => 'string', 'format' => 'date'],
             'peso_gramas' => ['type' => 'integer', 'description' => 'Peso em GRAMAS inteiros (6200 = 6,2 kg).'],
             'microchip' => ['type' => 'string'],
+            'observacoes' => ['type' => 'string', 'description' => 'Observações do cadastro do animal (não clínicas).'],
             'alertas' => ['type' => 'string', 'description' => 'Aviso NÃO clínico para a equipe (ex.: "morde", "medo de secador"). Nunca escreva texto clínico aqui.'],
         ];
     }

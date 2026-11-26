@@ -7,8 +7,11 @@ use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\AutenticacaoController;
 use App\Http\Controllers\ClinicaTelasController;
 use App\Http\Controllers\PainelDonoController;
+use App\Http\Controllers\ReactTesteController;
 use App\Http\Controllers\SupervisaoController;
 use App\Http\Controllers\TelasController;
+use App\Http\Middleware\GarantirContaAtiva;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
 
@@ -22,8 +25,11 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AutenticacaoController::class, 'entrar'])->middleware('throttle:login');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', GarantirContaAtiva::class])->group(function () {
     Route::post('/logout', [AutenticacaoController::class, 'sair']);
+
+    // Migração para React (18/11): página de teste da infraestrutura. 404 com SENTINEL_FRONT=blade (padrão).
+    Route::get('/react-teste', ReactTesteController::class)->middleware(HandleInertiaRequests::class);
 
     // R3: em toda requisição ao agente, as propostas vencidas são auditadas como "expirado" e saem da sessão.
     Route::middleware(VarrerConfirmacoesVencidas::class)->group(function () {
@@ -34,9 +40,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/auditoria/registros/{id}', [AuditoriaController::class, 'registro'])->whereNumber('id')->middleware('throttle:auditoria');
 
         // T1: o Administrador da clínica só gerencia PINs; a bancada do agente e os cadastros o levam à /supervisao.
-        Route::get('/agente', function () {
-            return app(\App\Services\ContextoUsuario::class)->ehAdminDaClinica() ? redirect('/supervisao') : view('agente');
-        });
+        Route::get('/agente', [AgenteController::class, 'index'])->middleware(HandleInertiaRequests::class);
 
         // Painel lateral do /agente (24/11): só leitura (pendentes do negócio e ações recentes do próprio usuário).
         Route::get('/agente/painel', [AgentePainelController::class, 'mostrar'])->middleware('throttle:120,1,painel-agente');
@@ -45,6 +49,9 @@ Route::middleware('auth')->group(function () {
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
         Route::get('/cadastros', [TelasController::class, 'cadastros']);
+        // 27/11: página Clientes (React; no front Blade redireciona para /cadastros). Só leitura: escrever abre o card de sempre.
+        Route::get('/clientes', [\App\Http\Controllers\ClientesController::class, 'index'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::get('/clientes/dados', [\App\Http\Controllers\ClientesController::class, 'dados'])->middleware('throttle:120,1,clientes-dados');
         Route::get('/lixeira', [TelasController::class, 'lixeira']);
         Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
         // Item I (clínica vet): a tela usa as rotas JSON /supervisao/* abaixo, que conferem tudo de novo.
@@ -87,5 +94,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/pins/{id}/gerar', [SupervisaoController::class, 'gerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/pins/{id}/revogar', [SupervisaoController::class, 'revogarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        // 26/11: liga ou desliga a conta de um funcionário (só o Administrador/RH; o dono dá a ordem).
+        Route::post('/supervisao/usuarios/{id}/ativo', [SupervisaoController::class, 'definirAtivo'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
     });
 });

@@ -143,6 +143,18 @@ class AiAgentService
         'itens' => 'os itens',
         'itens.*.catalogo_item_id' => 'o item do catálogo',
         'itens.*.quantidade' => 'a quantidade',
+        // 27/11: cadastro unificado (tutor + pets) e observações do pet.
+        'observacoes' => 'as observações',
+        'pets' => 'os pets',
+        'pets.*.nome' => 'o nome do pet',
+        'pets.*.especie' => 'a espécie do pet',
+        'pets.*.raca' => 'a raça do pet',
+        'pets.*.sexo' => 'o sexo do pet',
+        'pets.*.data_nascimento' => 'a data de nascimento do pet',
+        'pets.*.peso_gramas' => 'o peso do pet em gramas',
+        'pets.*.microchip' => 'o microchip do pet',
+        'pets.*.alertas' => 'os alertas do pet',
+        'pets.*.observacoes' => 'as observações do pet',
     ];
 
     /** atualizar_status_lancamento não tem Form Request: estas regras desenham o formulário e validam o executor. */
@@ -555,6 +567,11 @@ class AiAgentService
                 $resposta['lista'] = $this->listaParaGuardar($tool, $definicao, $resposta['resultado'] ?? []);
                 // A "versao" fica só no servidor (na lista guardada): as linhas que vão ao navegador não a levam.
                 $resposta = $this->semVersaoNasLinhas($resposta);
+            }
+
+            // 26/11: a agenda responde em frase (montada aqui, só com o que o servidor leu) e diz qual linha a tela realça.
+            if ($tool === 'consultar_agenda' && ($resposta['tipo'] ?? null) === 'resultado_leitura') {
+                $resposta = $this->apresentarAgenda($resposta, $argumentos);
             }
 
             // A3 (RF02): tabela de consulta pode ser exportada. Os argumentos voltam para o controller
@@ -1051,6 +1068,29 @@ class AiAgentService
         ];
     }
 
+    /**
+     * Agenda (26/11): acrescenta a frase da resposta e as linhas a realçar; pedido por gravação ou alteração mostra essa coluna.
+     *
+     * @param  array<string, mixed>  $resposta
+     * @param  array<string, mixed>  $filtros
+     * @return array<string, mixed>
+     */
+    private function apresentarAgenda(array $resposta, array $filtros): array
+    {
+        $linhas = is_array($resposta['resultado'] ?? null) ? array_values($resposta['resultado']) : [];
+        $filtros = \App\Services\AgendaService::sanearFiltros($filtros);
+        $apresentacao = \App\Services\Agente\FraseDaAgenda::montar($linhas, $filtros);
+        $colunas = is_array($resposta['colunas'] ?? null) ? $resposta['colunas'] : [];
+        foreach (['gravacao' => 'gravado_em', 'alteracao' => 'alterado_em'] as $tipo => $coluna) {
+            if (($filtros['tipo_data'] ?? null) === $tipo || ($filtros['ordenar'] ?? null) === $tipo) {
+                $depois = array_search('horario', $colunas, true);
+                array_splice($colunas, $depois === false ? 1 : $depois + 1, 0, [$coluna]);
+            }
+        }
+
+        return [...$resposta, 'colunas' => $colunas, 'frase' => $apresentacao['frase'], 'destacar' => $apresentacao['destacar']];
+    }
+
     /** A tool de atualizar existe e o papel atual chega no mínimo dela. */
     private function podeEditar(?string $toolAtualizar): bool
     {
@@ -1323,7 +1363,7 @@ class AiAgentService
      * tenant da proposta pelo agente; registro de outro tenant ou na lixeira responde
      * igual a inexistente.
      */
-    public function abrirFormulario(string $tool, ?int $id): array
+    public function abrirFormulario(string $tool, ?int $id, ?int $tutorId = null): array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -1349,6 +1389,12 @@ class AiAgentService
             }
 
             $argumentos = $localizado['argumentos'];
+        }
+
+        // 27/11: "Adicionar pet" na página Clientes abre o cadastro do pet já com o tutor escolhido (a lista de vínculo do card só mostra
+        // registros do tenant, e o Revisar valida o vínculo de novo).
+        if ($tutorId !== null && $tool === 'criar_pet' && $definicao['localizar'] === null) {
+            $argumentos['tutor_id'] = $tutorId;
         }
 
         if ($definicao['preparar'] !== null) {
@@ -1670,6 +1716,11 @@ class AiAgentService
             $formulario['tipo_autorizacao'] = 'crmv';
         }
 
+        // 27/11: cadastro unificado: "pets.*.x" vira a lista de pets do card (com o erro em cada pet), não campos soltos.
+        if (array_key_exists('pets', $definicao['regras'])) {
+            [$formulario, $erros] = $this->comListaDePets($formulario, $definicao['regras'], $valores, $erros);
+        }
+
         // Recusa que não é de um campo do formulário (ex.: "existem lançamentos vinculados"): vai no topo do card.
         $avulsos = array_diff_key($erros, array_flip(array_column($formulario['campos'], 'nome')));
         if ($avulsos !== []) {
@@ -1677,6 +1728,48 @@ class AiAgentService
         }
 
         return $formulario;
+    }
+
+    /**
+     * 27/11: troca os campos "pets" e "pets.*.x" do card por uma lista repetível (formulario.lista): o molde de cada pet (campos
+     * com opções), os pets atuais e o erro de cada um. O erro de um pet sai de $erros (não vira aviso solto no topo).
+     *
+     * @return array{0: array<string, mixed>, 1: array<string, string>}
+     */
+    private function comListaDePets(array $formulario, array $regras, array $valores, array $erros): array
+    {
+        $regrasDoPet = [];
+        foreach ($regras as $nome => $regra) {
+            if (str_starts_with($nome, 'pets.*.')) {
+                $regrasDoPet[substr($nome, 7)] = $regra;
+            }
+        }
+        $modelo = $this->formularios->montar('', $regrasDoPet, [], [], self::ROTULOS_CAMPOS, $this->contexto->tenantId())['campos'];
+        $modelo = array_map(fn (array $c) => array_diff_key($c, ['valor' => 1, 'faltando' => 1]), $modelo);
+        $formulario['campos'] = array_values(array_filter($formulario['campos'], fn (array $c) => ! str_starts_with($c['nome'], 'pets')));
+
+        $itens = [];
+        foreach (array_values(is_array($valores['pets'] ?? null) ? $valores['pets'] : []) as $i => $pet) {
+            $itens[] = ['valores' => is_array($pet) ? array_map(fn ($v) => is_scalar($v) ? (string) $v : '', $pet) : [], 'erros' => []];
+        }
+        $comErro = false;
+        foreach ($erros as $chave => $frase) {
+            if (preg_match('/^pets\.(\d+)\.(\w+)$/', (string) $chave, $m) === 1) {
+                $itens[(int) $m[1]]['erros'][$m[2]] = $frase;
+                $itens[(int) $m[1]]['valores'] ??= [];
+                unset($erros[$chave]);
+                $comErro = true;
+            } elseif ($chave === 'pets') {
+                unset($erros[$chave]);
+                $erros['_pets'] = $frase;
+            }
+        }
+        if ($comErro) {
+            $erros['_pets'] = 'Confira os dados dos pets destacados. Nada foi gravado.';
+        }
+        $formulario['lista'] = ['campo' => 'pets', 'rotulo' => 'Pets', 'max' => \App\Http\Requests\ClienteComPetsRequest::MAX_PETS, 'modelo' => $modelo, 'itens' => $itens];
+
+        return [$formulario, $erros];
     }
 
     /**

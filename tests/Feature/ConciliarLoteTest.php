@@ -285,16 +285,17 @@ class ConciliarLoteTest extends TestCase
         $this->assertSame('pendente', $a->fresh()->status);
     }
 
-    public function test_expirado_deixa_uma_linha_e_nada_grava(): void
+    public function test_lote_parado_muito_tempo_ainda_confirma_os_ids_congelados(): void
     {
+        // 25/11 (Lucas): a proposta não vence. Os ids continuam congelados e o Confirmar reconfere cada um.
         $a = $this->lancamento('2026-09-05');
         [, $token] = $this->revisarLote();
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
+        $this->get('/agente')->assertOk(); // a varredura não vence nada
 
-        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
-        $this->get('/agente')->assertOk(); // varredura de novo: não pode duplicar
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->assertSame('expirado', $this->linhasDoLote()->sole()->resultado);
-        $this->assertSame('pendente', $a->fresh()->status);
+        $this->assertSame('conciliado', $a->fresh()->status);
+        $this->assertSame(0, $this->linhasDoLote()->where('resultado', 'expirado')->count());
     }
 }

@@ -250,20 +250,17 @@ class AuditoriaConsultaTest extends TestCase
         $this->postJson('/agente/formulario', ['tool' => 'criar_cliente'])->assertOk();
     }
 
-    public function test_navegar_na_auditoria_tambem_audita_as_propostas_vencidas(): void
+    public function test_navegar_na_auditoria_nao_vence_propostas(): void
     {
+        // 25/11 (Lucas): nenhuma proposta vence; a varredura da auditoria não encontra nada para expirar.
         $this->prepararAgente();
-        $this->propor(['nome' => 'Esquecido'], 'criar_cliente');
+        $token = $this->propor(['nome' => 'Esquecido'], 'criar_cliente');
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
         $this->getJson('/auditoria/registros')->assertOk();
-        $this->assertSame('criar_cliente', AuditLog::query()->where('resultado', 'expirado')->sole()->tool);
-
-        // O detalhe também varre.
-        $this->propor(['nome' => 'Outro esquecido'], 'criar_cliente');
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
         $this->getJson('/auditoria/registros/999999')->assertNotFound();
-        $this->assertSame(2, AuditLog::query()->where('resultado', 'expirado')->count());
+        $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
+        $this->assertNotNull(session("confirmacoes.{$token}"));
     }
 
     public function test_detalhe_sem_proposto_vem_nulo(): void
@@ -278,30 +275,23 @@ class AuditoriaConsultaTest extends TestCase
 
     // ---- entidade_id nos desfechos sem execução ----
 
-    public function test_cancelar_e_expirar_uma_atualizacao_gravam_qual_registro_era_o_alvo(): void
+    public function test_cancelar_uma_atualizacao_grava_qual_registro_era_o_alvo(): void
     {
         $this->prepararAgente();
         $cliente = Cliente::create(['nome' => 'Mercado Central', 'tenant_id' => 1]);
 
-        // Cancelado (com o token de segurar).
+        // Cancelado com o token de segurar.
         $token = $this->propor(['id' => $cliente->id, 'email' => 'a@exemplo.com'], 'atualizar_cliente');
         $this->postJson('/agente/cancelar', ['token' => $token])->assertOk()->assertJsonPath('tipo', 'cancelado');
 
-        // Expirado pelo /agente/confirmar fora do prazo.
-        $token = $this->propor(['id' => $cliente->id, 'email' => 'b@exemplo.com'], 'atualizar_cliente');
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
-
-        // Expirado pela varredura (rascunho da IA esquecido além dos 5 min). 25/11: o card aberto por TELA (/agente/formulario) não
-        // vence mais; quem expira por tempo é a proposta do chat.
+        // Cancelado pelo rascunho, muito depois (25/11: nenhuma proposta vence; antes isto era "expirado").
         $proposta = (string) $this->comando('atualizar_cliente', ['id' => $cliente->id])->assertOk()->json('proposta');
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->get('/agente')->assertOk();
-        $this->assertNull(session("confirmacoes.{$proposta}"));
+        $this->postJson('/agente/cancelar', ['proposta' => $proposta])->assertOk()->assertJsonPath('tipo', 'cancelado');
 
         $desfechos = AuditLog::query()->whereIn('resultado', ['cancelado', 'expirado'])->orderBy('id')->get();
-        $this->assertSame(['cancelado', 'expirado', 'expirado'], $desfechos->pluck('resultado')->all());
-        $this->assertSame([$cliente->id, $cliente->id, $cliente->id], $desfechos->pluck('entidade_id')->all());
+        $this->assertSame(['cancelado', 'cancelado'], $desfechos->pluck('resultado')->all());
+        $this->assertSame([$cliente->id, $cliente->id], $desfechos->pluck('entidade_id')->all());
     }
 
     public function test_cancelar_um_cadastro_nao_inventa_entidade_id(): void
