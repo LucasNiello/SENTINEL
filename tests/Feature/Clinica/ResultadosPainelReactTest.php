@@ -17,7 +17,7 @@ class ResultadosPainelReactTest extends TestCase
         config(['sentinel.front' => 'react']);
 
         $this->get('/resultados')->assertOk()->assertInertia(fn ($p) => $p->component('Resultados', false)
-            ->where('periodo', 'mes')->has('r.faturamento')->has('rotuloPeriodo')->has('nomes.0'));
+            ->where('periodo', 'mes')->has('r.faturamento')->has('r.setores.0.rotulo')->has('r.setores.1')->has('rotuloPeriodo')->has('nomes.0'));
         $this->get('/painel')->assertOk()->assertInertia(fn ($p) => $p->component('Painel', false)->where('aba', 'dashboard')->has('indicadores', 4));
         $this->get('/painel?aba=clinica')->assertOk()->assertInertia(fn ($p) => $p->component('Painel', false)->has('valores.abre')->has('maxVagas'));
         $this->get('/painel?aba=clientes')->assertOk()->assertInertia(fn ($p) => $p->has('tutores')->missing('tutores.0.tenant_id'));

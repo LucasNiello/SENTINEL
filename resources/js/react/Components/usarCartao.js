@@ -16,6 +16,8 @@ export default function usarCartao() {
     const [cartao, setCartao] = useState(null);
     const [ocupado, setOcupado] = useState(false);
     const [erro, setErro] = useState('');
+    // `abrindo`: só enquanto o formulário é buscado (diferente de `ocupado`, que também vale no Confirmar). Alimenta a CaixaCarregando.
+    const [abrindo, setAbrindo] = useState(false);
     const trava = useRef(null);
     const montado = useRef(true);
     useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
@@ -25,6 +27,8 @@ export default function usarCartao() {
         const controller = new AbortController();
         trava.current = controller;
         setOcupado(true);
+        setAbrindo(true);
+        setCartao(null);
         setErro('');
         try {
             const dados = await pedir('/agente/formulario', { method: 'POST', signal: controller.signal,
@@ -33,8 +37,8 @@ export default function usarCartao() {
             if (dados?.tipo !== 'confirmacao_pendente' || typeof dados.proposta !== 'string') throw new Error('Não foi possível abrir o formulário. Tente novamente.');
             setCartao(dados);
         } catch (e) { if (montado.current) setErro(e.name === 'AbortError' ? 'Demorou demais. Tente novamente.' : e.message); }
-        finally { trava.current = null; if (montado.current) setOcupado(false); }
+        finally { trava.current = null; if (montado.current) { setOcupado(false); setAbrindo(false); } }
     }
 
-    return { cartao, setCartao, ocupado, setOcupado, erro, setErro, trava, abrir };
+    return { cartao, setCartao, abrindo, ocupado, setOcupado, erro, setErro, trava, abrir };
 }

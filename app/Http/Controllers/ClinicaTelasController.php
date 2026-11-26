@@ -388,7 +388,8 @@ class ClinicaTelasController extends Controller
         $meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
         return Front::tela('clinica.resultados', 'Resultados', [
-            'r' => $resumo,
+            // Listas (não objetos): o React faz .map nelas.
+            'r' => [...$resumo, 'setores' => array_values($resumo['setores']), 'top_itens' => array_values($resumo['top_itens'])],
             'periodo' => $periodo,
             'periodos' => ResultadosClinica::PERIODOS,
             'dia' => $dia->toDateString(),

@@ -136,10 +136,16 @@ html[data-tema] .botao-tema svg {width: 18px; height: 18px; fill: none; stroke: 
 @media (max-width: 599px) {html[data-tema] .botao-tema__texto {position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap}}
 
 /* ---------- AGENTE: uma coluna central, sem caixa em volta ---------- */
-html[data-tema] main:has(.command-layout) {padding-top: 0}
-html[data-tema] .command-layout {display: flex; flex-direction: column; max-width: 960px; width: 100%; margin: 0 auto}
+/* 26/11: a coluna do chat continua com 960 px centralizados, mas o container que rola ocupa a largura toda: a barra de rolagem fica na borda
+   da janela (como no app do Claude) e a roda do mouse funciona em qualquer ponto. O recuo lateral é feito por padding. */
+html[data-tema] {--coluna-chat: 960px}
+html[data-tema] main:has(.command-layout) {padding-top: 0; padding-inline: 0}
+html[data-tema] .command-layout {display: flex; flex-direction: column; max-width: none; width: 100%; margin: 0}
 html[data-tema] .agent-workspace {flex: 1; border: 0; border-radius: 0; background: transparent; box-shadow: none}
-html[data-tema] .agent-workspace #historico {padding: 24px 4px 16px; gap: 20px}
+html[data-tema] .agent-workspace #historico {padding: 24px max(var(--gutter), calc((100% - var(--coluna-chat)) / 2)) 16px; gap: 20px; scrollbar-width: thin; scrollbar-color: var(--cor-borda-campo) transparent}
+html[data-tema] .agent-workspace #historico::-webkit-scrollbar {width: 10px}
+html[data-tema] .agent-workspace #historico::-webkit-scrollbar-track {background: transparent}
+html[data-tema] .agent-workspace #historico::-webkit-scrollbar-thumb {background: var(--cor-borda-campo); border-radius: 10px; border: 2px solid transparent; background-clip: content-box}
 html[data-tema] .agent-workspace .msg--usuario {background: var(--cor-marca-suave); color: var(--cor-texto); border-radius: 18px 18px 4px 18px}
 html[data-tema] .agent-workspace .msg--agente {color: var(--cor-texto)}
 html[data-tema] .agent-empty {padding: 32px 0 8px; gap: 0}
@@ -150,7 +156,7 @@ html[data-tema] .agent-passos li {display: grid; gap: 4px; padding: 16px; border
 html[data-tema] .agent-passos strong {font: 500 16px var(--fonte-titulo); color: var(--cor-texto)}
 html[data-tema] .agent-passos span {color: var(--cor-texto-suave); font-size: 15px}
 html[data-tema] .agent-passos b {font: 500 12px var(--fonte-mono); color: var(--cor-marca-forte); letter-spacing: .1em}
-html[data-tema] .agent-composer {background: transparent; border-top: 0; padding: 8px 4px 16px}
+html[data-tema] .agent-composer {background: transparent; border-top: 0; padding: 8px max(var(--gutter), calc((100% - var(--coluna-chat)) / 2)) 16px}
 html[data-tema] form#form-comando {background: var(--cor-superficie); border: 1px solid var(--cor-borda-campo); box-shadow: var(--sombra-suave)}
 html[data-tema] form#form-comando:focus-within {outline: 2px solid var(--cor-marca-forte); outline-offset: 2px; box-shadow: var(--brilho-destaque)}
 html[data-tema] #campo-mensagem {color: var(--cor-texto); font-size: 16px}
@@ -162,10 +168,11 @@ html[data-tema] #botao-enviar:disabled {background: var(--cor-superficie-suave);
 html[data-tema] .composer-note {justify-content: center; color: var(--cor-texto-suave); font-size: 15px; margin-top: 8px}
 html[data-tema] .composer-note > span {color: var(--cor-marca-forte)}
 html[data-tema] .agent-conversa > .carregando, html[data-tema] .carregando {padding: 0 4px 8px; color: var(--cor-texto-suave)}
+html[data-tema] .agent-conversa > .carregando {padding-inline: max(var(--gutter), calc((100% - var(--coluna-chat)) / 2))}
 html[data-tema] .carregando__barra {height: 2px; border-radius: 2px; background: var(--cor-marca-forte)}
 @media (max-width: 599px) {
     html[data-tema] .agent-passos {grid-template-columns: minmax(0, 1fr)}
-    html[data-tema] .agent-workspace #historico {padding: 16px 0 12px}
+    html[data-tema] .agent-workspace #historico {padding-top: 16px; padding-bottom: 12px}
     html[data-tema] .composer-note {font-size: 15px}
 }
 
@@ -220,6 +227,7 @@ html[data-tema] .botao:disabled {box-shadow: none; cursor: not-allowed}
 html[data-tema] .botao__barra {position: absolute; inset: auto 0 0 0; height: 100%; width: 0%; background: color-mix(in srgb, var(--cor-sombra) 22%, transparent); pointer-events: none}
 html[data-tema="escuro"] .botao--perigo .botao__barra {background: color-mix(in srgb, var(--cor-sombra) 30%, transparent)}
 html[data-tema] .botao__rotulo {position: relative; z-index: 1; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.2; pointer-events: none}
+html[data-tema] .botao__progresso {position: absolute; inset: 0; justify-content: center}
 html[data-tema] .botao__rotulo small {font: 12px var(--fonte-mono); opacity: .9}
 
 /* ---------- CARD DE AÇÃO PROPOSTA: um nível só ---------- */
@@ -288,7 +296,8 @@ html[data-tema] .ficha-quem-lista {display: flex; flex-wrap: wrap; gap: 8px}
 /* ---------- TABELAS: colunas próximas, cabeçalho preso, sem moldura dupla ---------- */
 html[data-tema] .tabela-rolagem {width: fit-content; max-width: 100%; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-superficie); scrollbar-color: var(--cor-texto-suave) var(--cor-superficie-suave)}
 html[data-tema] .tabela-rolagem table {min-width: 0; width: auto}
-html[data-tema] .agent-workspace #historico .tabela-rolagem {max-height: min(60dvh, 520px)}
+/* No chat a tabela não tem rolagem vertical própria (só a horizontal): a roda do mouse sobre ela rola a conversa, não fica presa na tabela. */
+html[data-tema] .agent-workspace #historico .tabela-rolagem {max-height: none; overflow-y: visible; overflow-x: auto}
 html[data-tema] th, html[data-tema] td {border-bottom-color: var(--cor-borda)}
 html[data-tema] th {background: var(--cor-superficie-suave); color: var(--cor-texto-suave); position: sticky; top: 0; z-index: 1}
 html[data-tema] .agent-workspace #historico :is(th, td) {padding: 8px 14px; font-size: 15px}
@@ -461,3 +470,23 @@ html[data-tema] .detalhe dt {color: var(--cor-texto-suave)}
 html[data-tema] .detalhe dd {margin: 0; overflow-wrap: anywhere}
 html[data-tema] .paginacao {display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0}
 html[data-tema] .empty-state {padding: 16px; border: 1px dashed var(--cor-borda-campo); border-radius: var(--raio); color: var(--cor-texto-suave)}
+
+/* ---------- CARREGAMENTO: farol 2D com o facho varrendo esquerda e direita (ciclo de 1,5 s) ---------- */
+html[data-tema] .caixa-carregando {display: grid; place-items: center; min-height: 160px; padding: 24px; border: 1px solid var(--cor-borda); border-left: 4px solid var(--cor-marca-forte); border-radius: var(--raio); background: var(--cor-superficie); box-shadow: var(--sombra-suave)}
+html[data-tema] .caixa-carregando__farol {width: 56px; height: 56px}
+html[data-tema] .farol-carregando {color: var(--cor-marca-forte); overflow: visible}
+html[data-tema] .farol-carregando .lighthouse-window {fill: var(--cor-fundo)}
+html[data-tema] .farol-facho {transform-box: view-box; opacity: 0; transform: scaleX(.1)}
+html[data-tema] .farol-facho--esq {transform-origin: 52px 28px; animation: facho-esq 1.5s ease-in-out infinite}
+html[data-tema] .farol-facho--dir {transform-origin: 68px 28px; animation: facho-dir 1.5s ease-in-out infinite}
+/* Esquerda: cresce (0–25%), diminui (25–50%); direita: cresce (50–75%), diminui (75–100%). */
+@keyframes facho-esq {0% {transform: scaleX(.1); opacity: 0} 25% {transform: scaleX(1); opacity: .55} 50%, 100% {transform: scaleX(.1); opacity: 0}}
+@keyframes facho-dir {0%, 50% {transform: scaleX(.1); opacity: 0} 75% {transform: scaleX(1); opacity: .55} 100% {transform: scaleX(.1); opacity: 0}}
+@media (prefers-reduced-motion: reduce) {
+    html[data-tema] .farol-facho {animation: none; opacity: .4; transform: scaleX(.5)}
+}
+/* No chat: farolzinho no lugar da próxima mensagem. */
+html[data-tema] .agent-workspace #historico .chat-carregando {display: flex; align-items: center; min-height: 36px}
+html[data-tema] .chat-carregando .farol-carregando {width: 32px; height: 32px}
+/* Botão enquanto algo carrega: bloqueado contra duplo clique, mas sem o cursor de proibido. */
+html[data-tema] .botao:disabled {cursor: progress}

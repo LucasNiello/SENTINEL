@@ -4,6 +4,7 @@ import Workspace from '../Layouts/Workspace';
 import Confirmacao from '../Components/Confirmacao';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 import usarCartao from '../Components/usarCartao';
 
 // Cobranças e Vendas: a mesma tela com colunas e ações diferentes (o servidor manda as duas coisas).
@@ -13,7 +14,7 @@ const NUMERICAS = ['total', 'estornado', 'liquido'];
 const vazio = (v) => v === '' || v === null || v === undefined;
 
 export default function Financeiro({ titulo, rota, intro, erro, linhas, colunas, resumo, status, setor, opcoesStatus, acoes }) {
-    const { cartao, setCartao, ocupado, setOcupado, erro: erroCartao, trava, abrir } = usarCartao();
+    const { cartao, setCartao, abrindo, ocupado, setOcupado, erro: erroCartao, trava, abrir } = usarCartao();
     const [aviso, setAviso] = useState('');
     const aoMensagem = (texto) => { setAviso(texto); router.reload(); };
     const acoesDe = (s) => Object.values(acoes?.[s] ?? {});
@@ -49,6 +50,7 @@ export default function Financeiro({ titulo, rota, intro, erro, linhas, colunas,
         {erro && <Aviso tipo="erro" role="alert">{erro}</Aviso>}
         {erroCartao && <Aviso tipo="erro" role="alert">{erroCartao}</Aviso>}
         {aviso && <Aviso tipo="info" role="status">{aviso}</Aviso>}
+        {abrindo && <CaixaCarregando texto="Abrindo o formulário…" />}
         {cartao && <Confirmacao key={cartao.proposta} proposta={cartao} adicionar={aoMensagem} trava={trava} ocupado={ocupado} definirOcupado={setOcupado}
             abrirFormulario={(tool, id) => abrir(tool, { id })} />}
 

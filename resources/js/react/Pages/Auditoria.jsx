@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Workspace from '../Layouts/Workspace';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 
 // Os dados vêm do /auditoria/registros (só admin, só o tenant do usuário, mascarados no servidor). Nada do registro vira HTML:
 // o React escapa tudo que é texto.
@@ -98,7 +99,7 @@ export default function Auditoria({ usuarios, resultados, tools }) {
             </div>
         </form>
 
-        {carregando && <div className="carregando" role="status"><span>Consultando…</span><div className="carregando__barra" /></div>}
+        {carregando && <CaixaCarregando texto="Consultando…" />}
         {erro && <Aviso tipo="erro" role="alert">{erro}</Aviso>}
 
         <div aria-live="polite">

@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 import Workspace from '../Layouts/Workspace';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 import { csrf } from '../Components/usarCartao';
 
 const SETORES = [['', 'Nenhum'], ['clinica', 'Clínica'], ['petshop', 'Petshop']];
@@ -35,6 +36,9 @@ function Linha({ u, ehDono, ehAdmin, eu, rotulosPapeis, mostrar, recarregar, abr
     const [setor, setSetor] = useState(u.supervisor_setor || '');
     const [ocupado, setOcupado] = useState(false);
     const ativo = u.ativo !== false;
+    // O botão só existe quando o setor escolhido difere do salvo; depois de salvar, o foco volta ao seletor (o botão some).
+    const alterado = setor !== (u.supervisor_setor || '');
+    const seletor = useRef(null);
     useEffect(() => setSetor(u.supervisor_setor || ''), [u.supervisor_setor]);
 
     async function salvarSetor() {
@@ -43,7 +47,7 @@ function Linha({ u, ehDono, ehAdmin, eu, rotulosPapeis, mostrar, recarregar, abr
         setOcupado(false);
         // A frase vem do servidor (ex.: "Sem mudança: o usuário já estava nesse setor.").
         mostrar(ok ? `${u.nome}: ${dados.mensagem || 'Supervisor atualizado.'}` : (dados.mensagem || 'Não consegui salvar. Nada foi gravado.'), ok ? 'sucesso' : 'erro');
-        if (ok) recarregar();
+        if (ok) { await recarregar(); seletor.current?.focus(); }
     }
     async function revogar() {
         setOcupado(true);
@@ -64,7 +68,7 @@ function Linha({ u, ehDono, ehAdmin, eu, rotulosPapeis, mostrar, recarregar, abr
     else if (u.papel === 'admin') tdSetor = 'Não autoriza (Administrador)';
     else if (ehDono && ativo) tdSetor = <div className="campo">
         <label className="sr-only" htmlFor={`setor-${u.id}`}>Setor que {u.nome} supervisiona</label>
-        <select id={`setor-${u.id}`} value={setor} onChange={(e) => setSetor(e.target.value)}>{SETORES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>
+        <select id={`setor-${u.id}`} ref={seletor} value={setor} onChange={(e) => setSetor(e.target.value)}>{SETORES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>
     </div>;
     else tdSetor = u.supervisor_setor === 'clinica' ? 'Clínica' : u.supervisor_setor === 'petshop' ? 'Petshop' : 'Nenhum';
 
@@ -80,7 +84,7 @@ function Linha({ u, ehDono, ehAdmin, eu, rotulosPapeis, mostrar, recarregar, abr
             ? <span className={`estado-conta${ativo ? '' : ' estado-conta--inativo'}`}>{ativo ? 'Ativo' : 'Inativo'}</span>
             : <ChaveConta u={u} aoMudar={mudarConta} />}</td>
         <td><div className="supervisao-acoes">
-            {ehDono && ativo && u.papel !== 'dono' && u.papel !== 'admin' && <Botao variante="secundario" disabled={ocupado} aria-label={`Salvar o setor de ${u.nome}`} onClick={salvarSetor}>Salvar setor</Botao>}
+            {ehDono && ativo && alterado && u.papel !== 'dono' && u.papel !== 'admin' && <Botao variante="secundario" disabled={ocupado} aria-label={`Salvar o setor de ${u.nome}`} onClick={salvarSetor}>Salvar setor</Botao>}
             {podePin && <Botao variante="secundario" aria-label={`Gerar novo PIN para ${u.nome}`} onClick={() => abrirGerar(u)}>Gerar novo PIN</Botao>}
             {podePin && u.tem_pin && <Botao variante="perigo" disabled={ocupado} aria-label={`Revogar o PIN de ${u.nome}`} onClick={revogar}>Revogar PIN</Botao>}
         </div></td>
@@ -170,7 +174,7 @@ export default function Supervisao({ ehDono, ehAdmin, rotulosPapeis }) {
                 ? 'Desmarcar ou trocar o setor zera o PIN da pessoa. O dono não é marcado: ele já autoriza em qualquer setor. Gerar PIN pede a sua senha de login.'
                 : 'Gerar pede a sua senha de login. Revogar zera o PIN: a pessoa deixa de autorizar até ganhar outro.'}</p>
             {usuarios === null
-                ? <div className="carregando" role="status"><span>Consultando…</span><div className="carregando__barra" /></div>
+                ? <CaixaCarregando texto="Consultando…" />
                 : <div className="tabela-rolagem" id="tabela-supervisores"><table>
                     <thead><tr><th scope="col">Nome</th><th scope="col">Papel</th><th scope="col">Setor que supervisiona</th><th scope="col">PIN</th><th scope="col">Conta</th><th scope="col">Ações</th></tr></thead>
                     <tbody>{usuarios.map((u) => <Linha key={u.id} u={u} ehDono={ehDono} ehAdmin={ehAdmin} eu={usuario.id} rotulosPapeis={rotulosPapeis}

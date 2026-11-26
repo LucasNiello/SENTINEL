@@ -4,6 +4,7 @@ import Confirmacao from '../Components/Confirmacao';
 import TabelaConsulta from '../Components/TabelaConsulta';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 import usarCartao, { csrf, pedir } from '../Components/usarCartao';
 
 // Cadastros e Lixeira (mesma tela). Filtros, RBAC e tenant são conferidos de novo no /agente/consultar; toda gravação passa pelo card.
@@ -16,7 +17,7 @@ export default function Consulta({ titulo, intro, entidades, cadastroInicial = n
     const [erro, setErro] = useState('');
     const [aviso, setAviso] = useState('');
     const [carregando, setCarregando] = useState(false);
-    const { cartao, ocupado, setOcupado, erro: erroCartao, trava, abrir } = usarCartao();
+    const { cartao, abrindo, ocupado, setOcupado, erro: erroCartao, trava, abrir } = usarCartao();
     const ultimo = useRef(0);
     const filtrosRef = useRef(filtros);
     filtrosRef.current = filtros;
@@ -86,9 +87,10 @@ export default function Consulta({ titulo, intro, entidades, cadastroInicial = n
             </div>
         </form>
 
-        {carregando && <div className="carregando" role="status"><span>Consultando…</span><div className="carregando__barra" /></div>}
+        {carregando && <CaixaCarregando texto="Consultando…" />}
         {erro && <Aviso tipo="erro" role="alert">{erro}</Aviso>}
         {erroCartao && <Aviso tipo="erro" role="alert">{erroCartao}</Aviso>}
+        {abrindo && <CaixaCarregando texto="Abrindo o formulário…" />}
         {cartao && <Confirmacao key={cartao.proposta} proposta={cartao} adicionar={aoMensagem} trava={trava} ocupado={ocupado} definirOcupado={setOcupado}
             abrirFormulario={(tool, id) => abrir(tool, { id })} />}
         <div id="historico" aria-live="polite">

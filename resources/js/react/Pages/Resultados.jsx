@@ -46,7 +46,7 @@ export default function Resultados({ r, periodo, periodos, dia, rotuloPeriodo, n
                     <table>
                         <thead><tr><th scope="col">Setor</th><th scope="col" className="num">Faturamento</th><th scope="col">Parte</th><th scope="col" className="num">Estornado</th>
                             <th scope="col" className="num">Líquido</th><th scope="col" className="num">Ticket médio</th></tr></thead>
-                        <tbody>{r.setores.map((s) => <tr key={s.rotulo}>
+                        <tbody>{Object.values(r.setores).map((s) => <tr key={s.rotulo}>
                             <td data-rotulo="Setor">{s.rotulo}</td>
                             <td data-rotulo="Faturamento" className="num">{reais(s.faturamento)}</td>
                             <td data-rotulo="Parte"><span className="proporcao"><span className="proporcao__barra" style={{ width: `${parte(s.faturamento)}%` }} /></span> <span className="mono">{parte(s.faturamento)}%</span></td>
@@ -60,11 +60,11 @@ export default function Resultados({ r, periodo, periodos, dia, rotuloPeriodo, n
 
             <section className="bloco" aria-labelledby="titulo-top">
                 <h2 id="titulo-top">Itens que mais faturaram</h2>
-                {r.top_itens.length === 0 ? <p className="vazio">Nenhum pagamento no período.</p>
+                {Object.keys(r.top_itens).length === 0 ? <p className="vazio">Nenhum pagamento no período.</p>
                     : <div className="tabela-rolagem tabela-empilha resultados-mobile" tabIndex={0} role="region" aria-label="Itens que mais faturaram">
                         <table>
                             <thead><tr><th scope="col">Item</th><th scope="col" className="num">Quantidade</th><th scope="col" className="num">Total</th></tr></thead>
-                            <tbody>{r.top_itens.map((i) => <tr key={i.descricao}>
+                            <tbody>{Object.values(r.top_itens).map((i) => <tr key={i.descricao}>
                                 <td data-rotulo="Item">{i.descricao}</td><td data-rotulo="Quantidade" className="num">{i.quantidade}</td><td data-rotulo="Total" className="num">{reais(i.total)}</td>
                             </tr>)}</tbody>
                         </table>

@@ -4,6 +4,7 @@ import Workspace from '../Layouts/Workspace';
 import Confirmacao from '../Components/Confirmacao';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 import usarCartao from '../Components/usarCartao';
 
 const ESPECIES = { cao: 'Cão', gato: 'Gato', ave: 'Ave', roedor: 'Roedor', reptil: 'Réptil', outro: 'Outro' };
@@ -11,7 +12,7 @@ const v = (x) => (x ? x : '—');
 
 // Ficha do tutor (só leitura). O cadastro continua nos cards: "Editar o cadastro" abre o card de revisão.
 export default function Tutor({ tutor, pets, podeEditar }) {
-    const { cartao, ocupado, setOcupado, erro, trava, abrir } = usarCartao();
+    const { cartao, abrindo, ocupado, setOcupado, erro, trava, abrir } = usarCartao();
     const [aviso, setAviso] = useState('');
     const aoMensagem = (texto) => { setAviso(texto); router.reload(); };
 
@@ -27,6 +28,7 @@ export default function Tutor({ tutor, pets, podeEditar }) {
         </p>
         {erro && <Aviso tipo="erro" role="alert">{erro}</Aviso>}
         {aviso && <Aviso tipo="info" role="status">{aviso}</Aviso>}
+        {abrindo && <CaixaCarregando texto="Abrindo o formulário…" />}
         {cartao && <Confirmacao key={cartao.proposta} proposta={cartao} adicionar={aoMensagem} trava={trava} ocupado={ocupado} definirOcupado={setOcupado}
             abrirFormulario={(tool, id) => abrir(tool, { id })} />}
 

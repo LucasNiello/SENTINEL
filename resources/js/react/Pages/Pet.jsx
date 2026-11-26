@@ -4,6 +4,7 @@ import Workspace from '../Layouts/Workspace';
 import Confirmacao from '../Components/Confirmacao';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 import usarCartao from '../Components/usarCartao';
 
 const ESPECIES = { cao: 'Cão', gato: 'Gato', ave: 'Ave', roedor: 'Roedor', reptil: 'Réptil', outro: 'Outro' };
@@ -25,7 +26,7 @@ function Bloco({ id, titulo, vazio, itens, rotulo, children }) {
 
 // Ficha do pet (só leitura; o prontuário é do veterinário e não aparece aqui).
 export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, vendas, podeEditar }) {
-    const { cartao, ocupado, setOcupado, erro, trava, abrir } = usarCartao();
+    const { cartao, abrindo, ocupado, setOcupado, erro, trava, abrir } = usarCartao();
     const [aviso, setAviso] = useState('');
     const aoMensagem = (texto) => { setAviso(texto); router.reload(); };
 
@@ -41,6 +42,7 @@ export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, ven
         </p>
         {erro && <Aviso tipo="erro" role="alert">{erro}</Aviso>}
         {aviso && <Aviso tipo="info" role="status">{aviso}</Aviso>}
+        {abrindo && <CaixaCarregando texto="Abrindo o formulário…" />}
         {cartao && <Confirmacao key={cartao.proposta} proposta={cartao} adicionar={aoMensagem} trava={trava} ocupado={ocupado} definirOcupado={setOcupado}
             abrirFormulario={(tool, id) => abrir(tool, { id })} />}
 

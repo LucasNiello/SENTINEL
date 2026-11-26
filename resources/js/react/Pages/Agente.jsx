@@ -3,6 +3,7 @@ import Workspace from '../Layouts/Workspace';
 import Confirmacao from '../Components/Confirmacao';
 import TabelaConsulta from '../Components/TabelaConsulta';
 import Aviso from '../Components/ui/Aviso';
+import FarolCarregando from '../Components/ui/FarolCarregando';
 import './Agente.css';
 
 const errosHttp = {
@@ -22,18 +23,34 @@ export default function Agente({ historico = [] }) {
     const [pensando, setPensando] = useState(false);
     const campo = useRef(null);
     const fim = useRef(null);
+    const carregando = useRef(null);
     const requisicao = useRef(null);
     const montado = useRef(false);
     const interagiu = useRef(false);
+    // Histórico de mensagens nas setas (como no shell): posição atual (null = digitando) e o rascunho guardado ao começar a navegar.
+    const posicao = useRef(null);
+    const rascunho = useRef('');
 
     useEffect(() => {
         montado.current = true;
         return () => { montado.current = false; requisicao.current?.abort(); };
     }, []);
 
+    // A roda do mouse fora da coluna do chat (laterais, topo, rodapé) também rola a conversa: a tela só tem o chat para rolar.
+    // Dentro de #historico o navegador já cuida; zoom (Ctrl) e campos de texto ficam como estão.
+    useEffect(() => {
+        const aoRolar = (e) => {
+            const historico = document.getElementById('historico');
+            if (!historico || e.ctrlKey || e.defaultPrevented || historico.contains(e.target) || e.target.closest?.('textarea, input, select, [role="dialog"]')) return;
+            historico.scrollTop += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+        };
+        window.addEventListener('wheel', aoRolar, { passive: true });
+        return () => window.removeEventListener('wheel', aoRolar);
+    }, []);
+
     useEffect(() => {
         if (!interagiu.current) return;
-        fim.current?.scrollIntoView({ block: 'nearest' });
+        (carregando.current ?? fim.current)?.scrollIntoView({ block: 'nearest' });
         if (!pensando) campo.current?.focus({ preventScroll: true });
     }, [mensagens, pensando]);
 
@@ -70,6 +87,26 @@ export default function Agente({ historico = [] }) {
         }
     }
 
+    // ↑ volta às mensagens anteriores, ↓ avança; passando da mais nova, volta o que estava sendo digitado.
+    function navegarHistorico(e) {
+        if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.nativeEvent.isComposing || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+        const enviadas = mensagens.filter((m) => m.classe === 'msg--usuario').map((m) => m.texto);
+        if (enviadas.length === 0) return;
+        e.preventDefault();
+        let proxima = posicao.current;
+        if (e.key === 'ArrowUp') {
+            if (proxima === null) { rascunho.current = texto; proxima = enviadas.length - 1; }
+            else proxima = Math.max(0, proxima - 1);
+        } else {
+            if (proxima === null) return;
+            proxima = proxima + 1 >= enviadas.length ? null : proxima + 1;
+        }
+        posicao.current = proxima;
+        setTexto(proxima === null ? rascunho.current : enviadas[proxima]);
+        // Cursor no fim do texto, como no shell.
+        setTimeout(() => { const c = campo.current; if (c) c.setSelectionRange(c.value.length, c.value.length); }, 0);
+    }
+
     async function enviar(evento) {
         evento.preventDefault();
         const mensagem = texto.trim();
@@ -78,6 +115,7 @@ export default function Agente({ historico = [] }) {
         requisicao.current = controller;
         interagiu.current = true;
         adicionar(mensagem, 'msg--usuario');
+        posicao.current = null;
         setTexto('');
         setPensando(true);
         const timeout = setTimeout(() => controller.abort(), 35000);
@@ -171,15 +209,15 @@ export default function Agente({ historico = [] }) {
                                     <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : 'Sentinel'}</span>
                                     <span>{mensagem.texto}</span>
                                 </div>)}
-                    </div>
-                    <div id="carregando" className="carregando" hidden={!pensando} role="status">
-                        <span>Consultando…</span><div className="carregando__barra" />
+                        {pensando && <div id="carregando" ref={carregando} className="chat-carregando" role="status">
+                            <FarolCarregando /><span className="sr-only">Consultando…</span>
+                        </div>}
                     </div>
                     <div className="agent-composer" ref={fim}>
                         <form id="form-comando" onSubmit={enviar} aria-busy={pensando}>
                             <label htmlFor="campo-mensagem" className="sr-only">Seu pedido ao agente</label>
                             <span className="composer-mark" aria-hidden="true">⌘</span>
-                            <input ref={campo} type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required maxLength={1000} value={texto} onChange={(e) => setTexto(e.target.value)} disabled={pensando} onKeyDown={(e) => { if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault(); }} />
+                            <input ref={campo} type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required maxLength={1000} value={texto} autoComplete="off" autoCorrect="off" onChange={(e) => { posicao.current = null; setTexto(e.target.value); }} disabled={pensando} onKeyDown={(e) => { if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault(); navegarHistorico(e); }} />
                             <button type="submit" id="botao-enviar" aria-label="Enviar" title="Enviar" disabled={pensando}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" /></svg></button>
                         </form>
                         <p className="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>

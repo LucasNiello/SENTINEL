@@ -70,6 +70,8 @@ export default forwardRef(function Botao({ variante = 'secundario', segurar = fa
     return <button ref={ref} type={type} disabled={disabled} className={`botao botao--${variante} ${className}`.trim()}
         style={segurar ? { touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' } : undefined} {...resto} {...eventos}>
         {segurar && <span className="botao__barra" style={{ width: `${progresso}%` }} aria-hidden="true" />}
-        <span className="botao__rotulo">{progresso > 0 ? <><small>confirmando</small>{Math.floor(progresso)}%</> : children}</span>
+        {/* O rótulo original continua ocupando espaço (só fica invisível) enquanto segura: se o botão encolhesse, o mouse sairia de cima dele e o gesto seria cancelado. */}
+        <span className="botao__rotulo" style={progresso > 0 ? { visibility: 'hidden' } : undefined}>{children}</span>
+        {progresso > 0 && <span className="botao__rotulo botao__progresso" aria-hidden="true"><small>confirmando</small>{Math.floor(progresso)}%</span>}
     </button>;
 });
