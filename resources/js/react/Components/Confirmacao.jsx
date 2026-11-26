@@ -3,6 +3,7 @@ import CamposProposta, { coletarValores, valoresIniciais } from './CamposPropost
 import CalendarioAgendamento from './CalendarioAgendamento';
 import Reautenticacao from './Reautenticacao';
 import ItensLote from './ItensLote';
+import ListaDePets, { coletarPets, petsIniciais } from './ui/ListaDePets';
 import ItensEstorno, { coletarLinhas, quantidadesIniciais } from './ItensEstorno';
 import Aviso from './ui/Aviso';
 import Botao from './ui/Botao';
@@ -20,6 +21,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const [token, setToken] = useState(null);
     const [valores, setValores] = useState(() => valoresIniciais(proposta.formulario?.campos ?? []));
     const [quantidades, setQuantidades] = useState(() => quantidadesIniciais(proposta.formulario?.itens_estorno));
+    const [pets, setPets] = useState(() => petsIniciais(proposta.formulario?.lista));
     const [edicaoPendente, setEdicaoPendente] = useState(false);
     const tokenEdicao = useRef(null);
     const form = useRef(null);
@@ -30,7 +32,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     const [fechamento, setFechamento] = useState(null);
     const [erroSeq, setErroSeq] = useState(0);
     const avisoErro = useRef(null);
-    const [etapa, setEtapa] = useState('Confira a proposta e clique em Revisar. Nada foi gravado.');
+    const [etapa, setEtapa] = useState(null);
     const [toast, setToast] = useState(null);
     const montado = useRef(true);
     const cartao = useRef(null);
@@ -38,16 +40,31 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
     useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
     // Segurar 2 s só nas ações destrutivas (decisão B): o servidor diz em `segurar`, calculado com os valores revisados.
     // Sem a resposta, o padrão seguro é segurar (igual ao Blade).
-    const precisaSegurar = dados.segurar !== false;
+    // 26/11: ações da agenda confirmam em UM passo (dados.passo_unico): sem Revisar nem token; o Confirmar manda {proposta, valores}.
+    const passoUnico = dados.passo_unico === true;
+    const condicao = dados.segurar_quando;
+    const precisaSegurar = passoUnico
+        ? (condicao?.campo ? String(valores[condicao.campo] ?? '') === String(condicao.valor) : dados.segurar === true)
+        : dados.segurar !== false;
+    const textoEtapa = etapa ?? (passoUnico
+        ? (precisaSegurar ? 'Confira os dados. Segure Confirmar por 2 segundos para gravar. Se soltar antes, nada é gravado.'
+            : dados.formulario?.ficha ? 'Escolha o horário no calendário e clique em Confirmar.' : 'Confira os dados e clique em Confirmar.')
+        : 'Confira a proposta e clique em Revisar. Nada foi gravado.');
 
     async function executar(acao, alteracoes = null, { silencioso = false } = {}) {
-        if (trava.current || encerrado || (acao === 'confirmar' && !token)
+        if (trava.current || encerrado || (acao === 'confirmar' && !token && !passoUnico)
+            || (acao === 'revisar' && passoUnico)
             || (loteComErro && acao !== 'cancelar')
             || (acao === 'revisar' && (token || edicaoPendente))
             || (acao === 'editar' && !token && !tokenEdicao.current)) return false;
         const atuais = alteracoes ? { ...valores, ...alteracoes } : valores;
         if (alteracoes) setValores(atuais);
-        if (acao === 'revisar' && !form.current?.reportValidity()) return false;
+        if ((acao === 'revisar' || (acao === 'confirmar' && passoUnico)) && !form.current?.reportValidity()) return false;
+        if (acao === 'confirmar' && passoUnico && dados.formulario?.ficha && !atuais.inicio) {
+            setErro('Escolha o dia e o horário no calendário antes de confirmar.');
+            setErroSeq((n) => n + 1);
+            return false;
+        }
         if (['revisar', 'confirmar'].includes(acao) && dados.formulario?.reautenticar
             && !autorizacao.current?.validar()) return false;
         const controller = new AbortController();
@@ -56,7 +73,8 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         definirOcupado(true);
         setErro('');
         const corpo = acao === 'revisar' ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) }
-            : acao === 'confirmar' ? { token } : acao === 'editar' ? { token: token || tokenEdicao.current } : { proposta: proposta.proposta };
+            : acao === 'confirmar' ? (passoUnico ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) } : { token }) : acao === 'editar' ? { token: token || tokenEdicao.current } : { proposta: proposta.proposta };
+        if (['revisar', 'confirmar'].includes(acao) && corpo.valores && dados.formulario?.lista) corpo.valores.pets = coletarPets(pets);
         if (acao === 'revisar' && dados.formulario?.itens_estorno) {
             corpo.valores.linhas = coletarLinhas(dados.formulario.itens_estorno, quantidades);
         }
@@ -68,7 +86,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             setEdicaoPendente(true);
         }
         // Uma tentativa de confirmação pode consumir o token mesmo quando falha.
-        if (acao === 'confirmar') setToken(null);
+        if (acao === 'confirmar' && !passoUnico) setToken(null);
         const timeout = setTimeout(() => controller.abort(), 35000);
         let propostaEncerrada = false;
         try {
@@ -88,13 +106,15 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             const resultado = await resposta.json().catch(() => null);
             if (!montado.current) return false;
             if (!resposta.ok || !resultado || ['erro', 'negado'].includes(resultado.tipo)) {
-                if (acao === 'revisar' && resultado?.formulario) {
+                if ((acao === 'revisar' || (acao === 'confirmar' && passoUnico)) && resultado?.formulario) {
                     setDados((anterior) => ({ ...anterior, formulario: resultado.formulario }));
                     setValores((anteriores) => ({ ...valoresIniciais(resultado.formulario.campos ?? []), ...anteriores }));
+                    if (resultado.formulario.lista) setPets(coletarPets(pets)); // os erros vêm por posição: sem linhas em branco no meio
                     if (resultado.formulario.itens_estorno) {
                         setValores(valoresIniciais(resultado.formulario.campos ?? []));
                         setQuantidades(quantidadesIniciais(resultado.formulario.itens_estorno));
                     }
+                    if (passoUnico) setEtapa('Nada foi gravado. Ajuste o que está em destaque e confirme de novo.');
                     if ((resultado.formulario.itens ?? []).some((item) => item.erro)) {
                         setToken(null);
                         setEtapa('Peça de novo para montar outro plano, ou clique em Cancelar.');
@@ -115,8 +135,11 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                 }
                 setDados((anterior) => {
                     const formulario = resultado.formulario ?? anterior.formulario;
-                    return { ...anterior, ...resultado, formulario: formulario ? { ...formulario,
-                        campos: (formulario.campos ?? []).map(({ erro: _erro, ...campo }) => campo) } : formulario };
+                    // Revisão aprovada: some qualquer erro que ficou da tentativa anterior (do topo, dos campos e de cada pet da lista).
+                    const { erro: _erroTopo, ...semErro } = formulario ?? {};
+                    return { ...anterior, ...resultado, formulario: formulario ? { ...semErro,
+                        campos: (formulario.campos ?? []).map(({ erro: _erro, ...campo }) => campo),
+                        ...(formulario.lista ? { lista: { ...formulario.lista, itens: (formulario.lista.itens ?? []).map((i) => ({ ...i, erros: {} })) } } : {}) } : formulario };
                 });
                 setToken(resultado.token);
                 if (resultado.formulario?.itens_estorno) {
@@ -151,7 +174,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                 ? 'Não foi possível obter a resposta. A ação pode ter sido processada; confira a situação antes de tentar novamente.' : falha.message;
             setErro(mensagem);
             setErroSeq((n) => n + 1);
-            if (acao === 'confirmar') setEtapa(propostaEncerrada
+            if (acao === 'confirmar' && !(passoUnico && !propostaEncerrada)) setEtapa(propostaEncerrada
                 ? 'Proposta encerrada. Faça um novo pedido para tentar novamente.'
                 : 'Confirmação não concluída nesta tela. É necessário revisar novamente antes de confirmar.');
             return false;
@@ -176,6 +199,12 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             setQuantidades(Object.fromEntries(formulario.itens_estorno.map((item) => [item.item_id,
                 String(valor === 'tudo_menos_prontuario' && item.origem === 'Prontuário' ? 0 : item.restante)])));
         }
+    }
+    // Passo único: escolher no calendário só preenche os campos (nada é revisado nem fica travado).
+    function alterarSelecao(selecao) {
+        if (bloqueado) return;
+        setValores((anteriores) => ({ ...anteriores, ...selecao }));
+        setErro('');
     }
     // Atalho da ficha (Remarcar, Trocar serviço, Mudar status): esta proposta sai sem gravar e a outra ficha abre, sem IA.
     async function abrirOutra(tool) {
@@ -219,6 +248,7 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
         </dl>
         {(formulario.avisos ?? []).map((aviso, i) => <Aviso key={i} tipo="atencao" className="msg msg--aviso">{exibir(aviso)}</Aviso>)}
         <ItensLote itens={formulario.itens} />
+        {formulario.lista && <ListaDePets lista={formulario.lista} pets={pets} aoMudar={(novos) => { if (!bloqueado) setPets(novos); }} bloqueado={bloqueado} />}
         {formulario.ficha && abrirFormulario && !encerrado && (formulario.ficha.atalhos ?? []).length > 0 && <div className="ficha-atalhos">
             <span>Prefere outra ação com este agendamento?</span>
             {formulario.ficha.atalhos.map((atalho) => <Botao key={atalho.tool} variante="fantasma" disabled={ocupado} onClick={() => abrirOutra(atalho.tool)}>{atalho.rotulo}</Botao>)}
@@ -229,16 +259,16 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
             {formulario.itens_estorno && <ItensEstorno itens={formulario.itens_estorno} quantidades={quantidades} bloqueado={bloqueado}
                 alterar={(id, quantidade) => { if (!bloqueado) { setQuantidades((anteriores) => ({ ...anteriores, [id]: quantidade })); setValores((anteriores) => ({ ...anteriores, modo: 'itens' })); } }} />}
             {formulario.ficha && <CalendarioAgendamento ficha={formulario.ficha} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
-                selecionar={(selecao) => executar('revisar', selecao)} erros={campos.filter((c) => ['inicio', 'profissional_id'].includes(c.nome)).map((c) => c.erro)} />}
+                selecionar={(selecao) => passoUnico ? alterarSelecao(selecao) : executar('revisar', selecao)} recarregar={erroSeq} erros={campos.filter((c) => ['inicio', 'profissional_id'].includes(c.nome)).map((c) => c.erro)} />}
         </form>
         {formulario.reautenticar && !encerrado && <Reautenticacao key={formulario.tipo_autorizacao || 'admin'}
             ref={autorizacao} tipo={formulario.tipo_autorizacao} bloqueado={ocupado || edicaoPendente} />}
-        <p className="card-etapa" role="status">{processando ? 'Processando…' : etapa}</p>
+        <p className="card-etapa" role="status">{processando ? 'Processando…' : textoEtapa}</p>
         {!encerrado && <div className="acoes">
-            {!token && !edicaoPendente && !loteComErro && <Botao variante="primario" className="btn-revisar" disabled={ocupado} onClick={() => executar('revisar')}>Revisar</Botao>}
-            {(token || edicaoPendente) && !loteComErro && (!(formulario.itens?.length) || campos.length > 0 || formulario.reautenticar) && <Botao variante="secundario" className="btn-editar" disabled={ocupado} onClick={() => executar('editar')}>Editar</Botao>}
-            {!loteComErro && <Botao variante={token && precisaSegurar ? 'perigo' : token ? 'primario' : 'secundario'} className="btn-confirmar" disabled={ocupado || !token}
-                segurar={!!token && precisaSegurar} aoSoltarCedo={() => setToast({ tipo: 'atencao', texto: SOLTOU_CEDO })}
+            {!passoUnico && !token && !edicaoPendente && !loteComErro && <Botao variante="primario" className="btn-revisar" disabled={ocupado} onClick={() => executar('revisar')}>Revisar</Botao>}
+            {!passoUnico && (token || edicaoPendente) && !loteComErro && (!(formulario.itens?.length) || campos.length > 0 || formulario.reautenticar) && <Botao variante="secundario" className="btn-editar" disabled={ocupado} onClick={() => executar('editar')}>Editar</Botao>}
+            {!loteComErro && <Botao variante={(token || passoUnico) && precisaSegurar ? 'perigo' : (token || passoUnico) ? 'primario' : 'secundario'} className="btn-confirmar" disabled={ocupado || (!token && !passoUnico)}
+                segurar={(!!token || passoUnico) && precisaSegurar} aoSoltarCedo={() => setToast({ tipo: 'atencao', texto: SOLTOU_CEDO })}
                 onClick={() => executar('confirmar')}>Confirmar</Botao>}
             <Botao variante="fantasma" className="btn-cancelar" disabled={ocupado} onClick={() => executar('cancelar')}>Cancelar</Botao>
         </div>}

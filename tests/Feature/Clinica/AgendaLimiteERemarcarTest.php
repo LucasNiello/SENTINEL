@@ -486,7 +486,8 @@ class AgendaLimiteERemarcarTest extends TestCase
 
         $campos = array_column($this->comando('agendar_atendimento', [])->assertOk()->json('formulario.campos'), null, 'nome');
 
-        $this->assertContains("Thor · #{$pet->id}", array_column($campos['pet_id']['opcoes'], 'rotulo'));
+        // Pet com o dono (26/11): "Thor · Nome do tutor · #id".
+        $this->assertContains("Thor · {$pet->tutor->nome} · #{$pet->id}", array_column($campos['pet_id']['opcoes'], 'rotulo'));
         $this->assertContains("Retorno · #{$servico->id}", array_column($campos['catalogo_item_id']['opcoes'], 'rotulo'));
         $this->assertContains($this->vet->name." · #{$this->vet->id}", array_column($campos['profissional_id']['opcoes'], 'rotulo'));
         $this->assertSame((string) $pet->id, (string) $campos['pet_id']['opcoes'][0]['valor'], 'o valor continua sendo o id');

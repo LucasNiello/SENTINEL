@@ -141,6 +141,9 @@ class VendaService
 
         $pet = $petId === null ? null : $this->doTenant(Pet::class, $petId, $tenantId, 'o pet');
         if ($pet !== null) {
+            if ($pet->inativado_em !== null) {
+                throw new RegraDeNegocioException("{$pet->nome} está arquivado: reative o cadastro antes de vender.");
+            }
             if ($tutorId !== null && $tutorId !== $pet->tutor_id) {
                 throw new RegraDeNegocioException('O pet informado é de outro tutor.');
             }

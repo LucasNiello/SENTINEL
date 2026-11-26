@@ -179,8 +179,7 @@ export default function Agente({ historico = [] }) {
                             <label htmlFor="campo-mensagem" className="sr-only">Seu pedido ao agente</label>
                             <span className="composer-mark" aria-hidden="true">⌘</span>
                             <input ref={campo} type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required maxLength={1000} value={texto} onChange={(e) => setTexto(e.target.value)} disabled={pensando} onKeyDown={(e) => { if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault(); }} />
-                            <kbd className="composer-key" aria-hidden="true">ENTER ↵</kbd>
-                            <button type="submit" id="botao-enviar" disabled={pensando}>Enviar <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" /></svg></button>
+                            <button type="submit" id="botao-enviar" aria-label="Enviar" title="Enviar" disabled={pensando}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" /></svg></button>
                         </form>
                         <p className="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
                     </div>

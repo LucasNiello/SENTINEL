@@ -49,6 +49,9 @@ Route::middleware(['auth', GarantirContaAtiva::class])->group(function () {
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
         Route::get('/cadastros', [TelasController::class, 'cadastros']);
+        // 27/11: página Clientes (React; no front Blade redireciona para /cadastros). Só leitura: escrever abre o card de sempre.
+        Route::get('/clientes', [\App\Http\Controllers\ClientesController::class, 'index'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::get('/clientes/dados', [\App\Http\Controllers\ClientesController::class, 'dados'])->middleware('throttle:120,1,clientes-dados');
         Route::get('/lixeira', [TelasController::class, 'lixeira']);
         Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
         // Item I (clínica vet): a tela usa as rotas JSON /supervisao/* abaixo, que conferem tudo de novo.

@@ -13,6 +13,7 @@ use App\Http\Requests\PetRequest;
 use App\Http\Requests\ReceberCobrancaRequest;
 use App\Http\Requests\RemarcarRequest;
 use App\Http\Requests\RegistrarVendaRequest;
+use App\Http\Requests\ArquivarPetRequest;
 use App\Http\Requests\RegistroIdRequest;
 use App\Http\Requests\TutorRequest;
 use App\Models\Agendamento;
@@ -46,6 +47,9 @@ trait CatalogoDaClinica
     private const PAPEIS_EQUIPE = ['atendente', 'vendedor', 'recepcao', 'veterinario', 'dono'];
 
     private const PAPEIS_DO_DONO = ['dono'];
+
+    /** Arquivar/reativar o cadastro do pet (27/11, sugestão a confirmar com o Lucas): recepção, veterinário e dono. */
+    private const PAPEIS_DO_ARQUIVO_DE_PET = ['recepcao', 'veterinario', 'dono'];
 
     /** Quem vê e mexe na agenda (tabela da FASE oito, 15/11): o vendedor não. Mesma lista no chat e na tela /agenda. */
     private const PAPEIS_DA_AGENDA = ['atendente', 'recepcao', 'veterinario', 'dono'];
@@ -110,7 +114,7 @@ trait CatalogoDaClinica
                 ],
                 buscar: fn (array $a) => $pets->buscarPorFiltro($a['nome'] ?? null, isset($a['tutor_id']) ? (int) $a['tutor_id'] : null, $a['tenant_id']),
                 gravar: fn (array $dados, int $tenantId) => $pets->criar($dados, $tenantId),
-                colunas: ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas'],
+                colunas: ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas', 'observacoes', 'inativado_em'],
                 colunaRotulo: 'nome',
                 papeisLeitura: self::PAPEIS_EQUIPE,
                 papeisEscrita: self::PAPEIS_EQUIPE,
@@ -119,6 +123,96 @@ trait CatalogoDaClinica
                 tituloAtualizar: 'Alterar pet',
                 sucessoAtualizar: 'Pet atualizado',
                 resumirAtualizar: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
+            ),
+            // 27/11: cadastro unificado do cliente: o tutor e os pets dele de uma vez, tudo ou nada. Auditoria: uma linha por registro,
+            // todas com o mesmo lote_id.
+            $this->definirAcao(
+                nome: 'cadastrar_cliente_com_pets',
+                descricao: 'Cadastra um cliente (tutor) e, de uma vez, os pets dele (de 0 a 10). Use quando o pedido traz o tutor e os animais juntos ("cadastre a Maria com o cachorro Thor e a gata Mel"); para só um tutor ou só um pet de tutor que já existe, use criar_tutor ou criar_pet. Tudo é gravado junto ou nada é gravado. Nunca invente dados: o que faltar fica em branco e o card marca o campo.',
+                acao: 'cadastrar',
+                entidade: 'Tutor',
+                papeis: self::PAPEIS_EQUIPE,
+                propriedades: [
+                    ...$this->propriedadesDoTutor(),
+                    'pets' => ['type' => 'array', 'description' => 'Os pets do cliente.', 'items' => ['type' => 'object', 'properties' => [
+                        'nome' => ['type' => 'string'],
+                        'especie' => ['type' => 'string', 'enum' => Pet::ESPECIES],
+                        'raca' => ['type' => 'string'],
+                        'sexo' => ['type' => 'string', 'enum' => Pet::SEXOS],
+                        'data_nascimento' => ['type' => 'string', 'format' => 'date'],
+                        'peso_gramas' => ['type' => 'integer', 'description' => 'Peso em GRAMAS inteiros (6200 = 6,2 kg).'],
+                        'microchip' => ['type' => 'string'],
+                        'alertas' => ['type' => 'string'],
+                        'observacoes' => ['type' => 'string'],
+                    ]]],
+                ],
+                obrigatorios: ['nome'],
+                formRequest: \App\Http\Requests\ClienteComPetsRequest::class,
+                executar: function (array $d, int $tenantId) use ($tutores) {
+                    $loteId = (string) \Illuminate\Support\Str::uuid();
+                    // O lote vale também para a linha geral da tool (o escopo é o do executor): N+1 linhas, todas com o mesmo lote_id.
+                    app(\App\Services\DetalhesAuditoria::class)->anotar('lote_id', $loteId);
+                    $gravado = $tutores->criarComPets(
+                        \Illuminate\Support\Arr::except($d, ['pets', 'tenant_id']), $d['pets'] ?? [], $tenantId,
+                        fn ($registro, string $tipo) => app(\App\Services\AuditoriaService::class)->registrar(
+                            tool: $tipo === 'tutor' ? 'criar_tutor' : 'criar_pet', acao: 'criar', entidadeTipo: $tipo === 'tutor' ? 'Tutor' : 'Pet',
+                            entidadeId: $registro->id, parametros: ['id' => $registro->id, 'nome' => $registro->nome], resultado: 'sucesso',
+                            mensagem: 'Cadastro unificado do cliente (lote '.$loteId.').', papel: $this->contexto->papel(), permitido: true));
+
+                    return $gravado['tutor'];
+                },
+                mensagemErro: 'Não consegui cadastrar o cliente. Nada foi gravado.',
+                titulo: 'Cadastrar cliente e pets',
+                sucesso: 'Cliente cadastrado',
+            ),
+            // 27/11: arquivar o cadastro do pet (sem apagar; sai dos seletores, o histórico fica). Segurar 2 s (risco exclusao).
+            $this->definirAcao(
+                nome: 'arquivar_pet',
+                descricao: 'Arquiva o cadastro de um pet (falecido, mudou etc.) sem apagar nada: ele sai das listas de escolha e o histórico continua. Exige o motivo em observacoes. Pet com agendamento futuro em aberto não é arquivado. Achado pelo id ou pelo nome do pet.',
+                acao: 'arquivar',
+                entidade: 'Pet',
+                papeis: self::PAPEIS_DO_ARQUIVO_DE_PET,
+                propriedades: ['observacoes' => ['type' => 'string', 'description' => 'Motivo do arquivamento (ex.: falecido, mudou de cidade).']],
+                obrigatorios: ['observacoes'],
+                formRequest: ArquivarPetRequest::class,
+                executar: fn (array $d, int $tenantId) => $pets->arquivarCadastro((int) $d['id'], (string) $d['observacoes'], $tenantId),
+                mensagemErro: 'Não consegui arquivar o pet. Nada foi gravado.',
+                titulo: 'Arquivar o cadastro do pet',
+                sucesso: 'Pet arquivado',
+                conferir: function (array $a) use ($pets): ?array {
+                    $motivo = $pets->motivoParaNaoArquivar((int) ($a['id'] ?? 0), (int) $a['tenant_id']);
+
+                    return $motivo === null ? null : ['campo' => 'id', 'motivo' => $motivo];
+                },
+                risco: 'exclusao',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $pets->localizarPorCadastro($id, $busca, $tenantId, false),
+                rotulo: 'o pet',
+                colunaRotulo: 'nome',
+                rotuloAcao: 'Arquivar',
+                campos: ['observacoes'],
+                resumir: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
+            ),
+            $this->definirAcao(
+                nome: 'reativar_pet',
+                descricao: 'Reativa o cadastro de um pet arquivado: ele volta às listas de escolha. Achado pelo id ou pelo nome do pet.',
+                acao: 'reativar',
+                entidade: 'Pet',
+                papeis: self::PAPEIS_DO_ARQUIVO_DE_PET,
+                propriedades: [],
+                obrigatorios: [],
+                formRequest: RegistroIdRequest::class,
+                executar: fn (array $d, int $tenantId) => $pets->reativarCadastro((int) $d['id'], $tenantId),
+                mensagemErro: 'Não consegui reativar o pet. Nada foi gravado.',
+                titulo: 'Reativar o cadastro do pet',
+                sucesso: 'Pet reativado',
+                conferir: fn (array $a) => $pets->localizarPorCadastro((int) ($a['id'] ?? 0), null, (int) $a['tenant_id'], true)->isEmpty()
+                    ? ['campo' => 'id', 'motivo' => 'Não encontrei o pet arquivado #'.(int) ($a['id'] ?? 0).'.'] : null,
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $pets->localizarPorCadastro($id, $busca, $tenantId, true),
+                rotulo: 'o pet arquivado',
+                colunaRotulo: 'nome',
+                rotuloAcao: 'Reativar',
+                campos: [],
+                resumir: fn (array $v, int $tenantId) => $this->tutorDoPetNoCard((int) ($v['id'] ?? 0), $tenantId),
             ),
             ...$this->definirCadastro(
                 entidade: 'CatalogoItem',
@@ -1438,6 +1532,7 @@ trait CatalogoDaClinica
             'data_nascimento' => ['type' => 'string', 'format' => 'date'],
             'peso_gramas' => ['type' => 'integer', 'description' => 'Peso em GRAMAS inteiros (6200 = 6,2 kg).'],
             'microchip' => ['type' => 'string'],
+            'observacoes' => ['type' => 'string', 'description' => 'Observações do cadastro do animal (não clínicas).'],
             'alertas' => ['type' => 'string', 'description' => 'Aviso NÃO clínico para a equipe (ex.: "morde", "medo de secador"). Nunca escreva texto clínico aqui.'],
         ];
     }

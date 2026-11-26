@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['tutor_id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'microchip', 'alertas', 'tenant_id'])]
+#[Fillable(['tutor_id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'microchip', 'alertas', 'observacoes', 'tenant_id'])]
 class Pet extends Model
 {
     use ComArquivamento, SoftDeletes;
@@ -26,6 +26,7 @@ class Pet extends Model
             'data_nascimento' => 'date',
             'peso_gramas' => 'integer',
             'arquivado_em' => 'datetime',
+            'inativado_em' => 'datetime',
         ];
     }
 

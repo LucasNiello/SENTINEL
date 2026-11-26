@@ -312,7 +312,14 @@ class AgendaService
             throw new RegraDeNegocioException('Origem do agendamento inválida.');
         }
 
-        $this->doTenant(Pet::class, $dados['pet_id'] ?? null, $tenantId, 'o pet');
+        $pet = $this->doTenant(Pet::class, $dados['pet_id'] ?? null, $tenantId, 'o pet');
+        // Corrida com o arquivar: na gravação (travar) relê o pet com trava, na mesma ordem do arquivar (pet antes dos agendamentos).
+        if ($travar) {
+            $pet = Pet::query()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($pet->id);
+        }
+        if ($pet->inativado_em !== null) {
+            throw new RegraDeNegocioException("{$pet->nome} está arquivado: reative o cadastro antes de agendar.");
+        }
         $servico = $this->servicoDoTenant($dados['catalogo_item_id'] ?? null, $tenantId);
         // Em branco = "qualquer profissional" (escolhido abaixo, depois do início). Encaixe de emergência não escolhe: exige o profissional.
         if (blank($dados['profissional_id'] ?? null) && ($dados['origem'] ?? 'normal') === 'encaixe_emergencia') {
@@ -357,6 +364,12 @@ class AgendaService
             ->pluck('id')->map(fn ($id) => (int) $id)->all();
     }
 
+    /** Cirurgia, internação e afins: o profissional é explícito (CRMV), não existe "qualquer". */
+    private function exigeEscolherProfissional(CatalogoItem $servico, int $tenantId): bool
+    {
+        return $servico->setor === 'clinica' && (in_array($servico->categoria, $this->categoriasRestritas(), true) || $this->grade($tenantId)->foraDaAgenda($servico->categoria));
+    }
+
     /**
      * "Qualquer profissional" (25/11, decisão do Lucas): entre os do setor com vaga no horário, o que tem MENOS atendimentos
      * no dia (ativos e realizados; cancelado e faltou não contam); empate vai para o menor id. $preferido (remarcar: o atual)
@@ -365,7 +378,7 @@ class AgendaService
      */
     private function escolherProfissional(CatalogoItem $servico, CarbonImmutable $inicio, int $tenantId, ?int $ignorarId, bool $travar, ?int $preferido = null, ?int $seNinguemLivre = null): int
     {
-        if ($servico->setor === 'clinica' && (in_array($servico->categoria, $this->categoriasRestritas(), true) || $this->grade($tenantId)->foraDaAgenda($servico->categoria))) {
+        if ($this->exigeEscolherProfissional($servico, $tenantId)) {
             throw new RegraDeNegocioException('Este serviço não tem "qualquer profissional": escolha quem atende.');
         }
         $ids = $this->idsDosCandidatos($servico->setor, $tenantId);
@@ -935,6 +948,8 @@ class AgendaService
             'modelo' => $servico->setor === 'clinica' ? 'blocos' : 'grade',
             // "09:00 · 2 vagas" só para consulta; os demais serviços, só livre/ocupado.
             'mostra_vagas' => $servico->setor === 'clinica' && $grade->mostraVagas($servico->categoria),
+            // 26/11: sem "qualquer profissional" (cirurgia etc.): a tela obriga a escolher quem atende.
+            'exige_profissional' => $this->exigeEscolherProfissional($servico, $tenantId),
             'dia' => $data->format('Y-m-d'),
             'profissionais' => $profissionais,
             'horarios' => array_values($porHora),

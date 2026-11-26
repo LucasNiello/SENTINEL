@@ -265,6 +265,20 @@ html[data-tema] .ficha-mes {padding: 12px; border-radius: var(--raio); backgroun
 html[data-tema] .ficha-dia {background: var(--cor-superficie); border: 1px solid var(--cor-borda); border-radius: 8px}
 html[data-tema] .ficha-dia[aria-pressed="true"], html[data-tema] .ficha-horario[aria-current="true"] {background: var(--cor-primario); border: 2px solid var(--cor-primario); color: var(--cor-sobre-primario); font-weight: 600}
 html[data-tema] .ficha-dia:disabled, html[data-tema] .ficha-horario:disabled {background: transparent; border-color: transparent; color: var(--cor-texto-suave); opacity: 1}
+html[data-tema] .ficha-dia:disabled, html[data-tema] .ficha-horario:disabled {text-decoration: none}
+html[data-tema] .ficha-dia[data-sem-vaga], html[data-tema] .ficha-horario[data-sem-vaga] {text-decoration: line-through}
+html[data-tema] .ficha-horario[aria-current="true"]:disabled, html[data-tema] .ficha-dia[aria-pressed="true"]:disabled {background: var(--cor-primario); border: 2px solid var(--cor-primario); color: var(--cor-sobre-primario); text-decoration: none}
+html[data-tema] .ficha-escolha {margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--cor-marca-suave); color: var(--cor-texto); font-weight: 600}
+/* Combobox */
+html[data-tema] .combo {position: relative; width: 100%}
+html[data-tema] .combo-campo {width: 100%; min-height: 44px; padding: 8px 36px 8px 12px; box-sizing: border-box}
+html[data-tema] .combo-seta {position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--cor-texto-suave)}
+html[data-tema] .combo-lista {position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); max-height: 260px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--cor-superficie); border: 1px solid var(--cor-borda-campo); border-radius: 8px; box-shadow: var(--sombra-suave)}
+html[data-tema] .combo-opcao {min-height: 44px; display: flex; align-items: center; padding: 8px 12px; border-radius: 6px; cursor: pointer; color: var(--cor-texto); overflow-wrap: anywhere}
+html[data-tema] .combo-opcao--ativa {background: var(--cor-marca-suave)}
+html[data-tema] .combo-opcao[aria-selected="true"] {font-weight: 600; box-shadow: inset 3px 0 0 var(--cor-marca-forte)}
+html[data-tema] .combo-opcao--vazia {color: var(--cor-texto-suave)}
+html[data-tema] .combo-vazio {padding: 12px; color: var(--cor-texto-suave)}
 html[data-tema] .ficha-horario {min-width: 88px; border-color: var(--cor-borda-campo)}
 html[data-tema] .ficha-estado {color: var(--cor-texto)}
 html[data-tema] .ficha-quem {display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--cor-info-faixa)}
@@ -334,3 +348,45 @@ html[data-tema] .toast-ancorado {position: absolute; left: 0; bottom: calc(100% 
 html[data-tema] .toast-ancorado .aviso {box-shadow: var(--sombra-suave); background: var(--cor-superficie); padding-right: 4px; align-items: center}
 html[data-tema] .toast-ancorado .aviso--erro {background: var(--cor-erro-faixa)}
 @keyframes toast-sobe {from {opacity: 0; transform: translateY(14px) scale(.98)} to {opacity: 1; transform: translateY(0) scale(1)}}
+/* Cadastro unificado: lista de pets do cliente */
+html[data-tema] .lista-pets {border: 0; padding: 0; margin: 0; display: grid; gap: 12px; min-width: 0}
+html[data-tema] .lista-pets legend {font: 500 16px var(--fonte-titulo); color: var(--cor-texto); padding: 0; margin-bottom: 8px}
+html[data-tema] .lista-pets__item {display: grid; gap: 10px; padding: 12px; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-superficie-suave)}
+html[data-tema] .lista-pets__topo {display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px}
+/* Página Clientes */
+html[data-tema] .clientes {display: grid; gap: 20px; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); align-items: start}
+@media (max-width: 899px) {html[data-tema] .clientes {grid-template-columns: minmax(0, 1fr)}}
+html[data-tema] .clientes-lista, html[data-tema] .clientes-detalhe {display: grid; gap: 12px; min-width: 0}
+html[data-tema] .clientes-topo {display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px}
+html[data-tema] .clientes-busca {min-height: 44px; width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--cor-borda-campo); border-radius: 8px; background: var(--cor-superficie); color: var(--cor-texto)}
+html[data-tema] .clientes-itens {list-style: none; margin: 0; padding: 0; display: grid; gap: 8px}
+html[data-tema] .cliente-item {display: grid; gap: 2px; width: 100%; min-height: 44px; text-align: left; padding: 10px 12px; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-superficie); color: var(--cor-texto); cursor: pointer}
+html[data-tema] .cliente-item[aria-current="true"] {border: 2px solid var(--cor-marca-forte); background: var(--cor-marca-suave)}
+html[data-tema] .cliente-sub {color: var(--cor-texto-suave); font-size: 14px; overflow-wrap: anywhere}
+html[data-tema] .cliente-achado {color: var(--cor-info); font-size: 14px; font-weight: 600}
+html[data-tema] .cliente-ficha {display: grid; gap: 12px; padding: 16px; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-superficie)}
+html[data-tema] .cliente-cabeca {display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px}
+html[data-tema] .cliente-cabeca h2, html[data-tema] .cliente-ficha h3 {margin: 0}
+html[data-tema] .pet-dados {display: grid; gap: 6px; margin: 0}
+html[data-tema] .pet-dados > div {display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 3fr); gap: 8px}
+html[data-tema] .pet-dados dt {color: var(--cor-texto-suave)}
+html[data-tema] .pet-dados dd {margin: 0; overflow-wrap: anywhere}
+html[data-tema] .pet-acoes {display: flex; flex-wrap: wrap; gap: 8px}
+/* Pets empilhados (efeito cascata): cada um é uma linha recolhida; a setinha abre o cadastro */
+html[data-tema] .pet-pilha {list-style: none; margin: 0; padding: 0; display: grid; gap: 0}
+html[data-tema] .pet-item {border: 1px solid var(--cor-borda); background: var(--cor-superficie-suave); border-radius: var(--raio); margin-top: -1px; box-shadow: 0 2px 0 -1px var(--cor-borda)}
+html[data-tema] .pet-item:first-child {margin-top: 0}
+html[data-tema] .pet-linha {display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 12px; border: 0; background: transparent; color: var(--cor-texto); text-align: left; cursor: pointer}
+html[data-tema] .pet-seta {display: inline-block; transition: transform .15s; color: var(--cor-texto-suave)}
+html[data-tema] .pet-linha[aria-expanded="true"] .pet-seta {transform: rotate(90deg)}
+html[data-tema] .pet-nome {font-weight: 600}
+html[data-tema] .pet-especie {color: var(--cor-texto-suave)}
+html[data-tema] .pet-corpo {display: grid; gap: 12px; padding: 4px 12px 14px 34px}
+html[data-tema] .pet-item--arquivado {background: transparent; border-style: dashed}
+html[data-tema] .pet-item--arquivado .pet-nome, html[data-tema] .pet-item--arquivado .pet-especie {color: var(--cor-texto-suave)}
+html[data-tema] .etiqueta-arquivado {margin-left: auto; padding: 2px 8px; border: 1px solid var(--cor-texto-suave); border-radius: 999px; font-size: 13px; color: var(--cor-texto-suave)}
+html[data-tema] .pet-item--foco {outline: 3px solid var(--cor-marca-forte); outline-offset: 2px}
+@media (prefers-reduced-motion: no-preference) {html[data-tema] .pet-item--foco {animation: pet-foco 2.5s ease-out}}
+@keyframes pet-foco {from {background: var(--cor-marca-suave)} to {background: var(--cor-superficie-suave)}}
+html[data-tema] .pets-arquivados {margin-top: 8px}
+html[data-tema] .pets-arquivados > summary {cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--cor-texto-suave); font-weight: 600}

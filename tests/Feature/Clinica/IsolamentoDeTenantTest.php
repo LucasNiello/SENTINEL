@@ -48,9 +48,10 @@ class IsolamentoDeTenantTest extends TestCase
     {
         $nomes = [
             'TutorService::criar', 'TutorService::atualizar', 'TutorService::localizar', 'TutorService::buscarPorFiltro', 'TutorService::excluir',
-            'TutorService::restaurarDaLixeira', 'TutorService::excluirDefinitivo',
+            'TutorService::restaurarDaLixeira', 'TutorService::excluirDefinitivo', 'TutorService::criarComPets',
             'PetService::criar', 'PetService::atualizar', 'PetService::localizar', 'PetService::buscarPorFiltro', 'PetService::excluir',
             'PetService::restaurarDaLixeira', 'PetService::excluirDefinitivo',
+            'PetService::motivoParaNaoArquivar', 'PetService::arquivarCadastro', 'PetService::reativarCadastro', 'PetService::localizarPorCadastro',
             'CatalogoService::criar', 'CatalogoService::atualizar', 'CatalogoService::localizar', 'CatalogoService::buscarPorFiltro', 'CatalogoService::entradaDeEstoque',
             'CatalogoService::baixarEstoque', 'CatalogoService::devolverEstoque', 'CatalogoService::avisosDeSaldoNegativo', 'CatalogoService::excluir',
             'CatalogoService::restaurarDaLixeira', 'CatalogoService::excluirDefinitivo',
@@ -136,6 +137,10 @@ class IsolamentoDeTenantTest extends TestCase
                 $this->inexistente(fn () => $tutores->excluir($tutor->id, self::B), Tutor::class, 'deleted_at');
             },
             'TutorService::restaurarDaLixeira' => fn () => $this->inexistente(fn () => $tutores->restaurarDaLixeira($this->naLixeira($this->tutor())->id, self::B, true)),
+            'TutorService::criarComPets' => function () use ($tutores) {
+                $this->assertSame(self::B, $tutores->criarComPets(['nome' => 'Maria'], [['nome' => 'Rex', 'especie' => 'cao']], self::B)['pets'][0]->tenant_id);
+                $this->assertSame(0, Pet::where('tenant_id', self::T)->count());
+            },
             'TutorService::excluirDefinitivo' => fn () => $this->inexistente(fn () => $tutores->excluirDefinitivo($this->arquivado($this->tutor())->id, self::B, $this->usuarioClinica('dono', self::B)->id)),
 
             'PetService::criar' => fn () => $this->inexistente(fn () => $pets->criar(['tutor_id' => $this->tutor()->id, 'nome' => 'Rex', 'especie' => 'cao'], self::B), Pet::class),
@@ -149,6 +154,17 @@ class IsolamentoDeTenantTest extends TestCase
                 $pet = $this->pet();
                 $this->inexistente(fn () => $pets->excluir($pet->id, self::B), Pet::class, 'deleted_at');
             },
+            'PetService::motivoParaNaoArquivar' => fn () => $this->assertNotNull($pets->motivoParaNaoArquivar($this->pet()->id, self::B)),
+            'PetService::arquivarCadastro' => function () use ($pets) {
+                $pet = $this->pet();
+                $this->inexistente(fn () => $pets->arquivarCadastro($pet->id, 'x', self::B), Pet::class, 'inativado_em');
+            },
+            'PetService::reativarCadastro' => function () use ($pets) {
+                $pet = $this->pet();
+                $pet->forceFill(['inativado_em' => now()])->save();
+                $this->inexistente(fn () => $pets->reativarCadastro($pet->id, self::B), Pet::class, 'inativado_em');
+            },
+            'PetService::localizarPorCadastro' => fn () => $this->vazio($pets->localizarPorCadastro($this->pet()->id, null, self::B, false)),
             'PetService::restaurarDaLixeira' => fn () => $this->inexistente(fn () => $pets->restaurarDaLixeira($this->naLixeira($this->pet())->id, self::B, true)),
             'PetService::excluirDefinitivo' => fn () => $this->inexistente(fn () => $pets->excluirDefinitivo($this->arquivado($this->pet())->id, self::B, $this->usuarioClinica('dono', self::B)->id)),
 
