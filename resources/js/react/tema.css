@@ -496,3 +496,25 @@ html[data-tema] .nova-conversa {display: inline-flex; flex-wrap: wrap; align-ite
 html[data-tema] .nova-conversa__btn {min-height: 32px; padding: 2px 10px; border: 1px solid var(--cor-borda); border-radius: 8px; background: transparent; color: var(--cor-texto-suave); font: inherit; font-size: 14px; cursor: pointer}
 html[data-tema] .nova-conversa__btn:hover:not(:disabled) {background: var(--cor-superficie-suave); color: var(--cor-texto)}
 html[data-tema] .nova-conversa__btn:disabled {cursor: progress; opacity: .6}
+/* Prontuário na ficha do pet (só leitura) */
+html[data-tema] .prontuarios {list-style: none; margin: 0; padding: 0; display: grid; gap: 16px}
+html[data-tema] .prontuario {display: grid; gap: 12px; padding: 16px 20px; border: 1px solid var(--cor-borda); border-left: 4px solid var(--cor-marca-forte); border-radius: var(--raio); background: var(--cor-superficie)}
+html[data-tema] .prontuario__cabeca {display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px}
+html[data-tema] .prontuario__nota {margin: 0; color: var(--cor-texto-suave); font-size: 15px}
+html[data-tema] .prontuario__texto {white-space: pre-wrap; overflow-wrap: anywhere; margin: 0}
+html[data-tema] .prontuario__adendos {display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--cor-borda)}
+html[data-tema] .prontuario__adendos h3 {margin: 0; font-size: 1rem}
+html[data-tema] .prontuario__adendos ul {list-style: none; margin: 0; padding: 0; display: grid; gap: 8px}
+/* Tira de card finalizado/cancelado em telas que não são o chat: respiro antes do conteúdo */
+html[data-tema] main > .card-tira, html[data-tema] main > .aviso + .card-tira {margin: 4px 0 20px}
+/* CRMV na área do avatar (abaixo do papel) */
+html[data-tema] .crmv-tag {color: var(--cor-texto-suave); letter-spacing: .06em; text-transform: none; font-size: 12px}
+/* Atendimento: formulário do prontuário */
+html[data-tema] .prontuario-form {display: grid; gap: 16px; max-width: 880px; margin: 0 0 24px}
+html[data-tema] .prontuario-form__linha {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px}
+@media (max-width: 599px) {html[data-tema] .prontuario-form__linha {grid-template-columns: minmax(0, 1fr)}}
+html[data-tema] .prontuario-form textarea, html[data-tema] .prontuario-conferencia textarea {width: 100%; box-sizing: border-box; min-height: 96px; padding: 10px 12px; border: 1px solid var(--cor-borda-campo); border-radius: 8px; background: var(--cor-superficie); color: var(--cor-texto); font: inherit; line-height: 1.5; resize: vertical}
+html[data-tema] .prontuario-form textarea:disabled, html[data-tema] .prontuario-form select:disabled, html[data-tema] .prontuario-form input:disabled {background: var(--cor-superficie-suave); color: var(--cor-texto); opacity: 1; cursor: default}
+html[data-tema] .prontuario-conferencia {display: grid; gap: 12px; max-width: 520px; padding: 16px 20px; margin: 0 0 24px; border: 1px solid var(--cor-borda); border-left: 4px solid var(--cor-atencao); border-radius: var(--raio); background: var(--cor-superficie)}
+html[data-tema] .prontuario__adendos-lista {list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px}
+html[data-tema] .prontuario__abrir {margin-left: auto; min-height: 36px; padding: 4px 12px; font-size: 14px}

@@ -65,6 +65,14 @@ Route::middleware(['auth', GarantirContaAtiva::class])->group(function () {
         Route::get('/vendas', [ClinicaTelasController::class, 'vendas'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
         // Até 18 dígitos: número maior não cabe em inteiro e daria erro em vez de 404.
         Route::get('/pets/{id}', [ClinicaTelasController::class, 'pet'])->where('id', '[0-9]{1,18}')->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        // 26/11: atendimento do veterinário (prontuário: abrir, preencher, assinar, adendar). Fora do motor do agente; o controller confere
+        // papel (veterinário, ou dono com CRMV), tenant e CRMV+senha. Teto próprio nas gravações.
+        Route::get('/prontuarios/novo', [\App\Http\Controllers\ProntuarioController::class, 'novo'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::get('/prontuarios/{id}', [\App\Http\Controllers\ProntuarioController::class, 'mostrar'])->where('id', '[0-9]{1,18}')->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::post('/prontuarios', [\App\Http\Controllers\ProntuarioController::class, 'criar'])->middleware('throttle:30,1,prontuario-escrita');
+        Route::post('/prontuarios/{id}', [\App\Http\Controllers\ProntuarioController::class, 'atualizar'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,prontuario-escrita');
+        Route::post('/prontuarios/{id}/assinar', [\App\Http\Controllers\ProntuarioController::class, 'assinar'])->where('id', '[0-9]{1,18}')->middleware('throttle:20,1,prontuario-escrita');
+        Route::post('/prontuarios/{id}/adendos', [\App\Http\Controllers\ProntuarioController::class, 'adendar'])->where('id', '[0-9]{1,18}')->middleware('throttle:20,1,prontuario-escrita');
         Route::get('/resultados', [ClinicaTelasController::class, 'resultados'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
         // 23/11: painel do dono. Só o dono (o controller confere papel e tenant); só a aba Clínica grava, e com teto próprio.
         Route::get('/painel', [PainelDonoController::class, 'mostrar'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);

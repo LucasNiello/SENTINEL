@@ -727,9 +727,12 @@ class AgenteController extends Controller
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
             entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
+        // Card aberto fora do chat (Cadastros, Agenda, fichas): quem fala é o sistema, não o agente.
+        $doFormulario = ConfirmacoesPendentes::origem($pendente) === 'formulario';
+
         return response()->json($expirou
-            ? ['tipo' => 'expirado', 'mensagem' => 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.']
-            : ['tipo' => 'cancelado', 'mensagem' => 'Tudo bem, cancelei o pedido. Não alterei nada.']);
+            ? ['tipo' => 'expirado', 'mensagem' => $doFormulario ? 'O formulário expirou. Nada foi alterado.' : 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.']
+            : ['tipo' => 'cancelado', 'mensagem' => $doFormulario ? 'Cancelado. Nada foi alterado.' : 'Tudo bem, cancelei o pedido. Não alterei nada.']);
     }
 
     /**
@@ -892,8 +895,11 @@ class AgenteController extends Controller
             'http_status' => 422, 'mensagem' => 'Esta proposta não está mais disponível. Nada foi gravado. Peça de novo.'], 422);
     }
 
-    /** O id do registro que a escrita confirmada gravou (para o histórico da clínica; ver ConversaAgente::registrarResultado). */
-    /** Qual consulta mostra o registro que cada escrita acabou de gravar (excluir não tem: o registro foi para a lixeira). */
+    /**
+     * Qual consulta mostra o registro que cada escrita acabou de gravar (excluir não tem: o registro foi para a lixeira).
+     * Regra: o papel de cada escrita da lista precisa estar contido no papel da consulta correspondente; senão a leitura seria
+     * negada e deixaria uma linha "negado" na auditoria sem o usuário ter pedido nada.
+     */
     private const CONSULTA_DO_REGISTRO = [
         'agendar_atendimento' => 'consultar_agenda', 'remarcar_agendamento' => 'consultar_agenda', 'alterar_servico_agendamento' => 'consultar_agenda',
         'alterar_status_agendamento' => 'consultar_agenda', 'registrar_encaixe_emergencia' => 'consultar_agenda',
@@ -912,23 +918,25 @@ class AgenteController extends Controller
             return null;
         }
         try {
-            $resposta = $this->aiAgentService->consultarManual($consulta, ['id' => $id]);
+            // Origem 'agente': a leitura vem de uma ação do chat, não de uma consulta manual do usuário (RF06/RF07).
+            $resposta = $this->aiAgentService->consultarManual($consulta, ['id' => $id], 'agente');
+            if (($resposta['tipo'] ?? null) !== 'resultado_leitura' || (array) ($resposta['resultado'] ?? []) === []) {
+                return null;
+            }
+            if (isset($resposta['consulta'])) {
+                $resposta['exportar'] = $this->exportaveis->guardar($request->session(), $resposta['tool'], $resposta['consulta'], 'agente');
+                unset($resposta['consulta']);
+            }
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
         } catch (\Throwable) {
-            return null;
-        }
-        if (($resposta['tipo'] ?? null) !== 'resultado_leitura' || (array) ($resposta['resultado'] ?? []) === []) {
-            return null;
-        }
-        if (isset($resposta['consulta'])) {
-            $resposta['exportar'] = $this->exportaveis->guardar($request->session(), $resposta['tool'], $resposta['consulta'], 'manual');
-            unset($resposta['consulta']);
+            return null; // a escrita já aconteceu: ler de volta nunca derruba o Confirmar
         }
 
         return $resposta;
     }
 
+    /** O id do registro que a escrita confirmada gravou (para o histórico da clínica; ver ConversaAgente::registrarResultado). */
     private function idGravado(array $resultado): ?int
     {
         $id = $resultado['resultado']['id'] ?? null;

@@ -1500,7 +1500,7 @@ class AiAgentService
      * no formato) e a execução é o executarTool de sempre: RBAC, tenant, colunas, máscara LGPD e
      * auditoria (origem "manual").
      */
-    public function consultarManual(string $tool, array $filtros): array
+    public function consultarManual(string $tool, array $filtros, string $origem = 'manual'): array
     {
         $definicao = $this->catalogo()[$tool] ?? null;
 
@@ -1525,7 +1525,7 @@ class AiAgentService
 
         $argumentos = array_filter($validador->validated(), fn ($valor) => $valor !== null && $valor !== '');
 
-        return $this->detalhesAuditoria->com(['origem' => 'manual'], function () use ($tool, $argumentos) {
+        return $this->detalhesAuditoria->com(['origem' => $origem], function () use ($tool, $argumentos) {
             $resposta = $this->executarTool($tool, $argumentos);
 
             // Igual ao agente (A3): o controller guarda a consulta no servidor e o front só recebe o id do Exportar.

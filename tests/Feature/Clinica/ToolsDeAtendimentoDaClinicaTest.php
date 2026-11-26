@@ -102,7 +102,7 @@ class ToolsDeAtendimentoDaClinicaTest extends TestCase
         $this->confirmar($token)->assertOk()->assertJsonPath('tipo', 'resultado_escrita');
 
         $this->assertSame('confirmado', $agendamento->fresh()->status);
-        $log = AuditLog::latest('id')->first();
+        $log = AuditLog::where('acao', '!=', 'consultar')->latest('id')->first();
         $this->assertSame(['alterar_status_agendamento', 'Agendamento', $agendamento->id, 'recepcao'], [$log->tool, $log->entidade_tipo, $log->entidade_id, $log->papel]);
     }
 
@@ -135,8 +135,8 @@ class ToolsDeAtendimentoDaClinicaTest extends TestCase
 
         $cobranca = Cobranca::sole();
         $this->assertSame([$agendamento->id, 'fechada', 22000, 3], [$cobranca->agendamento_id, $cobranca->status, $cobranca->total_centavos, $vacina->fresh()->estoque]);
-        $this->assertSame(['cobrar_atendimento', 'cobrar', 'Cobranca', $cobranca->id], [AuditLog::latest('id')->first()->tool, AuditLog::latest('id')->first()->acao,
-            AuditLog::latest('id')->first()->entidade_tipo, AuditLog::latest('id')->first()->entidade_id]);
+        $this->assertSame(['cobrar_atendimento', 'cobrar', 'Cobranca', $cobranca->id], [AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->tool, AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->acao,
+            AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->entidade_tipo, AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->entidade_id]);
     }
 
     public function test_cobrar_com_prontuario_em_rascunho_avisa_no_card_e_recusa_no_revisar(): void
@@ -232,7 +232,7 @@ class ToolsDeAtendimentoDaClinicaTest extends TestCase
 
         $venda = Venda::sole();
         $this->assertSame([47000, 'paga', $pet->id, $pet->tutor_id, auth()->id(), 8], [$venda->total_centavos, $venda->status, $venda->pet_id, $venda->tutor_id, $venda->vendedor_id, $racao->fresh()->estoque]);
-        $this->assertSame(['registrar_venda', 'vender', 'Venda'], [AuditLog::latest('id')->first()->tool, AuditLog::latest('id')->first()->acao, AuditLog::latest('id')->first()->entidade_tipo]);
+        $this->assertSame(['registrar_venda', 'vender', 'Venda'], [AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->tool, AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->acao, AuditLog::where('acao', '!=', 'consultar')->latest('id')->first()->entidade_tipo]);
     }
 
     /** @return array<string, array{array<string, mixed>}> chave proibida posta pela IA DENTRO de um item */

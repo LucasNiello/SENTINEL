@@ -25,7 +25,32 @@ function Bloco({ id, titulo, vazio, itens, rotulo, children }) {
 }
 
 // Ficha do pet (só leitura; o prontuário é do veterinário e não aparece aqui).
-export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, vendas, podeEditar }) {
+const TIPOS = { consulta: 'Consulta', retorno: 'Retorno', vacinacao: 'Vacinação', exame: 'Exame', cirurgia: 'Cirurgia', internacao: 'Internação', emergencia: 'Emergência' };
+const CAMPOS_CLINICOS = [['anamnese', 'Anamnese'], ['exame_fisico', 'Exame físico'], ['diagnostico', 'Diagnóstico'], ['conduta', 'Conduta']];
+
+// Prontuário (só leitura): veterinário e dono. Edição e assinatura ficam fora desta tela. O autor do adendo é o nome gravado na assinatura.
+function Prontuarios({ itens }) {
+    return <section className="bloco" aria-labelledby="titulo-prontuario">
+        <h2 id="titulo-prontuario">Prontuário</h2>
+        {itens.length === 0 ? <p className="vazio">Nenhum prontuário registrado para este pet.</p>
+            : <ul className="prontuarios" role="list">{itens.map((p) => <li key={p.id} className="prontuario">
+                <header className="prontuario__cabeca">
+                    <strong>{TIPOS[p.tipo] ?? p.tipo}</strong>
+                    <span className="mono">{p.data}</span>
+                    <span>{p.veterinario ? `Vet. ${p.veterinario}` : ''}</span>
+                    <span className={`status-badge ${p.assinado ? 'status--sucesso' : 'status--expirado'}`}>{p.assinado ? 'Assinado' : 'Em rascunho'}</span>
+                    <a className="botao prontuario__abrir" href={`/prontuarios/${p.id}`}>{p.editavel ? 'Continuar' : 'Abrir'}</a>
+                </header>
+                {(p.entrada_em || p.alta_em) && <p className="prontuario__nota">{p.entrada_em && `Entrada: ${p.entrada_em}`}{p.entrada_em && p.alta_em && ' · '}{p.alta_em && `Alta: ${p.alta_em}`}</p>}
+                <dl className="ficha">{CAMPOS_CLINICOS.filter(([k]) => p[k]).map(([k, r]) => <div key={k} style={{ display: 'contents' }}><dt>{r}</dt><dd className="prontuario__texto">{p[k]}</dd></div>)}</dl>
+                {p.assinado && p.assinado_por && <p className="prontuario__nota">Assinado por {p.assinado_por} em {p.assinado_em}.</p>}
+                {p.adendos.length > 0 && <div className="prontuario__adendos"><h3>Adendos</h3>
+                    <ul role="list">{p.adendos.map((a, i) => <li key={i}><span className="mono">{a.em}</span> · {a.autor ?? ''}<p className="prontuario__texto">{a.texto}</p></li>)}</ul></div>}
+            </li>)}</ul>}
+    </section>;
+}
+
+export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, vendas, prontuarios = null, podeAtender = false, podeEditar }) {
     const { cartao, abrindo, ocupado, setOcupado, erro, trava, abrir } = usarCartao();
     const [aviso, setAviso] = useState('');
     const aoMensagem = (texto) => { setAviso(texto); router.reload(); };
@@ -34,9 +59,12 @@ export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, ven
         <header className="page-header">
             <p className="eyebrow">Ficha do pet</p>
             <h1>{pet.nome}</h1>
-            <p className="intro">Cadastro, alertas de atendimento, agenda e contas do pet. O prontuário não aparece aqui: ele é do veterinário.</p>
+            <p className="intro">{prontuarios !== null
+                ? 'Cadastro, alertas de atendimento, prontuário, agenda e contas do pet. O prontuário aparece só para veterinário e dono.'
+                : 'Cadastro, alertas de atendimento, agenda e contas do pet. O prontuário não aparece aqui: ele é do veterinário.'}</p>
         </header>
         <p className="acoes-topo">
+            {podeAtender && <a className="botao botao--primario" href={`/prontuarios/novo?pet=${pet.id}`}>Novo prontuário</a>}
             <a className="botao" href={tutor ? `/clientes?cliente=${tutor.id}&pet=${pet.id}` : '/cadastros'}><span aria-hidden="true">←</span> {tutor ? 'Clientes' : 'Cadastros'}</a>
             {podeEditar && <Botao variante="secundario" disabled={ocupado} onClick={() => abrir('atualizar_pet', { id: pet.id })}>Editar o cadastro</Botao>}
         </p>
@@ -72,6 +100,8 @@ export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, ven
             <h2 id="titulo-alertas">Alertas de atendimento</h2>
             {pet.alertas ? <Aviso tipo="atencao" titulo="Atenção:">{pet.alertas}</Aviso> : <p className="vazio">Nenhum alerta no cadastro.</p>}
         </section>
+
+        {prontuarios !== null && <Prontuarios itens={prontuarios} />}
 
         {agendamentos !== null && <Bloco id="titulo-agenda" titulo="Agendamentos" vazio="Nenhum agendamento." itens={agendamentos} rotulo="Agendamentos do pet">
             <thead><tr><th scope="col">Horário</th><th scope="col">Serviço</th><th scope="col">Profissional</th><th scope="col">Setor</th><th scope="col">Situação</th></tr></thead>

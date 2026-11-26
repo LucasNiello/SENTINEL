@@ -47,6 +47,8 @@ class HandleInertiaRequests extends Middleware
             'iniciais' => mb_strtoupper($iniciais),
             'papel' => (string) $papel,
             'rotuloPapel' => (string) ($rotulos[$papel] ?? $papel),
+            // O CRMV é do próprio usuário (aparece na área do avatar, útil nas demonstrações); só quando cadastrado.
+            'crmv' => filled($usuario->crmv) ? trim((string) $usuario->crmv) : null,
         ];
     }
 

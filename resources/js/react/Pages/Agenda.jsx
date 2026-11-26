@@ -17,7 +17,7 @@ function Selo({ status }) {
     return <span className={`status-badge ${classe}`.trim()}>{texto}</span>;
 }
 
-export default function Agenda({ erro, dias, visao, dia, setor, soUmSetor, anterior, proximo, hoje, total, noTeto, podeMudarStatus, podeAgendar }) {
+export default function Agenda({ erro, dias, visao, dia, setor, soUmSetor, anterior, proximo, hoje, total, noTeto, podeMudarStatus, podeAgendar, temAtender = false }) {
     const { cartao, setCartao, abrindo, ocupado, setOcupado, erro: erroCartao, trava, abrir } = usarCartao();
     const [aviso, setAviso] = useState('');
 
@@ -28,6 +28,9 @@ export default function Agenda({ erro, dias, visao, dia, setor, soUmSetor, anter
     };
     const semana = visao === 'semana';
     const aoMensagem = (texto) => { setAviso(texto); router.reload(); };
+    // Atendimento do veterinário: abre o prontuário do agendamento (ou o já existente). Só vem em linhas do próprio veterinário.
+    const atender = (l) => l.atender && <a className="botao btn-editar-linha" aria-label={`${l.atender.prontuario_id ? 'Abrir o prontuário' : 'Atender'} ${l.pet}, ${l.hora}`}
+        href={l.atender.prontuario_id ? `/prontuarios/${l.atender.prontuario_id}` : `/prontuarios/novo?pet=${l.atender.pet_id}&agendamento=${l.id}`}>{l.atender.prontuario_id ? 'Prontuário' : 'Atender'}</a>;
     const mudarStatus = (l) => <Botao variante="fantasma" className="btn-editar-linha" disabled={ocupado} aria-label={`Mudar o status do horário de ${l.pet}, ${l.hora}`}
         onClick={() => abrir('alterar_status_agendamento', { id: l.id })}>Mudar status</Botao>;
 
@@ -92,13 +95,14 @@ export default function Agenda({ erro, dias, visao, dia, setor, soUmSetor, anter
                                 <dt>Profissional</dt><dd>{l.profissional}</dd>
                                 <dt>Situação</dt><dd><Selo status={l.status} /></dd>
                             </dl>
+                            {atender(l)}
                             {podeMudarStatus && abre(l.status) && mudarStatus(l)}
                         </li>)}
                     </ol>
                     : <div className="tabela-rolagem tabela-empilha agenda-mobile" tabIndex={0} role="region" aria-label={`Agenda de ${bloco.rotulo}`}>
                         <table>
                             <thead><tr><th scope="col">Horário</th><th scope="col">Pet</th><th scope="col">Tutor</th><th scope="col">Serviço</th><th scope="col">Profissional</th>
-                                <th scope="col">Setor</th><th scope="col">Situação</th>{podeMudarStatus && <th scope="col">Ação</th>}</tr></thead>
+                                <th scope="col">Setor</th><th scope="col">Situação</th>{(podeMudarStatus || temAtender) && <th scope="col">Ação</th>}</tr></thead>
                             <tbody>{bloco.linhas.map((l) => <tr key={l.id}>
                                 <td data-rotulo="Horário">{l.hora}</td>
                                 <td data-rotulo="Pet">{l.pet}</td>
@@ -107,7 +111,7 @@ export default function Agenda({ erro, dias, visao, dia, setor, soUmSetor, anter
                                 <td data-rotulo="Profissional">{l.profissional}</td>
                                 <td data-rotulo="Setor">{l.setor === 'clinica' ? 'Clínica' : 'Banho e tosa'}</td>
                                 <td data-rotulo="Situação"><Selo status={l.status} /></td>
-                                {podeMudarStatus && <td data-rotulo="Ação">{abre(l.status) && mudarStatus(l)}</td>}
+                                {(podeMudarStatus || temAtender) && <td data-rotulo="Ação">{atender(l)}{podeMudarStatus && abre(l.status) && mudarStatus(l)}</td>}
                             </tr>)}</tbody>
                         </table>
                     </div>}
