@@ -48,31 +48,31 @@ Route::middleware(['auth', GarantirContaAtiva::class])->group(function () {
         Route::post('/agente/caixa/importar', [AgentePainelController::class, 'importar'])->middleware('throttle:30,1,caixa-importar');
 
         // B3 (Bloco 7): telas da bancada. Os dados vêm das rotas JSON acima e abaixo.
-        Route::get('/cadastros', [TelasController::class, 'cadastros']);
+        Route::get('/cadastros', [TelasController::class, 'cadastros'])->middleware(HandleInertiaRequests::class);
         // 27/11: página Clientes (React; no front Blade redireciona para /cadastros). Só leitura: escrever abre o card de sempre.
         Route::get('/clientes', [\App\Http\Controllers\ClientesController::class, 'index'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
         Route::get('/clientes/dados', [\App\Http\Controllers\ClientesController::class, 'dados'])->middleware('throttle:120,1,clientes-dados');
-        Route::get('/lixeira', [TelasController::class, 'lixeira']);
-        Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware('throttle:auditoria');
+        Route::get('/lixeira', [TelasController::class, 'lixeira'])->middleware(HandleInertiaRequests::class);
+        Route::get('/auditoria', [TelasController::class, 'auditoria'])->middleware([HandleInertiaRequests::class, 'throttle:auditoria']);
         // Item I (clínica vet): a tela usa as rotas JSON /supervisao/* abaixo, que conferem tudo de novo.
-        Route::get('/supervisao', [TelasController::class, 'supervisao']);
+        Route::get('/supervisao', [TelasController::class, 'supervisao'])->middleware(HandleInertiaRequests::class);
 
         // Front de 14/11 (F2): telas de LEITURA da clínica + petshop. Cada uma confere domínio, papel (o da tool de leitura) e tenant.
         // Teto próprio (60/min por usuário, 429 em HTML): as cinco telas gravam uma linha de auditoria por acesso,
         // e sem teto um F5 em laço encheria a audit_logs. Balde separado do 'agente-sem-ia', para navegar não gastar o Revisar.
-        Route::get('/agenda', [ClinicaTelasController::class, 'agenda'])->middleware('throttle:60,1,telas-clinica');
-        Route::get('/cobrancas', [ClinicaTelasController::class, 'cobrancas'])->middleware('throttle:60,1,telas-clinica');
-        Route::get('/vendas', [ClinicaTelasController::class, 'vendas'])->middleware('throttle:60,1,telas-clinica');
+        Route::get('/agenda', [ClinicaTelasController::class, 'agenda'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::get('/cobrancas', [ClinicaTelasController::class, 'cobrancas'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::get('/vendas', [ClinicaTelasController::class, 'vendas'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
         // Até 18 dígitos: número maior não cabe em inteiro e daria erro em vez de 404.
-        Route::get('/pets/{id}', [ClinicaTelasController::class, 'pet'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,telas-clinica');
-        Route::get('/resultados', [ClinicaTelasController::class, 'resultados'])->middleware('throttle:60,1,telas-clinica');
+        Route::get('/pets/{id}', [ClinicaTelasController::class, 'pet'])->where('id', '[0-9]{1,18}')->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::get('/resultados', [ClinicaTelasController::class, 'resultados'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
         // 23/11: painel do dono. Só o dono (o controller confere papel e tenant); só a aba Clínica grava, e com teto próprio.
-        Route::get('/painel', [PainelDonoController::class, 'mostrar'])->middleware('throttle:60,1,telas-clinica');
-        Route::post('/painel/clinica', [PainelDonoController::class, 'salvarClinica'])->middleware('throttle:20,1,painel-dono');
+        Route::get('/painel', [PainelDonoController::class, 'mostrar'])->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
+        Route::post('/painel/clinica', [PainelDonoController::class, 'salvarClinica'])->middleware([HandleInertiaRequests::class, 'throttle:20,1,painel-dono']);
         // 15/11: ficha do tutor (só leitura, com os pets dele) e o calendário da ficha de agendamento (JSON, só mostra:
         // a vaga é conferida de novo na gravação). O calendário tem balde próprio (120/min por usuário): uma ficha faz várias
         // leituras (mês, dia, troca de profissional) e não pode gastar o Revisar nem o Cancelar do balde 'agente-sem-ia'.
-        Route::get('/tutores/{id}', [ClinicaTelasController::class, 'tutor'])->where('id', '[0-9]{1,18}')->middleware('throttle:60,1,telas-clinica');
+        Route::get('/tutores/{id}', [ClinicaTelasController::class, 'tutor'])->where('id', '[0-9]{1,18}')->middleware([HandleInertiaRequests::class, 'throttle:60,1,telas-clinica']);
         Route::get('/agenda/disponibilidade', [ClinicaTelasController::class, 'disponibilidade'])->middleware('throttle:120,1,agenda-calendario');
 
         Route::post('/agente/comando', [AgenteController::class, 'processar'])->middleware('throttle:agente');

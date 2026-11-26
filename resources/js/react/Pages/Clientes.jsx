@@ -143,7 +143,11 @@ export default function Clientes({ clienteInicial = null, petInicial = null, pod
         foco={foco === p.id} pode={pode} ocupado={ocupado} abrirCartao={abrirCartao} />)}</ul>;
 
     return <Workspace titulo="Clientes">
-        <h1 className="sr-only">Clientes</h1>
+        <header className="page-header">
+            <p className="eyebrow">Organização</p>
+            <h1>Clientes</h1>
+            <p className="intro">Tutores e seus pets em um só lugar. Busque pelo nome do cliente, do pet ou pelo microchip; toda gravação passa pelo card de revisão.</p>
+        </header>
         <div className="clientes">
             <section className="clientes-lista" aria-label="Lista de clientes">
                 <div className="clientes-topo">

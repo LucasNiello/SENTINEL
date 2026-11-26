@@ -43,10 +43,16 @@ export function createLighthouse(stage, state, onFailure) {
         const mobile=window.innerWidth<=600;
         const pose=storyPose(mobile ? 0 : state.progress);
         const factor=damping(4,delta);
-        const atHero=state.progress<.15;
+        const atHero=state.progress<.01;
         if(atHero) idleAngle+=delta*Math.PI*2/26;
-        // Blend out the exploratory rotation as scrolling takes over; never rotate the tower.
-        const desiredAngle=pose.angle+idleAngle*(1-smooth(state.progress/.8));
+        else {
+            // 26/11: ao começar a rolar, descarta as voltas inteiras do giro sozinho (visualmente idênticas) para sobrar no máximo meia volta;
+            // antes o giro sozinho somava ao do scroll no começo (rápido demais) e depois era apagado subtraindo (lento).
+            const voltas=Math.round(idleAngle/(Math.PI*2))*Math.PI*2;
+            idleAngle-=voltas; angle-=voltas;
+        }
+        // O resto some devagar (até o capítulo 2); a queda é sempre mais lenta que o avanço do scroll, então o farol nunca volta nem trava.
+        const desiredAngle=pose.angle+idleAngle*(1-smooth(state.progress/2));
         angle+=(desiredAngle-angle)*factor;
         model.rotating.rotation.y=angle;
         const pulse=state.confirmedAt ? Math.exp(-Math.max(0,now-state.confirmedAt)/450)*.6 : 0;

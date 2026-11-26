@@ -36,6 +36,9 @@ class PetService
     public function atualizar(int $id, array $dados, int $tenantId): Pet
     {
         $pet = Pet::where('tenant_id', $tenantId)->findOrFail($id);
+        if ($pet->inativado_em !== null) {
+            throw new RegraDeNegocioException("{$pet->nome} está arquivado: reative o cadastro antes de editar.");
+        }
         $dados = Arr::only($dados, self::CAMPOS);
         $this->conferir([...$pet->only(self::CAMPOS), ...$dados], $tenantId, $pet->id);
 

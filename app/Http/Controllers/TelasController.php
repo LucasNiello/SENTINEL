@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\AiAgentService;
 use App\Services\ConsultaAuditoria;
 use App\Services\ContextoUsuario;
+use App\Support\Front;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
 
@@ -78,19 +79,31 @@ class TelasController extends Controller
         $visiveis = array_keys(array_filter($cadastros, fn (array $e) => $this->agente->podeExecutar($e['consultar'])));
         $inicial = is_string($pedido) && in_array($pedido, $visiveis, true) ? $pedido : null;
 
-        return view('telas.consulta', [
+        $dados = [
             'cadastroInicial' => $inicial,
             'titulo' => 'Cadastros',
             'intro' => 'Liste, busque, cadastre e edite sem usar o agente. Toda gravação passa pela mesma revisão e confirmação.',
             'entidades' => $entidades,
-        ]);
+        ];
+        if (! Front::react()) {
+            return view('telas.consulta', $dados);
+        }
+
+        // React (26/11): a linha ganha Excluir (para a lixeira) e, nos pets, Arquivar/Reativar. O botão só aparece se o papel pode; o servidor confere de novo.
+        $excluir = ['tutores' => 'excluir_tutor', 'pets' => 'excluir_pet', 'catalogo' => 'excluir_item_catalogo'];
+        $dados['entidades'] = array_map(fn (array $e, string $chave) => [...$e, 'excluir' => isset($excluir[$chave]) && $this->agente->podeExecutar($excluir[$chave]) ? $excluir[$chave] : null], $entidades, array_keys($entidades));
+        $dados['entidades'] = array_combine(array_keys($entidades), $dados['entidades']);
+        $dados['podeArquivarPet'] = $this->agente->podeExecutar('arquivar_pet');
+        $dados['podeReativarPet'] = $this->agente->podeExecutar('reativar_pet');
+
+        return Front::tela('telas.consulta', 'Consulta', $dados);
     }
 
     public function lixeira()
     {
         abort_unless($this->agente->podeExecutar('consultar_lixeira'), 403);
 
-        return view('telas.consulta', [
+        return Front::tela('telas.consulta', 'Consulta', [
             'titulo' => 'Lixeira',
             'intro' => 'Registros excluídos podem ser restaurados dentro do prazo; depois ficam arquivados. Restaurar e excluir de vez pedem a senha de um administrador.',
             'entidades' => ['lixeira' => ['rotulo' => 'Lixeira', 'consultar' => 'consultar_lixeira', 'criar' => null, 'filtros' => [
@@ -114,7 +127,7 @@ class TelasController extends Controller
         $ehAdmin = $this->contexto->ehAdminDaClinica();
         abort_unless($ehDono || $ehAdmin, 403);
 
-        return view('telas.supervisao', [
+        return Front::tela('telas.supervisao', 'Supervisao', [
             'ehDono' => $ehDono,
             'ehAdmin' => $ehAdmin,
             'rotulosPapeis' => (array) config('sentinel.rotulos_papeis', []),
@@ -130,11 +143,19 @@ class TelasController extends Controller
             abort(403);
         }
 
-        return view('telas.auditoria', [
+        $dados = [
             'usuarios' => User::query()->where('tenant_id', $this->contexto->tenantId())->orderBy('name')->pluck('name', 'id')->all(),
             'resultados' => ConsultaAuditoria::resultados(),
             'tools' => [...array_column(array_column($this->agente->tools(), 'function'), 'name'), ConsultaAuditoria::TOOL,
                 ...($this->contexto->dominio() === 'clinica' ? [ClinicaTelasController::TOOL_FICHA, ClinicaTelasController::TOOL_FICHA_TUTOR, ClinicaTelasController::TOOL_RESULTADOS, PainelDonoController::TOOL_PAINEL, PainelDonoController::TOOL_SALVAR] : [])],
-        ]);
+        ];
+        if (! Front::react()) {
+            return view('telas.auditoria', $dados);
+        }
+
+        // React: lista de {id, nome} (a ordem do nome é mantida; chave numérica de objeto JSON seria reordenada pelo navegador).
+        $dados['usuarios'] = array_map(fn ($id, $nome) => ['id' => $id, 'nome' => $nome], array_keys($dados['usuarios']), array_values($dados['usuarios']));
+
+        return Front::tela('telas.auditoria', 'Auditoria', $dados);
     }
 }

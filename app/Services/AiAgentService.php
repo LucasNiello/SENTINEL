@@ -1759,7 +1759,7 @@ class AiAgentService
                 $itens[(int) $m[1]]['valores'] ??= [];
                 unset($erros[$chave]);
                 $comErro = true;
-            } elseif ($chave === 'pets') {
+            } elseif ($chave === 'pets' || str_starts_with((string) $chave, 'pets.')) {
                 unset($erros[$chave]);
                 $erros['_pets'] = $frase;
             }

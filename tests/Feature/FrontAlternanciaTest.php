@@ -58,12 +58,16 @@ class FrontAlternanciaTest extends TestCase
         $this->get('/react-teste')->assertRedirect('/login');
     }
 
-    public function test_com_react_as_telas_blade_continuam_iguais(): void
+    public function test_telas_portadas_seguem_o_front_escolhido(): void
     {
-        config(['sentinel.front' => 'react']);
         $this->logarComo('operador');
 
+        // 26/11: as telas foram portadas; com blade continuam idênticas (plano B), com react viram página Inertia.
+        config(['sentinel.front' => 'blade']);
         $this->get('/cadastros')->assertOk()->assertSee('workspace-sidebar', false)->assertDontSee('data-page', false);
+
+        config(['sentinel.front' => 'react']);
+        $this->get('/cadastros')->assertOk()->assertSee('data-page', false)->assertInertia(fn (Assert $p) => $p->component('Consulta', false));
     }
 
     public function test_agente_blade_preserva_a_tela_atual(): void
