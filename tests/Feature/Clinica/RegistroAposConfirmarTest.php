@@ -65,6 +65,23 @@ class RegistroAposConfirmarTest extends TestCase
         $this->postJson('/agente/confirmar', ['token' => $token])->assertOk()->assertJsonPath('tipo', 'resultado_escrita')->assertJsonMissingPath('registro');
     }
 
+    public function test_cancelar_card_aberto_fora_do_chat_nao_fala_como_o_agente(): void
+    {
+        $this->prepararAgente();
+        $this->logarComo('veterinario', self::T);
+        $pet = $this->pet();
+        app(PetService::class)->arquivarCadastro($pet->id, 'Mudou', self::T);
+
+        // Formulário (Cadastros/fichas): texto neutro do sistema.
+        $proposta = $this->postJson('/agente/formulario', ['tool' => 'reativar_pet', 'id' => $pet->id])->assertOk()->json('proposta');
+        $this->postJson('/agente/cancelar', ['proposta' => $proposta])->assertOk()->assertJsonPath('tipo', 'cancelado')
+            ->assertJsonPath('mensagem', 'Cancelado. Nada foi alterado.');
+
+        // Pelo chat: continua a frase do agente.
+        $proposta = $this->comando('reativar_pet', ['id' => $pet->id])->assertOk()->json('proposta');
+        $this->postJson('/agente/cancelar', ['proposta' => $proposta])->assertOk()->assertJsonPath('mensagem', 'Tudo bem, cancelei o pedido. Não alterei nada.');
+    }
+
     public function test_confirmar_devolve_o_registro_gravado_como_tabela(): void
     {
         $this->prepararAgente();

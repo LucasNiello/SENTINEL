@@ -218,6 +218,8 @@ class ProntuarioService
     private function agendamentoParaVincular(mixed $id, int $petId, int $veterinarioId, int $tenantId, ?string $origemExigida): Agendamento
     {
         $agendamento = $this->doTenant(Agendamento::class, $id, $tenantId, 'o agendamento');
+        // Trava a linha do agendamento: dois "Atender" ao mesmo tempo não passam juntos pela checagem de "já tem prontuário".
+        $agendamento = Agendamento::query()->where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($agendamento->id);
 
         if ($origemExigida !== null && $agendamento->origem !== $origemExigida) {
             throw new RegraDeNegocioException('Atendimento de emergência só se vincula a um agendamento de encaixe de emergência.');

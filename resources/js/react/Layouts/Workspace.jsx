@@ -106,7 +106,7 @@ export default function Workspace({ titulo = 'Sentinel', children }) {
                         </div>
                         <div className="sidebar-account">
                             <span className="account-initials" aria-hidden="true">{usuario.iniciais}</span>
-                            <span className="usuario"><span>{usuario.nome}</span><span className="papel-tag"><span className="sr-only">Papel: </span>{usuario.rotuloPapel}</span></span>
+                            <span className="usuario"><span>{usuario.nome}</span><span className="papel-tag"><span className="sr-only">Papel: </span>{usuario.rotuloPapel}</span>{usuario.crmv && <span className="papel-tag crmv-tag"><span className="sr-only">Registro: </span>CRMV {usuario.crmv}</span>}</span>
                             <form method="POST" action="/logout">
                                 <input type="hidden" name="_token" value={csrf} />
                                 <button type="submit">Sair <span aria-hidden="true">↗</span></button>

@@ -6,6 +6,7 @@ use App\Models\Agendamento;
 use App\Support\Front;
 use App\Models\Cobranca;
 use App\Models\Pet;
+use App\Models\Prontuario;
 use App\Models\Tutor;
 use App\Models\Venda;
 use App\Exceptions\RegraDeNegocioException;
@@ -37,6 +38,9 @@ class ClinicaTelasController extends Controller
 
     /** Nomes das leituras próprias na auditoria (não são tools do agente); a tela de auditoria filtra por eles também. */
     public const TOOL_FICHA = 'ver_ficha_pet';
+
+    /** Leitura do prontuário na ficha do pet (só veterinário e dono). */
+    public const TOOL_PRONTUARIO = 'ver_prontuario_pet';
 
     public const TOOL_RESULTADOS = 'ver_resultados';
 
@@ -108,13 +112,26 @@ class ClinicaTelasController extends Controller
         // React: só os campos que a tela mostra (nada de modelo inteiro na página). Mesmos dados do Blade.
         $diasSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 
+        // Atender: só nas linhas da clínica do próprio veterinário (o serviço de prontuário confere de novo). Se já há prontuário, abre esse.
+        $atender = [];
+        if ($this->podeAtender()) {
+            $ids = collect($dados['dias'])->flatMap(fn (array $b) => array_column($b['linhas'], 'id'))->filter()->all();
+            $meus = Agendamento::query()->where('tenant_id', $this->contexto->tenantId())->whereIn('id', $ids)->where('setor', 'clinica')
+                ->where('profissional_id', $this->contexto->usuario()->getKey())->whereNotIn('status', Agendamento::STATUS_LIVRES)->get(['id', 'pet_id']);
+            $existentes = Prontuario::query()->where('tenant_id', $this->contexto->tenantId())->whereIn('agendamento_id', $meus->pluck('id'))->pluck('id', 'agendamento_id');
+            foreach ($meus as $m) {
+                $atender[$m->id] = ['pet_id' => $m->pet_id, 'prontuario_id' => $existentes[$m->id] ?? null];
+            }
+        }
+
         return Front::tela('clinica.agenda', 'Agenda', [
             ...\Illuminate\Support\Arr::except($dados, ['dias', 'dia', 'setores']),
+            'temAtender' => $atender !== [],
             'dia' => $dia->toDateString(),
             'dias' => collect($dados['dias'])->map(fn (array $b, string $rotulo) => [
                 'rotulo' => $rotulo,
                 'semana' => $diasSemana[$b['data']->dayOfWeek],
-                'linhas' => array_map(fn (array $l) => \Illuminate\Support\Arr::only($l, ['id', 'hora', 'pet', 'tutor', 'servico', 'profissional', 'setor', 'status']), $b['linhas']),
+                'linhas' => array_map(fn (array $l) => [...\Illuminate\Support\Arr::only($l, ['id', 'hora', 'pet', 'tutor', 'servico', 'profissional', 'setor', 'status']), 'atender' => $atender[$l['id'] ?? 0] ?? null], $b['linhas']),
             ])->values()->all(),
         ]);
     }
@@ -235,13 +252,30 @@ class ClinicaTelasController extends Controller
                 ->get()
             : null;
 
+        // 26/11: veterinário e dono leem o prontuário do pet na ficha (só leitura). Recepção, vendedor e atendente nunca: o texto clínico
+        // não sai para eles (ver Prontuario::CAMPOS_METADADOS). Cada abertura fica na auditoria.
+        // Só no front React: o Blade (plano B) não mostra o prontuário, então ali não se lê nem se audita uma leitura que não aconteceu.
+        $prontuarios = Front::react() && in_array($this->contexto->papel(), ['veterinario', 'dono'], true)
+            ? Prontuario::query()->where('tenant_id', $tenantId)->where('pet_id', $pet->id)
+                // Rascunho de outro veterinário só o dono vê; o veterinário vê os assinados e os próprios.
+                ->when($this->contexto->papel() !== 'dono', fn ($q) => $q->where(fn ($w) => $w->whereNotNull('assinado_em')->orWhere('veterinario_id', $this->contexto->usuario()->getKey())))
+                ->with(['veterinario:id,name', 'adendos' => fn ($q) => $q->orderBy('assinado_em')->orderBy('id')])
+                ->orderByDesc('created_at')->orderByDesc('id')->limit(20)->get()
+            : null;
+
         $this->auditarLeitura(self::TOOL_FICHA, 'Pet', $pet->id, [], 'Ficha do pet aberta.');
+        if ($prontuarios !== null) {
+            $this->auditarLeitura(self::TOOL_PRONTUARIO, 'Pet', $pet->id, [], 'Prontuário do pet aberto.');
+        }
 
         $dados = [
             'pet' => $pet,
             'agendamentos' => $agendamentos,
             'cobrancas' => $cobrancas,
             'vendas' => $vendas,
+            'prontuarios' => $prontuarios,
+            'podeAtender' => $this->podeAtender(),
+            'usuarioId' => (int) $this->contexto->usuario()->getKey(),
             'podeEditar' => $this->agente->podeExecutar('atualizar_pet'),
             // O bloco do tutor segue a consulta de tutores, como os outros blocos seguem a deles.
             'verTutor' => $this->agente->podeExecutar('consultar_tutores'),
@@ -257,6 +291,12 @@ class ClinicaTelasController extends Controller
      * Ficha do tutor (15/11, só leitura): cadastro e os pets dele (nome, espécie, link para a ficha do pet). O cadastro
      * continua separado (Cadastros › Tutores). Outro tenant, lixeira ou inexistente: 404.
      */
+    /** Quem atende (escreve prontuário): veterinário, ou o dono com CRMV cadastrado. Só a clínica. */
+    private function podeAtender(): bool
+    {
+        return $this->contexto->dominio() === 'clinica' && in_array($this->contexto->papel(), ['veterinario', 'dono'], true) && filled($this->contexto->usuario()->crmv);
+    }
+
     /** Ficha do pet para o React: só o que a tela mostra, com os mesmos textos e contas do Blade (reais, líquido, idade). */
     private function propsDoPet(array $d): array
     {
@@ -290,6 +330,16 @@ class ClinicaTelasController extends Controller
                 'id' => $v->id, 'data' => ($v->pago_em ?? $v->created_at)?->format('d/m/Y H:i'), 'setor' => $v->setor,
                 'total' => $reais((int) $v->total_centavos), 'estornado' => $reais((int) $v->estornado_centavos),
                 'liquido' => $liquido($v->status, (int) $v->total_centavos, (int) $v->estornado_centavos), 'status' => $v->status,
+            ])->values()->all(),
+            'podeAtender' => $d['podeAtender'],
+            'prontuarios' => $d['prontuarios']?->map(fn ($p) => [
+                'id' => $p->id, 'data' => $p->created_at?->format('d/m/Y H:i'), 'tipo' => $p->tipo, 'veterinario' => $p->veterinario?->name,
+                'editavel' => $d['podeAtender'] && ! $p->estaAssinado() && $p->veterinario_id === $d['usuarioId'],
+                'assinado' => $p->estaAssinado(), 'assinado_em' => $p->assinado_em?->format('d/m/Y H:i'),
+                'assinado_por' => $p->assinado_por_nome ? $p->assinado_por_nome.($p->assinado_por_crmv ? ' (CRMV '.$p->assinado_por_crmv.')' : '') : null,
+                'entrada_em' => $p->entrada_em?->format('d/m/Y H:i'), 'alta_em' => $p->alta_em?->format('d/m/Y H:i'),
+                'anamnese' => $p->anamnese, 'exame_fisico' => $p->exame_fisico, 'diagnostico' => $p->diagnostico, 'conduta' => $p->conduta,
+                'adendos' => $p->adendos->map(fn ($a) => ['autor' => $a->autor_nome ? $a->autor_nome.($a->autor_crmv ? ' (CRMV '.$a->autor_crmv.')' : '') : null, 'texto' => $a->texto, 'em' => $a->assinado_em?->format('d/m/Y H:i')])->values()->all(),
             ])->values()->all(),
             'podeEditar' => $d['podeEditar'],
         ];

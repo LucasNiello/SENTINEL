@@ -727,9 +727,12 @@ class AgenteController extends Controller
         $this->aiAgentService->auditarDesfecho($pendente['tool'], ConfirmacoesPendentes::propostos($pendente), $desfecho, $motivo, ConfirmacoesPendentes::origem($pendente),
             entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
+        // Card aberto fora do chat (Cadastros, Agenda, fichas): quem fala é o sistema, não o agente.
+        $doFormulario = ConfirmacoesPendentes::origem($pendente) === 'formulario';
+
         return response()->json($expirou
-            ? ['tipo' => 'expirado', 'mensagem' => 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.']
-            : ['tipo' => 'cancelado', 'mensagem' => 'Tudo bem, cancelei o pedido. Não alterei nada.']);
+            ? ['tipo' => 'expirado', 'mensagem' => $doFormulario ? 'O formulário expirou. Nada foi alterado.' : 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.']
+            : ['tipo' => 'cancelado', 'mensagem' => $doFormulario ? 'Cancelado. Nada foi alterado.' : 'Tudo bem, cancelei o pedido. Não alterei nada.']);
     }
 
     /**
