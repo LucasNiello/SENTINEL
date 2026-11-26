@@ -167,7 +167,7 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
         $this->assertSame(self::T, $registro->tenant_id);
         $this->assertSame(0, $f['model']::where('tenant_id', 999)->count());
 
-        $log = AuditLog::query()->sole();
+        $log = AuditLog::query()->where('acao', '!=', 'consultar')->sole();
         $this->assertSame([$f['criar'], 'criar', $f['tipo'], 'sucesso', 'dono', self::T], [$log->tool, $log->acao, $log->entidade_tipo, $log->resultado, $log->papel, $log->tenant_id]);
         $this->assertSame($registro->id, $log->entidade_id);
     }
@@ -226,7 +226,7 @@ class ToolsDeCadastroDaClinicaTest extends TestCase
         }
         $this->assertSame($antes[$f['campoNome']], $depois->{$f['campoNome']}, 'o que não mudou continua igual');
 
-        $log = AuditLog::query()->latest('id')->first();
+        $log = AuditLog::query()->where('acao', '!=', 'consultar')->latest('id')->first();
         $this->assertSame([$f['atualizar'], 'atualizar', $registro->id, 'sucesso'], [$log->tool, $log->acao, $log->entidade_id, $log->resultado]);
         $this->assertSame(array_keys($f['muda']), array_keys($log->valores_anteriores), 'a auditoria guarda o valor de antes dos campos que mudaram');
     }
