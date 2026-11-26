@@ -157,6 +157,21 @@ class AgenteReferenciasTest extends TestCase
         $this->assertSame('2026-12-22 10:30', $this->inicioProposto(['id' => $meu->id, 'hora' => '10:30']), 'só a hora: o dia não muda');
     }
 
+    public function test_deslocamento_relativo_soma_ao_horario_atual_e_mantem_a_hora(): void
+    {
+        $meu = $this->marcar($this->thor, '2026-12-22 08:00', '2026-12-22 09:00');
+
+        // "no dia seguinte", "semana que vem", "mês que vem", "daqui a 1 mês e 2 dias": a IA não sabe a data atual; o servidor calcula.
+        $this->assertSame('2026-12-23 08:00', $this->inicioProposto(['id' => $meu->id, 'somar_dias' => 1, 'inicio' => '2026-01-01 14:00']));
+        $this->assertSame('2026-12-29 08:00', $this->inicioProposto(['id' => $meu->id, 'somar_semanas' => 1]));
+        $this->assertSame('2027-01-22 08:00', $this->inicioProposto(['id' => $meu->id, 'somar_meses' => 1]));
+        $this->assertSame('2027-01-24 08:00', $this->inicioProposto(['id' => $meu->id, 'somar_meses' => 1, 'somar_dias' => 2]));
+        $this->assertSame('2026-12-23 10:30', $this->inicioProposto(['id' => $meu->id, 'somar_dias' => 1, 'hora' => '10:30']), 'hora nova junto do deslocamento');
+        // Dia explícito vence o deslocamento; valor fora da faixa é ignorado (o início da IA segue como veio).
+        $this->assertSame('2026-12-24 08:00', $this->inicioProposto(['id' => $meu->id, 'dia' => '2026-12-24', 'somar_dias' => 1]));
+        $this->assertSame('2026-12-23 15:00', $this->inicioProposto(['id' => $meu->id, 'somar_dias' => 9999, 'inicio' => '2026-12-23 15:00']));
+    }
+
     public function test_inicio_completo_sem_dia_relativo_continua_valendo_como_antes(): void
     {
         $meu = $this->marcar($this->thor, '2026-12-22 08:00', '2026-12-22 09:00');

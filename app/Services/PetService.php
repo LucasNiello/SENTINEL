@@ -57,10 +57,11 @@ class PetService
             ->get();
     }
 
-    public function buscarPorFiltro(?string $nome, ?int $tutorId, int $tenantId): Collection
+    public function buscarPorFiltro(?string $nome, ?int $tutorId, int $tenantId, ?int $id = null): Collection
     {
         return Pet::query()
             ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id))
             ->when($nome, fn ($query) => $this->nomeContem($query, $nome))
             ->when($tutorId, fn ($query) => $query->where('tutor_id', $tutorId))
             ->orderBy('nome')

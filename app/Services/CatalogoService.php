@@ -53,10 +53,11 @@ class CatalogoService
         return $item;
     }
 
-    public function buscarPorFiltro(?string $setor, ?string $categoria, ?string $nome, int $tenantId): Collection
+    public function buscarPorFiltro(?string $setor, ?string $categoria, ?string $nome, int $tenantId, ?int $id = null): Collection
     {
         return CatalogoItem::query()
             ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id))
             ->when($setor, fn ($query) => $query->where('setor', $setor))
             ->when($categoria, fn ($query) => $query->where('categoria', $categoria))
             ->when($nome, fn ($query) => $this->nomeContem($query, $nome, 'nome_comercial'))

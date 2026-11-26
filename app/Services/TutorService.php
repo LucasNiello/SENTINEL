@@ -98,10 +98,11 @@ class TutorService
             ->get();
     }
 
-    public function buscarPorFiltro(?string $nome, int $tenantId): Collection
+    public function buscarPorFiltro(?string $nome, int $tenantId, ?int $id = null): Collection
     {
         return Tutor::query()
             ->where('tenant_id', $tenantId)
+            ->when($id, fn ($query) => $query->whereKey($id))
             ->when($nome, fn ($query) => $this->nomeContem($query, $nome))
             ->orderBy('nome')
             ->get();

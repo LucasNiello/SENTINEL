@@ -59,7 +59,9 @@ class AgendaLoteController extends Controller
         if (($resposta['tipo'] ?? null) === 'resultado_escrita') {
             // Uma lista, um envio: depois de gravar ela some (reenviar o mesmo pedido não cancela de novo), e o chat fica sabendo.
             $this->conversa->esquecerLista($request->session());
-            $this->conversa->registrarResultado($request->session(), $resposta['mensagem'], null);
+            $this->conversa->encerrarSelecao($request->session(), array_map('intval', $ids));
+            $n = count($ids);
+            $this->conversa->registrarResultado($request->session(), $resposta['mensagem'], null, $n === 1 ? 'Cancelar 1 agendamento' : "Cancelar {$n} agendamentos");
         }
 
         return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {

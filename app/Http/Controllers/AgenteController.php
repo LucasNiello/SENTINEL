@@ -39,8 +39,79 @@ class AgenteController extends Controller
         }
 
         return Front::tela('agente', 'Agente', Front::react()
-            ? ['historico' => $this->conversa->ler($request->session())]
+            ? ['historico' => $this->historicoParaTela($this->conversa->lerParaTela($request->session()), $request->session())]
             : []);
+    }
+
+    /**
+     * O histórico como a tela precisa ao recarregar (26/11, UX): texto como antes; card e tabela viram uma "tira" (título, desfecho,
+     * hora; nunca dados), para o que esteve na tela não sumir como se tivesse dado erro. Só campos explícitos saem daqui: o resumo da
+     * proposta e o id dela ficam no servidor. "Confirmei a proposta no card." é uma fala sintética do servidor: não aparece.
+     *
+     * @param  list<array<string, mixed>>  $mensagens
+     * @return list<array<string, mixed>>
+     */
+    private function historicoParaTela(array $mensagens, \Illuminate\Contracts\Session\Session $sessao): array
+    {
+        $saida = [];
+        foreach ($mensagens as $m) {
+            if ((($m['role'] ?? null) === 'user' && ($m['content'] ?? null) === 'Confirmei a proposta no card.') || ($m['oculta'] ?? false)) {
+                continue;
+            }
+            // 26/11: o que a tela mostrou (tabela já mascarada, card) volta como estava, dentro do prazo da conversa. O card só volta
+            // com botões se a proposta ainda existe na sessão e não teve desfecho; senão fica a tira.
+            $tela = $m['tela'] ?? null;
+            if (is_array($tela) && is_array($tela['dados'] ?? null)) {
+                if (($tela['tipo'] ?? null) === 'consulta') {
+                    // O resultado de uma escrita (ex.: "Agendamento remarcado.") leva a tabela do registro: o texto vem antes dela.
+                    if (! isset($m['tabela']) && is_string($m['content'] ?? null) && $m['content'] !== '') {
+                        $saida[] = ['role' => 'assistant', 'content' => $m['content']];
+                    }
+                    $saida[] = ['role' => 'assistant', 'consulta' => $tela['dados']];
+
+                    continue;
+                }
+                if (($tela['tipo'] ?? null) === 'proposta' && is_string($m['proposta'] ?? null) && ! isset($m['desfecho'])
+                    && $this->pendentes->rascunho($sessao, $m['proposta']) !== null) {
+                    $saida[] = ['role' => 'assistant', 'proposta' => $tela['dados']];
+
+                    continue;
+                }
+            }
+            $conteudo = is_string($m['content'] ?? null) ? $m['content'] : '';
+            // Mensagens gravadas antes de 26/11 não têm os campos novos: reconhece pelo texto fixo que o servidor escrevia.
+            if (! isset($m['titulo']) && ! isset($m['tabela']) && ($m['role'] ?? null) === 'assistant') {
+                if (preg_match('/^Mostrei ao usuário uma tabela com (\d+) linhas? \(/u', $conteudo, $t) === 1) {
+                    $saida[] = ['role' => 'assistant', 'tira' => ['tipo' => 'consulta', 'linhas' => (int) $t[1]]];
+
+                    continue;
+                }
+                if (preg_match('/^\[Proposta: (.+?)(?: \(.*\))? — (.*)\]$/su', $conteudo, $p) === 1) {
+                    $fim = mb_strtolower($p[2]);
+                    $desfecho = match (true) {
+                        str_starts_with($fim, 'confirmada') => 'confirmada',
+                        str_starts_with($fim, 'cancelada') => 'cancelada',
+                        str_starts_with($fim, 'substituída') => 'substituida',
+                        str_starts_with($fim, 'expirou') => 'expirada',
+                        str_starts_with($fim, 'não foi executada') => 'falhou',
+                        default => 'pendente',
+                    };
+                    $saida[] = ['role' => 'assistant', 'tira' => ['tipo' => 'proposta', 'titulo' => mb_substr($p[1], 0, 120), 'desfecho' => $desfecho, 'hora' => null]];
+
+                    continue;
+                }
+            }
+            if (isset($m['titulo']) && is_string($m['titulo'])) {
+                $saida[] = ['role' => 'assistant', 'tira' => ['tipo' => 'proposta', 'titulo' => $m['titulo'],
+                    'desfecho' => is_string($m['desfecho'] ?? null) ? $m['desfecho'] : 'pendente', 'hora' => is_string($m['hora'] ?? null) ? $m['hora'] : null]];
+            } elseif (isset($m['tabela']) && is_int($m['tabela'])) {
+                $saida[] = ['role' => 'assistant', 'tira' => ['tipo' => 'consulta', 'linhas' => $m['tabela']]];
+            } else {
+                $saida[] = ['role' => $m['role'] ?? null, 'content' => $m['content'] ?? null];
+            }
+        }
+
+        return $saida;
     }
 
     /**
@@ -145,11 +216,26 @@ class AgenteController extends Controller
             unset($resposta['propostos'], $resposta['tempo_ia_ms'], $resposta['lote_ids']);
         }
 
+        // UX (26/11): o que a tela vai mostrar (tabela mascarada ou card) fica guardado na conversa, por 2 h, para recarregar não apagar o trabalho.
+        $this->conversa->guardarTela($request->session(), $resposta);
+
         return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
             'negado' => 403,
             'erro' => 422,
             default => 200,
         });
+    }
+
+    /**
+     * "Nova conversa" (26/11): descarta as propostas abertas (auditadas como canceladas, como num novo pedido) e apaga o que a conversa
+     * guardou (falas, tabelas, cards, lista de posições). Não grava nada de negócio.
+     */
+    public function nova(Request $request)
+    {
+        $this->descartarPendencias($request);
+        $this->conversa->esquecer($request->session());
+
+        return response()->json(['tipo' => 'ok']);
     }
 
     /**
@@ -312,6 +398,7 @@ class AgenteController extends Controller
             // Sem permissão a proposta não tem mais futuro: a negação (já auditada) é o desfecho dela.
             $this->pendentes->concluir($proposta);
             $this->pendentes->encerrar($request->session(), $proposta);
+            $this->conversa->marcarProposta($request->session(), $proposta, 'falhou');
 
             return response()->json($recusa, 403);
         }
@@ -491,6 +578,8 @@ class AgenteController extends Controller
                 'Confirmação recebida fora do prazo. Nada foi gravado.', ConfirmacoesPendentes::origem($pendente),
                 entidadeId: ConfirmacoesPendentes::entidadeId($pendente), tempoIaMs: ConfirmacoesPendentes::tempoIa($pendente));
 
+            $this->conversa->marcarProposta($request->session(), $proposta, 'expirada');
+
             return response()->json(['tipo' => 'erro', 'mensagem' => 'Confirmação fora do prazo. Refaça o comando.'], 422);
         }
 
@@ -508,6 +597,8 @@ class AgenteController extends Controller
             $autorizacao = $this->reautenticar($request, $estorno ? 'estorno' : 'admin');
 
             if (! isset($autorizacao['admin'])) {
+                $this->conversa->marcarProposta($request->session(), $proposta, 'falhou'); // a proposta já foi consumida: o card guardado sai da sessão
+
                 return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], $estorno ? 'estorno' : 'admin');
             }
 
@@ -519,6 +610,8 @@ class AgenteController extends Controller
             $autorizacao = $this->reautenticar($request, 'crmv');
 
             if (! isset($autorizacao['admin'])) {
+                $this->conversa->marcarProposta($request->session(), $proposta, 'falhou');
+
                 return $this->reautenticacaoRecusada($pendente, $autorizacao['falha'], 'crmv');
             }
 
@@ -530,6 +623,8 @@ class AgenteController extends Controller
             $resultado = $this->aiAgentService->executarConfirmada($pendente['tool'], $pendente['argumentos'], ConfirmacoesPendentes::propostos($pendente),
                 ConfirmacoesPendentes::origem($pendente), $autorizadoPor, ConfirmacoesPendentes::tempoIa($pendente), ConfirmacoesPendentes::loteIds($pendente), $conferencia);
         } catch (InvalidArgumentException $e) {
+            $this->conversa->marcarProposta($request->session(), $proposta, 'falhou');
+
             return response()->json(['tipo' => 'erro', 'categoria' => 'unsupported_operation', 'codigo' => 'AI_UNSUPPORTED_OPERATION', 'mensagem' => 'Esta operação não é suportada pelo agente.'], 422);
         } catch (\Illuminate\Auth\AuthenticationException $e) {
             throw $e;
@@ -538,9 +633,15 @@ class AgenteController extends Controller
         }
 
         // O agente passa a saber que a escrita aconteceu: só a frase fixa do servidor, sem valores.
-        $this->conversa->marcarProposta($request->session(), $proposta, ($resultado['tipo'] ?? null) === 'resultado_escrita' ? 'confirmada' : 'falhou');
+        $ligada = $this->conversa->marcarProposta($request->session(), $proposta, ($resultado['tipo'] ?? null) === 'resultado_escrita' ? 'confirmada' : 'falhou');
         if (($resultado['tipo'] ?? null) === 'resultado_escrita') {
-            $this->conversa->registrarResultado($request->session(), $resultado['mensagem'], $this->idGravado($resultado));
+            // 26/11 (UX): depois de agendar/remarcar/trocar serviço/mudar status pelo chat, mostra o registro como ficou, igual à consulta
+            // inicial. Mesma leitura (papel, tenant, máscara) de "me mostre o agendamento"; sem isso, o usuário não vê o resultado.
+            $registro = $ligada ? $this->registroAtualizado($request, $pendente['tool'], $this->idGravado($resultado)) : null;
+            if ($registro !== null) {
+                $resultado['registro'] = $registro;
+            }
+            $this->conversa->registrarResultado($request->session(), $resultado['mensagem'], $this->idGravado($resultado), null, ! $ligada, $registro);
         }
 
         $status = $resultado['http_status'] ?? match ($resultado['tipo'] ?? null) {
@@ -792,6 +893,42 @@ class AgenteController extends Controller
     }
 
     /** O id do registro que a escrita confirmada gravou (para o histórico da clínica; ver ConversaAgente::registrarResultado). */
+    /** Qual consulta mostra o registro que cada escrita acabou de gravar (excluir não tem: o registro foi para a lixeira). */
+    private const CONSULTA_DO_REGISTRO = [
+        'agendar_atendimento' => 'consultar_agenda', 'remarcar_agendamento' => 'consultar_agenda', 'alterar_servico_agendamento' => 'consultar_agenda',
+        'alterar_status_agendamento' => 'consultar_agenda', 'registrar_encaixe_emergencia' => 'consultar_agenda',
+        'criar_tutor' => 'consultar_tutores', 'atualizar_tutor' => 'consultar_tutores', 'cadastrar_cliente_com_pets' => 'consultar_tutores',
+        'criar_pet' => 'consultar_pets', 'atualizar_pet' => 'consultar_pets', 'arquivar_pet' => 'consultar_pets', 'reativar_pet' => 'consultar_pets',
+        'criar_item_catalogo' => 'consultar_catalogo', 'atualizar_item_catalogo' => 'consultar_catalogo',
+        'cobrar_atendimento' => 'consultar_cobrancas', 'receber_cobranca' => 'consultar_cobrancas', 'cancelar_cobranca' => 'consultar_cobrancas', 'estornar_cobranca' => 'consultar_cobrancas',
+        'registrar_venda' => 'consultar_vendas', 'estornar_venda' => 'consultar_vendas',
+    ];
+
+    /** O registro que acabou de ser gravado, como a tabela de consulta o mostra (com Exportar). Falha ou ação sem consulta: nada. */
+    private function registroAtualizado(Request $request, string $tool, ?int $id): ?array
+    {
+        $consulta = self::CONSULTA_DO_REGISTRO[$tool] ?? null;
+        if ($id === null || $consulta === null) {
+            return null;
+        }
+        try {
+            $resposta = $this->aiAgentService->consultarManual($consulta, ['id' => $id]);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable) {
+            return null;
+        }
+        if (($resposta['tipo'] ?? null) !== 'resultado_leitura' || (array) ($resposta['resultado'] ?? []) === []) {
+            return null;
+        }
+        if (isset($resposta['consulta'])) {
+            $resposta['exportar'] = $this->exportaveis->guardar($request->session(), $resposta['tool'], $resposta['consulta'], 'manual');
+            unset($resposta['consulta']);
+        }
+
+        return $resposta;
+    }
+
     private function idGravado(array $resultado): ?int
     {
         $id = $resultado['resultado']['id'] ?? null;
