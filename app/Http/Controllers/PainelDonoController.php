@@ -9,6 +9,7 @@ use App\Models\Pet;
 use App\Models\Tutor;
 use App\Models\User;
 use App\Services\AuditoriaService;
+use App\Support\Front;
 use App\Services\ConfiguracaoDaAgenda;
 use App\Services\ContextoUsuario;
 use App\Services\DetalhesAuditoria;
@@ -65,7 +66,7 @@ class PainelDonoController extends Controller
         };
         $this->auditar(self::TOOL_PAINEL, 'consultar', ['aba' => $aba], 'sucesso', 'Painel do dono aberto (aba '.$aba.').', true);
 
-        return view('clinica.painel', ['abas' => self::ABAS, 'aba' => $aba, ...$dados]);
+        return Front::tela('clinica.painel', 'Painel', ['abas' => self::ABAS, 'aba' => $aba, ...$dados]);
     }
 
     public function salvarClinica(Request $request)

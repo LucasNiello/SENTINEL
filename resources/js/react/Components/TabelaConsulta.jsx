@@ -5,7 +5,17 @@ import Botao from './ui/Botao';
 import Toast from './ui/Toast';
 import Aviso from './ui/Aviso';
 
-const textoCelula = (valor) => valor == null ? '' : typeof valor === 'object' ? JSON.stringify(valor) : String(valor);
+// Data/hora ISO em UTC (ex.: 2019-03-10T03:00:00.000000Z) vira texto brasileiro; à meia-noite local só a data.
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+function dataBr(texto) {
+    const d = new Date(texto);
+    if (Number.isNaN(d.getTime())) return texto;
+    const fuso = { timeZone: 'America/Sao_Paulo' };
+    const hora = d.toLocaleTimeString('pt-BR', { ...fuso, hour: '2-digit', minute: '2-digit', hour12: false });
+    const dia = d.toLocaleDateString('pt-BR', fuso);
+    return hora === '00:00' ? dia : `${dia} ${hora}`;
+}
+const textoCelula = (valor) => valor == null ? '' : typeof valor === 'object' ? JSON.stringify(valor) : (typeof valor === 'string' && ISO_UTC.test(valor)) ? dataBr(valor) : String(valor);
 
 // Texto de cada ação em lote, pela URL que o servidor manda em `selecao`. Ação nova = uma linha aqui.
 const ACOES_EM_LOTE = {
@@ -14,14 +24,15 @@ const ACOES_EM_LOTE = {
 const INCERTO = 'Não consegui confirmar o resultado. A ação pode ter sido processada; confira a situação antes de tentar de novo.';
 const SOLTOU_CEDO ='Você soltou antes da hora, então não fiz nada. Se quiser, é só segurar de novo.';
 
-export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, prepararPedido, adicionar }) {
+// linkDaLinha(linha) → { href, rotulo } e acoesExtras(linha) → [{ tool, rotulo, perigo }] são opcionais (telas Cadastros/Lixeira); o chat não usa.
+export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, prepararPedido, adicionar, linkDaLinha, acoesExtras }) {
     const linhas = consulta.resultado;
     const selecao = consulta.selecao && typeof consulta.selecao.url === 'string' ? consulta.selecao : null;
     const acao = selecao ? (ACOES_EM_LOTE[selecao.url] ?? { verbo: 'aplicar a ação em', singular: 'registro', plural: 'registros', botao: selecao.rotulo || 'Confirmar', feito: 'feito' }) : null;
     // Sem cabeçalhos explícitos, usar apenas chaves realmente recebidas.
     const colunas = consulta.colunas?.length ? consulta.colunas
         : [...new Set(linhas.flatMap((linha) => Object.keys(linha)))].filter((nome) => !['acao', 'destaque', 'bloqueado'].includes(nome));
-    const temAcoes = !!consulta.editar || linhas.some((linha) => linha.acao?.tool || typeof linha.pedido === 'string');
+    const temAcoes = !!consulta.editar || linhas.some((linha) => linha.acao?.tool || typeof linha.pedido === 'string' || linkDaLinha?.(linha) || acoesExtras?.(linha)?.length);
 
     // Seleção em lote (25/11): nada é gravado ao marcar. O envio leva só os ids marcados; o servidor só aceita os da lista.
     const [marcados, setMarcados] = useState(() => new Set());
@@ -141,6 +152,8 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
                             {colunas.map((coluna) => <td key={coluna} style={{ whiteSpace: 'pre-wrap' }}>{celula(linha, coluna)}</td>)}
                             {temAcoes && <td>
                                 {tool && <button type="button" className={`btn-editar-linha${tool.startsWith('excluir_definitivo_') ? ' btn-danger' : ''}`} disabled={ocupado} aria-label={`${rotulo} registro #${linha.id}`} onClick={() => abrirFormulario(tool, linha.id)}>{rotulo}</button>}
+                                {(() => { const l = Number.isInteger(linha.id) ? linkDaLinha?.(linha) : null; return l ? <a className="btn-editar-linha" href={l.href}>{l.rotulo}</a> : null; })()}
+                                {(acoesExtras?.(linha) ?? []).map((a) => <button key={a.tool} type="button" className={`btn-editar-linha${a.perigo ? ' btn-danger' : ''}`} disabled={ocupado} aria-label={`${a.rotulo} registro #${linha.id}`} onClick={() => abrirFormulario(a.tool, linha.id)}>{a.rotulo}</button>)}
                                 {typeof linha.pedido === 'string' && <button type="button" className="btn-editar-linha" disabled={ocupado} aria-label={`Pedir ao agente o que a mensagem ${linha.id} pede`} onClick={() => prepararPedido(linha.pedido)}>Pedir ao agente</button>}
                             </td>}
                         </tr>;

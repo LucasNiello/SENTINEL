@@ -16,7 +16,7 @@ const exibir = (valor) => valor == null || valor === '' ? 'Não informado' : typ
 const horaAgora = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const SOLTOU_CEDO = 'Você soltou antes da hora, então não fiz nada. Se quiser, é só segurar de novo.';
 
-export default function Confirmacao({ proposta, adicionar, trava, ocupado, definirOcupado, abrirFormulario }) {
+export default function Confirmacao({ proposta, adicionar, adicionarTabela, trava, ocupado, definirOcupado, abrirFormulario }) {
     const [dados, setDados] = useState(proposta);
     const [token, setToken] = useState(null);
     const [valores, setValores] = useState(() => valoresIniciais(proposta.formulario?.campos ?? []));
@@ -166,6 +166,8 @@ export default function Confirmacao({ proposta, adicionar, trava, ocupado, defin
                 setToken(null);
                 setEtapa(resultado.mensagem);
                 if (!silencioso) adicionar(resultado.mensagem, 'msg--agente');
+                // O registro como ficou (agenda, pelo chat): aparece como a tabela da consulta inicial.
+                if (!silencioso && acao === 'confirmar' && resultado.registro && adicionarTabela) adicionarTabela(resultado.registro);
             }
             return true;
         } catch (falha) {

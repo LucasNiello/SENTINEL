@@ -184,7 +184,7 @@ class CobrancaService
      * Cobranças do tenant, mais novas primeiro, com o pet e o serviço do atendimento (para a tabela e para achar
      * "a cobrança do Thor"). Até 100.
      */
-    public function buscarPorFiltro(?string $status, ?string $setor, int $tenantId): Collection
+    public function buscarPorFiltro(?string $status, ?string $setor, int $tenantId, ?int $id = null): Collection
     {
         return Cobranca::query()
             ->join('agendamentos', 'agendamentos.id', '=', 'cobrancas.agendamento_id')
@@ -193,6 +193,7 @@ class CobrancaService
             ->where('cobrancas.tenant_id', $tenantId)
             ->when($status, fn ($query) => $query->where('cobrancas.status', $status))
             ->when($setor, fn ($query) => $query->where('cobrancas.setor', $setor))
+            ->when($id, fn ($query) => $query->where('cobrancas.id', $id))
             ->orderByDesc('cobrancas.id')
             ->limit(100)
             ->select(['cobrancas.*', 'pets.nome as pet', 'catalogo_itens.nome_comercial as servico', 'agendamentos.inicio as atendimento_em'])

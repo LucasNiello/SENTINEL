@@ -13,6 +13,11 @@ class ConversaAgente
     private const AVISO_PROPOSTA = 'Proposta pendente de confirmação humana. Nenhuma escrita foi executada.';
     private const CHAVE_LISTA = 'agente_ultima_lista'; // P-C1
     private const PRAZO_LISTA_S = 1800;
+    // 26/11 (UX): a conversa na tela (tabelas e cards junto das mensagens) vale 2 h desde a última atividade; depois a próxima
+    // requisição começa uma conversa nova. Logout e "Nova conversa" também apagam. O limite de mensagens é o mesmo de sempre.
+    private const PRAZO_CONVERSA_S = 7200;
+    private const MAX_LINHAS_TELA = 200;
+    private const MAX_BYTES_TELA = 600000;
 
     public function __construct(private ContextoUsuario $contexto) {}
 
@@ -21,13 +26,43 @@ class ConversaAgente
         return $this->contexto->usuario()->getKey().':'.$this->contexto->tenantId();
     }
 
-    public function ler(Session $sessao): array
+    /** Todas as falas guardadas, inclusive as internas (que só a tela usa). Conversa de outro usuário ou passada de 2 h: começa do zero. */
+    private function lerTudo(Session $sessao): array
     {
         $dados = $sessao->get(self::CHAVE, []);
         if (($dados['identidade'] ?? null) !== $this->identidade()) {
             $sessao->forget(self::CHAVE);
             return [];
         }
+        if (now()->getTimestamp() - (int) ($dados['em'] ?? now()->getTimestamp()) > self::PRAZO_CONVERSA_S) {
+            $this->esquecer($sessao);
+            return [];
+        }
+
+        return array_values((array) ($dados['mensagens'] ?? []));
+    }
+
+    /** Falas com o que a tela mostra (tabela, card); a IA nunca recebe isto, só o texto (ler). */
+    public function lerParaTela(Session $sessao): array
+    {
+        return $this->lerTudo($sessao);
+    }
+
+    /** "Nova conversa" e fim do prazo: some o que a tela guarda e a lista de posições. As propostas abertas são descartadas por quem chama. */
+    public function esquecer(Session $sessao): void
+    {
+        $sessao->forget(self::CHAVE);
+        $sessao->forget(self::CHAVE_LISTA);
+    }
+
+    private function gravar(Session $sessao, array $mensagens): void
+    {
+        $sessao->put(self::CHAVE, ['identidade' => $this->identidade(), 'mensagens' => array_values($mensagens), 'em' => now()->getTimestamp()]);
+    }
+
+    public function ler(Session $sessao): array
+    {
+        $todas = $this->lerTudo($sessao);
         // É um marcador da interface, não uma resposta da IA. Reenviá-lo como
         // fala do assistente induz o modelo a copiá-lo no próximo cadastro,
         // sem chamar uma tool e, portanto, sem produzir um formulário.
@@ -37,7 +72,10 @@ class ConversaAgente
             'A consulta foi concluída. Os dados não são guardados no histórico.',
             'Não há lançamentos pendentes nesse período. Nada a conciliar.',
         ];
-        return array_values(array_filter($dados['mensagens'] ?? [], fn ($m) =>
+        // A IA recebe só o texto: o que a tela guardou (tabela, card) nunca vai junto.
+        $todas = array_map(fn ($m) => array_diff_key($m, ['tela' => 1]), $todas);
+
+        return array_values(array_filter($todas, fn ($m) =>
             ! ($m['interno'] ?? false)
             && ! (($m['role'] ?? null) === 'assistant' && in_array($m['content'] ?? null, $internosLegados, true))));
     }
@@ -58,7 +96,16 @@ class ConversaAgente
         if ($texto === null) return;
         $tipo = $resposta['tipo'] ?? null;
         $interno = $tipo !== 'confirmacao_pendente' && $frase === null && (isset($resposta['tool']) || $tipo === 'resultado_leitura');
-        $this->acrescentar($sessao, $mensagem, $texto, $interno, $tipo === 'confirmacao_pendente' ? ['resumo' => $this->resumoDaProposta($resposta)] : []);
+        // 26/11 (UX): o título e a hora do card, e o tamanho da tabela, ficam no histórico só para a tela refazer a "tira" depois de
+        // recarregar (o card finalizado não some sem deixar rastro). Nenhum dado da consulta: só o título do card e a contagem.
+        $extra = match (true) {
+            $tipo === 'confirmacao_pendente' => ['resumo' => $this->resumoDaProposta($resposta),
+                'titulo' => mb_substr(is_string($resposta['formulario']['titulo'] ?? null) ? $resposta['formulario']['titulo'] : 'Ação proposta', 0, 120),
+                'hora' => now()->format('H:i')],
+            $frase !== null => ['tabela' => count((array) ($resposta['resultado'] ?? []))],
+            default => [],
+        };
+        $this->acrescentar($sessao, $mensagem, $texto, $interno, $extra);
     }
 
     /**
@@ -127,12 +174,23 @@ class ConversaAgente
      * Bateria da clínica (15/11): na clínica, a frase leva também o NÚMERO do registro gravado (só o id interno, nenhum
      * valor), para "esse mesmo" depois de gravar ter a que se referir. Na contabilidade, nada muda.
      */
-    public function registrarResultado(Session $sessao, string $frase, ?int $idGravado = null): void
+    public function registrarResultado(Session $sessao, string $frase, ?int $idGravado = null, ?string $tituloDaTira = null, bool $ocultaNaTela = false, ?array $registro = null): void
     {
         if ($idGravado !== null && $idGravado > 0 && $this->contexto->dominio() === 'clinica') {
             $frase = rtrim($frase).' Número do registro gravado: '.$idGravado.'.';
         }
-        $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase);
+        // UX (26/11): ações sem card de proposta (o lote) deixam a mesma "tira" que um card finalizado deixa depois de recarregar.
+        $extra = $tituloDaTira === null ? [] : ['titulo' => mb_substr($tituloDaTira, 0, 120), 'desfecho' => 'confirmada', 'hora' => now()->format('H:i')];
+        // O registro gravado, como a tabela o mostrou (já mascarado): volta junto da mensagem ao recarregar, dentro do prazo da conversa.
+        if ($registro !== null) {
+            $registro['resultado'] = array_slice(array_values((array) ($registro['resultado'] ?? [])), 0, self::MAX_LINHAS_TELA);
+            $extra['tela'] = ['tipo' => 'consulta', 'dados' => $registro];
+        }
+        // Card aberto fora do chat (Cadastros, Agenda): a IA continua sabendo, mas a tela não mostra uma fala solta, sem pedido nem tira antes dela.
+        if ($ocultaNaTela) {
+            $extra['oculta'] = true;
+        }
+        $this->acrescentar($sessao, 'Confirmei a proposta no card.', $frase, false, $extra);
     }
 
     /** Como cada desfecho de uma proposta aparece no histórico (frase do servidor, sem valores sensíveis). */
@@ -150,14 +208,14 @@ class ConversaAgente
      */
     public function vincularProposta(Session $sessao, string $proposta): void
     {
-        $dados = $sessao->get(self::CHAVE, []);
-        $mensagens = (array) ($dados['mensagens'] ?? []);
+        // lerTudo confere identidade e o prazo de 2 h: marcar uma proposta de uma conversa vencida não a renova.
+        $mensagens = $this->lerTudo($sessao);
         $ultima = array_key_last($mensagens);
-        if (($dados['identidade'] ?? null) !== $this->identidade() || $ultima === null || ! isset($mensagens[$ultima]['resumo'])) {
+        if ($ultima === null || ! isset($mensagens[$ultima]['resumo'])) {
             return;
         }
         $mensagens[$ultima]['proposta'] = $proposta;
-        $sessao->put(self::CHAVE, ['identidade' => $this->identidade(), 'mensagens' => $mensagens]);
+        $this->gravar($sessao, $mensagens);
     }
 
     /**
@@ -165,21 +223,25 @@ class ConversaAgente
      * "cancelada", "substituída por novo pedido", etc. O pedido original continua no histórico, então "na verdade,
      * coloca R$ 90" ainda tem a que se referir. Fala que já saiu do histórico (limite de mensagens): nada a fazer.
      */
-    public function marcarProposta(Session $sessao, string $proposta, string $desfecho): void
+    public function marcarProposta(Session $sessao, string $proposta, string $desfecho): bool
     {
-        $dados = $sessao->get(self::CHAVE, []);
-        if (($dados['identidade'] ?? null) !== $this->identidade() || ! isset(self::DESFECHOS[$desfecho])) {
-            return;
+        if (! isset(self::DESFECHOS[$desfecho])) {
+            return false;
         }
-        $mensagens = (array) ($dados['mensagens'] ?? []);
+        $mensagens = $this->lerTudo($sessao);
         foreach ($mensagens as $i => $m) {
             if (($m['proposta'] ?? null) === $proposta) {
                 $mensagens[$i]['content'] = $this->sanitizar('[Proposta: '.($m['resumo'] ?? 'sem resumo').' — '.self::DESFECHOS[$desfecho].']');
-                $sessao->put(self::CHAVE, ['identidade' => $this->identidade(), 'mensagens' => $mensagens]);
+                $mensagens[$i]['desfecho'] = $desfecho;
+                $mensagens[$i]['hora'] = now()->format('H:i');
+                unset($mensagens[$i]['tela']); // finalizado: o card sai e fica a tira
+                $this->gravar($sessao, $mensagens);
 
-                return;
+                return true;
             }
         }
+
+        return false;
     }
 
     /** "[Proposta: Cadastrar item do catálogo (nome: Banho premium; …) — ainda não confirmada]". */
@@ -207,9 +269,66 @@ class ConversaAgente
         return mb_substr($titulo.($pares === [] ? '' : ' ('.implode('; ', $pares).')'), 0, 600);
     }
 
+    /**
+     * 26/11 (UX): guarda, na fala do assistente que acabou de entrar, o que a tela mostrou (tabela já mascarada pelo servidor, ou o card
+     * da proposta), para a conversa voltar inteira se a página for recarregada. Só vale por PRAZO_CONVERSA_S, e sai com o logout.
+     */
+    public function guardarTela(Session $sessao, array $resposta): void
+    {
+        $tipo = $resposta['tipo'] ?? null;
+        if (! in_array($tipo, ['resultado_leitura', 'confirmacao_pendente'], true)) {
+            return;
+        }
+        $mensagens = $this->lerTudo($sessao);
+        $ultima = array_key_last($mensagens);
+        if ($ultima === null || ($mensagens[$ultima]['role'] ?? null) !== 'assistant') {
+            return;
+        }
+        if ($tipo === 'resultado_leitura') {
+            $resposta['resultado'] = array_slice(array_values((array) ($resposta['resultado'] ?? [])), 0, self::MAX_LINHAS_TELA);
+            $mensagens[$ultima]['tela'] = ['tipo' => 'consulta', 'dados' => $resposta];
+        } else {
+            $mensagens[$ultima]['tela'] = ['tipo' => 'proposta', 'dados' => $resposta];
+        }
+        $this->gravar($sessao, $this->aparar($mensagens));
+    }
+
+    /** Depois do envio do lote: a tabela deixa de ser selecionável e as linhas canceladas aparecem como tais ao recarregar. */
+    public function encerrarSelecao(Session $sessao, array $ids): void
+    {
+        $mensagens = $this->lerTudo($sessao);
+        foreach ($mensagens as $i => $m) {
+            if (($m['tela']['tipo'] ?? null) !== 'consulta' || ! isset($m['tela']['dados']['selecao'])) {
+                continue;
+            }
+            unset($mensagens[$i]['tela']['dados']['selecao']);
+            foreach ((array) ($m['tela']['dados']['resultado'] ?? []) as $j => $linha) {
+                if (is_array($linha) && in_array($linha['id'] ?? null, $ids, true)) {
+                    $mensagens[$i]['tela']['dados']['resultado'][$j]['status'] = 'cancelado';
+                }
+            }
+        }
+        $this->gravar($sessao, $mensagens);
+    }
+
+    /** O que passa do teto de tamanho da tela cai do mais antigo para o mais novo; a fala de texto fica. */
+    private function aparar(array $mensagens): array
+    {
+        $bytes = fn () => array_sum(array_map(fn ($m) => isset($m['tela']) ? strlen((string) json_encode($m['tela'])) : 0, $mensagens));
+        foreach (array_keys($mensagens) as $i) {
+            if ($bytes() <= self::MAX_BYTES_TELA) {
+                break;
+            }
+            unset($mensagens[$i]['tela']);
+        }
+
+        return $mensagens;
+    }
+
     private function acrescentar(Session $sessao, string $mensagem, string $texto, bool $interno = false, array $extra = []): void
     {
-        $historico = $this->ler($sessao);
+        // Guarda também as falas internas que têm o que a tela mostrar (ler() as esconde da IA).
+        $historico = array_values(array_filter($this->lerTudo($sessao), fn ($m) => ! ($m['interno'] ?? false) || isset($m['tela'])));
         $historico[] = ['role' => 'user', 'content' => $this->sanitizar($mensagem)];
         $historico[] = ['role' => 'assistant', 'content' => $this->sanitizar($texto), ...$extra];
         if ($interno) $historico[array_key_last($historico)]['interno'] = true;
@@ -217,7 +336,7 @@ class ConversaAgente
         while (count($historico) > 2 && array_sum(array_map(fn ($m) => mb_strlen($m['content']), $historico)) > self::MAX_CARACTERES) {
             array_splice($historico, 0, 2);
         }
-        $sessao->put(self::CHAVE, ['identidade' => $this->identidade(), 'mensagens' => $historico]);
+        $this->gravar($sessao, $this->aparar($historico));
     }
 
     private function sanitizar(string $texto): string

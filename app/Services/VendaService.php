@@ -262,11 +262,12 @@ class VendaService
     /**
      * Vendas do tenant, mais novas primeiro, com o tutor, o pet e o estornado (soma dos estornos). Até 100.
      */
-    public function buscarPorFiltro(?string $status, ?string $setor, int $tenantId): Collection
+    public function buscarPorFiltro(?string $status, ?string $setor, int $tenantId, ?int $id = null): Collection
     {
         return $this->consultaDeVendas($tenantId)
             ->when($status, fn ($query) => $query->where('vendas.status', $status))
             ->when($setor, fn ($query) => $query->where('vendas.setor', $setor))
+            ->when($id, fn ($query) => $query->where('vendas.id', $id))
             ->orderByDesc('vendas.id')
             ->limit(100)
             ->get();

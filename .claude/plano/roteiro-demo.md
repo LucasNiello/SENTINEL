@@ -1,6 +1,10 @@
 # Roteiro da demo para a banca — 15 a 20 min (rascunho)
 
-Contas do seed (domínio `@clinica.sentinel.br`, senha = `DEMO_SENHA`, que só o Lucas sabe): `vet1` (dono), `vet2` (veterinário), `recepcao1`, `estetica1` (atendente), `vendas1` (vendedor), `administracao` (admin).
+Contas do seed (domínio `@clinica.sentinel.br`; a senha vem da `DEMO_SENHA` do `.env`; senha de testes anotada pelo Lucas em 26/11, dado de simulação: `Sentinel@2026`): `vet1` (dono), `vet2` (veterinário), `recepcao1`, `estetica1` (atendente), `vendas1` (vendedor), `administracao` (admin).
+E-mails completos (11 contas): `vet1@`, `vet2@`, `vet3@`, `recepcao1@`, `recepcao2@`, `recepcao3@`, `estetica1@`, `estetica2@`, `vendas1@`, `vendas2@` e `administracao@`, todos seguidos de `clinica.sentinel.br`.
+PIN de teste do supervisor responsável do setor (simulação, anotado pelo Lucas em 26/11): `estetica1_262096`.
+PIN de teste do supervisor de vendas (simulação, anotado pelo Lucas em 26/11): `Vendas1_865872`.
+PIN de teste do dono, vet1 (simulação, anotado pelo Lucas em 26/11): `Vet1_253764`.
 
 ## Antes de entrar na sala (checklist, 5 min)
 - Banco semeado **no dia** (as datas são relativas ao dia do seed): `migrate:fresh --seed` com `DEMO_SENHA`. O bloco lotado é "hoje" na primeira hora cheia ainda não passada (9h–16h); se a demo for à noite ou domingo, ele cai no próximo dia útil às 10h. Conferir em `/agenda` qual é o horário e anotar: **HH:MM do bloco lotado = ____**.

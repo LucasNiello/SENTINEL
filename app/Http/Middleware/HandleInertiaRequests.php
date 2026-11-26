@@ -24,6 +24,7 @@ class HandleInertiaRequests extends Middleware
             'menu' => fn () => $this->menu($request),
             'flash' => fn () => [
                 'status' => $request->hasSession() ? $request->session()->get('status') : null,
+                'ok' => $request->hasSession() ? $request->session()->get('ok') : null,
             ],
         ]);
     }

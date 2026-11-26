@@ -3,6 +3,8 @@ import Workspace from '../Layouts/Workspace';
 import Confirmacao from '../Components/Confirmacao';
 import TabelaConsulta from '../Components/TabelaConsulta';
 import Aviso from '../Components/ui/Aviso';
+import FarolCarregando from '../Components/ui/FarolCarregando';
+import TiraDoHistorico from '../Components/TiraDoHistorico';
 import './Agente.css';
 
 const errosHttp = {
@@ -15,16 +17,26 @@ const errosHttp = {
 };
 
 export default function Agente({ historico = [] }) {
-    const [mensagens, setMensagens] = useState(() => historico
-        .filter((m) => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string')
-        .map((m) => ({ texto: m.content, classe: m.role === 'user' ? 'msg--usuario' : 'msg--agente' })));
+    // A conversa volta como estava (dentro do prazo do servidor): texto, tabela (com a frase antes dela), card pendente ou a tira do que já terminou.
+    const [mensagens, setMensagens] = useState(() => historico.flatMap((m) => {
+        if (m.consulta) return [...(typeof m.consulta.frase === 'string' && m.consulta.frase ? [{ texto: m.consulta.frase, classe: 'msg--agente' }] : []), { consulta: m.consulta }];
+        if (m.proposta) return [{ proposta: m.proposta }];
+        if (m.tira) return [{ tira: m.tira }];
+        return ['user', 'assistant'].includes(m.role) && typeof m.content === 'string'
+            ? [{ texto: m.content, classe: m.role === 'user' ? 'msg--usuario' : 'msg--agente' }] : [];
+    }));
+    const [confirmandoNova, setConfirmandoNova] = useState(false);
     const [texto, setTexto] = useState('');
     const [pensando, setPensando] = useState(false);
     const campo = useRef(null);
     const fim = useRef(null);
+    const carregando = useRef(null);
     const requisicao = useRef(null);
     const montado = useRef(false);
     const interagiu = useRef(false);
+    // Histórico de mensagens nas setas (como no shell): posição atual (null = digitando) e o rascunho guardado ao começar a navegar.
+    const posicao = useRef(null);
+    const rascunho = useRef('');
 
     useEffect(() => {
         montado.current = true;
@@ -33,11 +45,13 @@ export default function Agente({ historico = [] }) {
 
     useEffect(() => {
         if (!interagiu.current) return;
-        fim.current?.scrollIntoView({ block: 'nearest' });
+        (carregando.current ?? fim.current)?.scrollIntoView({ block: 'nearest' });
         if (!pensando) campo.current?.focus({ preventScroll: true });
     }, [mensagens, pensando]);
 
     const adicionar = (texto, classe) => setMensagens((atuais) => [...atuais, { texto, classe }]);
+    // Tabela de um registro recém-gravado: a frase da consulta (se veio) e a tabela, como na consulta inicial.
+    const adicionarTabela = (dados) => setMensagens((atuais) => [...atuais, ...(typeof dados.frase === 'string' && dados.frase ? [{ texto: dados.frase, classe: 'msg--agente' }] : []), { consulta: dados }]);
 
     async function abrirFormulario(tool, id) {
         if (requisicao.current) return;
@@ -70,6 +84,42 @@ export default function Agente({ historico = [] }) {
         }
     }
 
+    // ↑ volta às mensagens anteriores, ↓ avança; passando da mais nova, volta o que estava sendo digitado.
+    function navegarHistorico(e) {
+        if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.nativeEvent.isComposing || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+        const enviadas = mensagens.filter((m) => m.classe === 'msg--usuario').map((m) => m.texto);
+        if (enviadas.length === 0) return;
+        e.preventDefault();
+        let proxima = posicao.current;
+        if (e.key === 'ArrowUp') {
+            if (proxima === null) { rascunho.current = texto; proxima = enviadas.length - 1; }
+            else proxima = Math.max(0, proxima - 1);
+        } else {
+            if (proxima === null) return;
+            proxima = proxima + 1 >= enviadas.length ? null : proxima + 1;
+        }
+        posicao.current = proxima;
+        setTexto(proxima === null ? rascunho.current : enviadas[proxima]);
+        // Cursor no fim do texto, como no shell.
+        setTimeout(() => { const c = campo.current; if (c) c.setSelectionRange(c.value.length, c.value.length); }, 0);
+    }
+
+    // "Nova conversa": o servidor descarta as propostas abertas e apaga o que a conversa guardou; aqui a tela volta ao início.
+    async function novaConversa() {
+        if (requisicao.current) return;
+        setConfirmandoNova(false);
+        setPensando(true);
+        try {
+            const resposta = await fetch('/agente/nova', { method: 'POST', credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '' } });
+            if (resposta.status === 401 || resposta.status === 419) { window.location.assign('/login'); return; }
+            if (!resposta.ok) throw new Error();
+            posicao.current = null;
+            setMensagens([]);
+        } catch (e) { adicionar('Não consegui limpar a conversa agora. Tente de novo.', 'msg--erro'); }
+        finally { setPensando(false); }
+    }
+
     async function enviar(evento) {
         evento.preventDefault();
         const mensagem = texto.trim();
@@ -78,6 +128,7 @@ export default function Agente({ historico = [] }) {
         requisicao.current = controller;
         interagiu.current = true;
         adicionar(mensagem, 'msg--usuario');
+        posicao.current = null;
         setTexto('');
         setPensando(true);
         const timeout = setTimeout(() => controller.abort(), 35000);
@@ -159,8 +210,9 @@ export default function Agente({ historico = [] }) {
                                 <li><b>03</b><strong>Confirme</strong><span>Nada é gravado sem a sua confirmação.</span></li>
                             </ol>
                         </div>}
-                        {mensagens.map((mensagem, indice) => mensagem.proposta
-                            ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} abrirFormulario={abrirFormulario} />
+                        {mensagens.map((mensagem, indice) => mensagem.tira ? <TiraDoHistorico key={indice} tira={mensagem.tira} />
+                            : mensagem.proposta
+                            ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} adicionarTabela={adicionarTabela} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} abrirFormulario={abrirFormulario} />
                             : mensagem.consulta ? <TabelaConsulta key={indice} consulta={mensagem.consulta} ocupado={pensando} abrirFormulario={abrirFormulario} adicionar={adicionar}
                                 prepararPedido={(pedido) => { if (!requisicao.current) { setTexto(pedido.slice(0, 1000)); campo.current?.focus(); } }} />
                             : ['msg--erro', 'msg--aviso'].includes(mensagem.classe)
@@ -171,18 +223,24 @@ export default function Agente({ historico = [] }) {
                                     <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : 'Sentinel'}</span>
                                     <span>{mensagem.texto}</span>
                                 </div>)}
-                    </div>
-                    <div id="carregando" className="carregando" hidden={!pensando} role="status">
-                        <span>Consultando…</span><div className="carregando__barra" />
+                        {pensando && <div id="carregando" ref={carregando} className="chat-carregando" role="status">
+                            <FarolCarregando /><span className="sr-only">Consultando…</span>
+                        </div>}
                     </div>
                     <div className="agent-composer" ref={fim}>
                         <form id="form-comando" onSubmit={enviar} aria-busy={pensando}>
                             <label htmlFor="campo-mensagem" className="sr-only">Seu pedido ao agente</label>
                             <span className="composer-mark" aria-hidden="true">⌘</span>
-                            <input ref={campo} type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required maxLength={1000} value={texto} onChange={(e) => setTexto(e.target.value)} disabled={pensando} onKeyDown={(e) => { if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault(); }} />
+                            <input ref={campo} type="text" id="campo-mensagem" data-foco placeholder="Peça ou pergunte…" required maxLength={1000} value={texto} autoComplete="off" autoCorrect="off" onChange={(e) => { posicao.current = null; setTexto(e.target.value); }} disabled={pensando} onKeyDown={(e) => { if (e.key === 'Enter' && e.nativeEvent.isComposing) e.preventDefault(); navegarHistorico(e); }} />
                             <button type="submit" id="botao-enviar" aria-label="Enviar" title="Enviar" disabled={pensando}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" /></svg></button>
                         </form>
-                        <p className="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
+                        <p className="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.
+                            {mensagens.length > 0 && (confirmandoNova
+                                ? <span className="nova-conversa" role="group" aria-label="Confirmar nova conversa">Limpar a conversa e cancelar o que está aberto?
+                                    <button type="button" className="nova-conversa__btn" disabled={pensando} onClick={novaConversa}>Sim, limpar</button>
+                                    <button type="button" className="nova-conversa__btn" onClick={() => setConfirmandoNova(false)}>Voltar</button></span>
+                                : <button type="button" className="nova-conversa__btn" disabled={pensando} onClick={() => setConfirmandoNova(true)}>Nova conversa</button>)}
+                        </p>
                     </div>
                 </section>
             </div>

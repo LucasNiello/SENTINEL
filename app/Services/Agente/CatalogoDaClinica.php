@@ -84,8 +84,8 @@ trait CatalogoDaClinica
                 propriedadesCriar: $this->propriedadesDoTutor(),
                 obrigatorios: ['nome'],
                 propriedadesAtualizar: $this->propriedadesDoTutor('Nome novo, só se for mudar.'),
-                filtros: ['nome' => ['type' => 'string', 'description' => 'Parte do nome do tutor.']],
-                buscar: fn (array $a) => $tutores->buscarPorFiltro($a['nome'] ?? null, $a['tenant_id']),
+                filtros: ['nome' => ['type' => 'string', 'description' => 'Parte do nome do tutor.'], 'id' => ['type' => 'integer', 'description' => 'Número de um registro específico.'],],
+                buscar: fn (array $a) => $tutores->buscarPorFiltro($a['nome'] ?? null, $a['tenant_id'], isset($a['id']) ? (int) $a['id'] : null),
                 gravar: fn (array $dados, int $tenantId) => $tutores->criar($dados, $tenantId),
                 colunas: ['id', 'nome', 'documento', 'email', 'telefone', 'endereco'],
                 colunaRotulo: 'nome',
@@ -111,8 +111,9 @@ trait CatalogoDaClinica
                 filtros: [
                     'nome' => ['type' => 'string', 'description' => 'Parte do nome do pet.'],
                     'tutor_id' => ['type' => 'integer', 'description' => 'Id do tutor, para listar só os pets dele.'],
+                    'id' => ['type' => 'integer', 'description' => 'Número de um registro específico.'],
                 ],
-                buscar: fn (array $a) => $pets->buscarPorFiltro($a['nome'] ?? null, isset($a['tutor_id']) ? (int) $a['tutor_id'] : null, $a['tenant_id']),
+                buscar: fn (array $a) => $pets->buscarPorFiltro($a['nome'] ?? null, isset($a['tutor_id']) ? (int) $a['tutor_id'] : null, $a['tenant_id'], isset($a['id']) ? (int) $a['id'] : null),
                 gravar: fn (array $dados, int $tenantId) => $pets->criar($dados, $tenantId),
                 colunas: ['id', 'nome', 'especie', 'raca', 'sexo', 'data_nascimento', 'peso_gramas', 'tutor_id', 'alertas', 'observacoes', 'inativado_em'],
                 colunaRotulo: 'nome',
@@ -243,8 +244,9 @@ trait CatalogoDaClinica
                     'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
                     'categoria' => ['type' => 'string'],
                     'nome' => ['type' => 'string', 'description' => 'Parte do nome comercial.'],
+                    'id' => ['type' => 'integer', 'description' => 'Número de um registro específico.'],
                 ],
-                buscar: fn (array $a) => $catalogo->buscarPorFiltro($a['setor'] ?? null, $a['categoria'] ?? null, $a['nome'] ?? null, $a['tenant_id'])
+                buscar: fn (array $a) => $catalogo->buscarPorFiltro($a['setor'] ?? null, $a['categoria'] ?? null, $a['nome'] ?? null, $a['tenant_id'], isset($a['id']) ? (int) $a['id'] : null)
                     ->map(function (CatalogoItem $i) {
                         $negativo = $i->controla_estoque && $i->estoque < 0;
 
@@ -441,6 +443,9 @@ trait CatalogoDaClinica
                     'inicio' => ['type' => 'string', 'description' => 'Novo início COMPLETO (data e hora): AAAA-MM-DD HH:MM. Só quando o usuário disser dia E hora; senão use dia/dia_do_mes/hora.'],
                     'dia' => ['type' => 'string', 'description' => 'Só o NOVO DIA, AAAA-MM-DD ("pra amanhã", "pro dia 5 de dezembro"). O servidor mantém o horário do agendamento. Nunca invente o horário.'],
                     'dia_do_mes' => ['type' => 'integer', 'description' => 'Só o número do dia ("pro dia 21"), 1 a 31: vale no mês do próprio agendamento. O servidor mantém o horário.'],
+                    'somar_dias' => ['type' => 'integer', 'description' => 'Deslocamento RELATIVO em dias a partir do dia do próprio agendamento: "no dia seguinte" = 1, "daqui a 3 dias" = 3. O servidor mantém o horário e calcula a data; você nunca sabe a data atual do agendamento, então use isto em vez de chutar "dia". 1 a 366.'],
+                    'somar_semanas' => ['type' => 'integer', 'description' => 'Deslocamento RELATIVO em semanas ("semana que vem" = 1): mesmo dia da semana e mesmo horário. 1 a 52.'],
+                    'somar_meses' => ['type' => 'integer', 'description' => 'Deslocamento RELATIVO em meses ("mês que vem" = 1): mesmo dia do mês e mesmo horário. 1 a 12.'],
                     'hora' => ['type' => 'string', 'description' => 'Só a HORA nova, HH:MM, quando o usuário disser ("às 10h"). Sem ela, o horário não muda.'],
                     'profissional_id' => ['type' => 'integer', 'description' => 'Só se o usuário pedir outro profissional (do mesmo setor).'],
                 ],
@@ -589,9 +594,10 @@ trait CatalogoDaClinica
                 propriedades: [
                     'status' => ['type' => 'string', 'enum' => Cobranca::STATUS],
                     'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
+                    'id' => ['type' => 'integer', 'description' => 'Número de um registro específico.'],
                 ],
                 obrigatorios: [],
-                executar: fn (array $a) => $cobrancas->buscarPorFiltro($a['status'] ?? null, $a['setor'] ?? null, $a['tenant_id'])
+                executar: fn (array $a) => $cobrancas->buscarPorFiltro($a['status'] ?? null, $a['setor'] ?? null, $a['tenant_id'], isset($a['id']) ? (int) $a['id'] : null)
                     ->map(fn (Cobranca $c) => [
                         'id' => (int) $c->id,
                         'pet' => $c->getAttribute('pet'),
@@ -773,9 +779,10 @@ trait CatalogoDaClinica
                 propriedades: [
                     'status' => ['type' => 'string', 'enum' => Venda::STATUS],
                     'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
+                    'id' => ['type' => 'integer', 'description' => 'Número de um registro específico.'],
                 ],
                 obrigatorios: [],
-                executar: fn (array $a) => $vendas->buscarPorFiltro($a['status'] ?? null, $a['setor'] ?? null, $a['tenant_id'])
+                executar: fn (array $a) => $vendas->buscarPorFiltro($a['status'] ?? null, $a['setor'] ?? null, $a['tenant_id'], isset($a['id']) ? (int) $a['id'] : null)
                     ->map(fn (Venda $venda) => [
                         'id' => (int) $venda->id,
                         'data' => ($venda->pago_em ?? $venda->created_at)?->format('d/m/Y H:i'),
@@ -1018,8 +1025,13 @@ trait CatalogoDaClinica
         $dia = is_string($propostos['dia'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($propostos['dia'])) === 1 ? trim($propostos['dia']) : null;
         $diaDoMes = filter_var($propostos['dia_do_mes'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 31]]);
         $hora = is_string($propostos['hora'] ?? null) && preg_match('/^([01]?\d|2[0-3]):[0-5]\d$/', trim($propostos['hora'])) === 1 ? trim($propostos['hora']) : null;
+        // 26/11: deslocamento relativo ("no dia seguinte", "semana que vem", "mês que vem"): o servidor soma ao horário atual.
+        $somarDias = filter_var($propostos['somar_dias'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 366]]);
+        $somarSemanas = filter_var($propostos['somar_semanas'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 52]]);
+        $somarMeses = filter_var($propostos['somar_meses'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 12]]);
+        $relativo = $somarDias !== false || $somarSemanas !== false || $somarMeses !== false;
 
-        if ($dia === null && $diaDoMes === false && $hora === null) {
+        if ($dia === null && $diaDoMes === false && $hora === null && ! $relativo) {
             return $argumentos;
         }
 
@@ -1035,6 +1047,9 @@ trait CatalogoDaClinica
         } elseif ($diaDoMes !== false) {
             // Dia 31 num mês de 30 dias não existe: fica em branco (a ficha pede o dia), em vez de "pular" para o mês seguinte.
             $data = $diaDoMes <= $atual->daysInMonth ? $atual->setDate($atual->year, $atual->month, $diaDoMes) : null;
+        } elseif ($relativo) {
+            // Meses sem estouro (31/01 + 1 mês = 28/02); depois semanas e dias. A data nova pode ficar no passado só se a conta der isso: a ficha confere.
+            $data = $atual->addMonthsNoOverflow($somarMeses === false ? 0 : $somarMeses)->addWeeks($somarSemanas === false ? 0 : $somarSemanas)->addDays($somarDias === false ? 0 : $somarDias);
         } else {
             $data = $atual;
         }

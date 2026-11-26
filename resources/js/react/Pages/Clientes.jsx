@@ -3,6 +3,7 @@ import Workspace from '../Layouts/Workspace';
 import Confirmacao from '../Components/Confirmacao';
 import Aviso from '../Components/ui/Aviso';
 import Botao from '../Components/ui/Botao';
+import CaixaCarregando from '../Components/ui/CaixaCarregando';
 
 const ESPECIES = { cao: 'Cão', gato: 'Gato', ave: 'Ave', roedor: 'Roedor', reptil: 'Réptil', outro: 'Outro' };
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
@@ -53,6 +54,7 @@ export default function Clientes({ clienteInicial = null, petInicial = null, pod
     const [aviso, setAviso] = useState('');
     const [mostrarArq, setMostrarArq] = useState(false);
     const [ocupado, setOcupado] = useState(false);
+    const [abrindo, setAbrindo] = useState(false);
     const trava = useRef(null);
     const atual = useRef(clienteInicial);
     const montado = useRef(true);
@@ -118,6 +120,8 @@ export default function Clientes({ clienteInicial = null, petInicial = null, pod
         const controller = new AbortController();
         trava.current = controller;
         setOcupado(true);
+        setAbrindo(true);
+        setCartao(null);
         setAviso('');
         try {
             const dados = await pedir('/agente/formulario', { method: 'POST', signal: controller.signal,
@@ -126,7 +130,7 @@ export default function Clientes({ clienteInicial = null, petInicial = null, pod
             if (dados?.tipo !== 'confirmacao_pendente' || typeof dados.proposta !== 'string') throw new Error('Não foi possível abrir o formulário. Tente novamente.');
             setCartao(dados);
         } catch (e) { if (montado.current) setErro(e.name === 'AbortError' ? 'Demorou demais. Tente novamente.' : e.message); }
-        finally { trava.current = null; if (montado.current) setOcupado(false); }
+        finally { trava.current = null; if (montado.current) { setOcupado(false); setAbrindo(false); } }
     }
 
     // O card avisa o desfecho por esta função: depois de gravar (ou cancelar), a lista e o cadastro abertos são lidos de novo.
@@ -143,7 +147,11 @@ export default function Clientes({ clienteInicial = null, petInicial = null, pod
         foco={foco === p.id} pode={pode} ocupado={ocupado} abrirCartao={abrirCartao} />)}</ul>;
 
     return <Workspace titulo="Clientes">
-        <h1 className="sr-only">Clientes</h1>
+        <header className="page-header">
+            <p className="eyebrow">Organização</p>
+            <h1>Clientes</h1>
+            <p className="intro">Tutores e seus pets em um só lugar. Busque pelo nome do cliente, do pet ou pelo microchip; toda gravação passa pelo card de revisão.</p>
+        </header>
         <div className="clientes">
             <section className="clientes-lista" aria-label="Lista de clientes">
                 <div className="clientes-topo">
@@ -168,6 +176,7 @@ export default function Clientes({ clienteInicial = null, petInicial = null, pod
             <section className="clientes-detalhe" aria-label="Cadastro do cliente" ref={topoDetalhe}>
                 {erro && <Aviso tipo="erro" role="alert">{erro}</Aviso>}
                 {aviso && <Aviso tipo="info" role="status">{aviso}</Aviso>}
+                {abrindo && <CaixaCarregando texto="Abrindo o formulário…" />}
                 {cartao && <Confirmacao key={cartao.proposta} proposta={cartao} adicionar={aoMensagem} trava={trava} ocupado={ocupado} definirOcupado={setOcupado}
                     abrirFormulario={(tool, id) => abrirCartao(tool, { id })} />}
                 {!cliente && !cartao && <p className="campo-info">Escolha um cliente na lista ou busque pelo nome do pet.</p>}
