@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import Campo from './ui/Campo';
 
 export const valoresIniciais = (campos) => Object.fromEntries(campos.map((c) => [c.nome, c.sensivel ? '' : String(c.valor ?? '')]));
 
@@ -26,20 +27,19 @@ export default function CamposProposta({ campos, valores, alterar, bloqueado }) 
                 required: !!obrigatorio && !(campo.sensivel && campo.informado),
                 'aria-invalid': campo.erro ? true : undefined, 'aria-describedby': `${id}-info`,
                 onChange: (e) => alterar(campo.nome, e.target.value) };
-            return <div key={campo.nome} className={`campo${campo.erro ? ' campo--erro' : ''}`} hidden={proibido} style={{ minWidth: 0 }}>
-                <label htmlFor={id}>{campo.rotulo || campo.nome}{obrigatorio && <span className="campo-obrigatorio"> (obrigatório)</span>}</label>
+            // O erro fica só no campo (sem role="alert": o resumo do card é o único alerta e leva até aqui).
+            return <Campo key={campo.nome} id={id} rotulo={campo.rotulo || campo.nome} obrigatorio={!!obrigatorio} erro={campo.erro} hidden={proibido}
+                info={<>
+                    {campo.sensivel && <p className="campo-info">{campo.informado ? `Informado${campo.valor ? `: ${campo.valor}` : ''}. Deixe em branco para manter.` : 'Não informado.'}</p>}
+                    {campo.tipo === 'numero' && <p className="campo-info">{campo.inteiro ? 'Informe um número inteiro.' : 'Use ponto nos centavos (ex.: 4567.89).'}{campo.min != null && ` Mínimo: ${campo.min}.`}{campo.max != null && ` Máximo: ${campo.max}.`}</p>}
+                </>}>
                 {['opcoes', 'referencia'].includes(campo.tipo)
                     ? <select {...props}><option value="">— escolha —</option>{(campo.opcoes ?? []).map((opcao) => <option key={opcao.valor} value={String(opcao.valor)}>{opcao.rotulo}</option>)}</select>
                     : <input {...props} type={{ email: 'email', data: 'date' }[campo.tipo] || 'text'}
                         inputMode={campo.tipo === 'numero' ? campo.inteiro ? 'numeric' : 'decimal' : undefined}
                         minLength={campo.tipo === 'numero' ? undefined : campo.min}
                         maxLength={campo.tipo === 'numero' ? undefined : campo.max} />}
-                <div id={`${id}-info`}>
-                    {campo.sensivel && <p className="campo-info">{campo.informado ? `Informado${campo.valor ? `: ${campo.valor}` : ''}. Deixe em branco para manter.` : 'Não informado.'}</p>}
-                    {campo.tipo === 'numero' && <p className="campo-info">{campo.inteiro ? 'Informe um número inteiro.' : 'Use ponto nos centavos (ex.: 4567.89).'}{campo.min != null && ` Mínimo: ${campo.min}.`}{campo.max != null && ` Máximo: ${campo.max}.`}</p>}
-                    {campo.erro && <p className="campo-erro" role="alert">{campo.erro}</p>}
-                </div>
-            </div>;
+            </Campo>;
         })}
     </fieldset>;
 }

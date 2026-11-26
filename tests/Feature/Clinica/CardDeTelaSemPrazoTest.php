@@ -13,9 +13,9 @@ use Tests\TestCase;
 
 /**
  * 25/11 (decisão do Lucas): o card aberto por uma TELA (/agente/formulario, origem "formulario") não vence: quem abriu é
- * o humano, sem IA propondo nada, e o Confirmar revalida tudo no servidor (vaga, versão, setor do papel). A proposta da IA
- * (chat) mantém os 5 min (CLAUDE.md). O contrato vai no campo prazo_s (null = sem prazo), para o front e o React só criarem
- * contador se vier número. Há um teto de 20 cards de tela por usuário; o excedente sai auditado como "cancelado".
+ * o humano, sem IA propondo nada, e o Confirmar revalida tudo no servidor (vaga, versão, setor do papel). No mesmo dia o
+ * Lucas tirou o prazo também da proposta da IA (chat). O contrato vai no campo prazo_s (null = sem prazo), para o front e o
+ * React só criarem contador se vier número. Há um teto de 20 cards de tela por usuário; o excedente sai auditado como "cancelado".
  */
 class CardDeTelaSemPrazoTest extends TestCase
 {
@@ -77,20 +77,20 @@ class CardDeTelaSemPrazoTest extends TestCase
         $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
     }
 
-    public function test_proposta_do_chat_traz_prazo_de_5_minutos_e_vence_com_desfecho_expirado(): void
+    public function test_proposta_do_chat_tambem_nao_tem_prazo(): void
     {
+        // 25/11 (Lucas): o chat deixou de vencer também. Sem prazo_s, o front não arma timer.
         $this->atendente();
         $proposta = $this->comando('agendar_atendimento', ['pet_id' => $this->petId, 'catalogo_item_id' => $this->banhoId, 'inicio' => '2026-11-11 14:00']);
-        $this->assertSame(300, $proposta->json('prazo_s'));
+        $this->assertNull($proposta->json('prazo_s'));
         $id = $proposta->json('proposta');
 
-        // Dentro do prazo, com valores válidos, o Revisar vale (prova que o 422 abaixo é do PRAZO e não da validação).
         $this->postJson('/agente/revisar', ['proposta' => $id, 'valores' => $this->valores(), 'previa' => true])->assertOk();
 
         $this->travel(6)->minutes();
-        $this->postJson('/agente/revisar', ['proposta' => $id, 'valores' => $this->valores()])->assertStatus(422);
-        $this->assertSame(0, Agendamento::count());
-        $this->assertSame(1, AuditLog::query()->where('resultado', 'expirado')->where('tool', 'agendar_atendimento')->count(), 'o desfecho do chat é "expirado"');
+        $this->getJson('/agente/painel')->assertOk(); // passa pela varredura
+        $this->postJson('/agente/revisar', ['proposta' => $id, 'valores' => $this->valores(), 'previa' => true])->assertOk();
+        $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
     }
 
     public function test_a_sessao_guarda_no_maximo_20_cards_de_tela_e_o_excedente_sai_auditado_como_cancelado(): void
@@ -99,6 +99,9 @@ class CardDeTelaSemPrazoTest extends TestCase
         $primeiro = $this->abrirCardDeTela();
         // Enquanto vive, o card de tela revisa normalmente (prova que o 422 do fim é do despejo).
         $this->postJson('/agente/revisar', ['proposta' => $primeiro, 'valores' => $this->valores(), 'previa' => true])->assertOk();
+        // 25/11 (revisão): o card despejado já tinha token; o token sai junto e não confirma depois.
+        $token = $this->postJson('/agente/revisar', ['proposta' => $primeiro, 'valores' => $this->valores()])->assertOk()->json('token');
+        $this->assertIsString($token);
 
         for ($i = 0; $i < 20; $i++) {
             $this->travel(1)->seconds();
@@ -106,9 +109,28 @@ class CardDeTelaSemPrazoTest extends TestCase
         }
 
         $this->postJson('/agente/revisar', ['proposta' => $primeiro, 'valores' => $this->valores(), 'previa' => true])->assertStatus(422);
-        $despejados = AuditLog::query()->where('resultado', 'cancelado')->get();
-        $this->assertCount(1, $despejados, 'só o mais antigo saiu, e com desfecho');
-        $this->assertSame(['agendar_atendimento', 'formulario'], [$despejados->first()->tool, $despejados->first()->origem]);
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
+        $this->assertSame(0, Agendamento::count());
+        $this->assertSame(['cancelado'], AuditLog::query()->where('tool', 'agendar_atendimento')->pluck('resultado')->all(),
+            'só o mais antigo saiu, com um desfecho só; o token despejado não gera outra linha');
+        $this->assertSame('formulario', AuditLog::query()->where('tool', 'agendar_atendimento')->sole()->origem);
+    }
+
+    public function test_cards_de_tela_nao_despejam_a_proposta_do_chat(): void
+    {
+        // 25/11 (revisão): o teto de 20 vale só para card de tela; o chat não acumula (pedido novo descarta a pendente).
+        $this->atendente();
+        $chat = (string) $this->comando('agendar_atendimento', ['pet_id' => $this->petId, 'catalogo_item_id' => $this->banhoId, 'inicio' => '2026-11-11 14:00'])
+            ->assertOk()->json('proposta');
+
+        for ($i = 0; $i < 21; $i++) {
+            $this->travel(1)->seconds();
+            $this->abrirCardDeTela();
+        }
+
+        $this->assertNotNull(session("confirmacoes.{$chat}"), 'a proposta do chat continua na sessão');
+        $this->postJson('/agente/revisar', ['proposta' => $chat, 'valores' => $this->valores(), 'previa' => true])->assertOk();
+        $this->assertSame(0, AuditLog::query()->where('origem', 'agente')->whereIn('resultado', ['cancelado', 'expirado'])->count());
     }
 
     public function test_card_de_tela_velho_e_recusado_quando_a_vaga_foi_tomada_depois_de_abrir(): void

@@ -111,7 +111,7 @@ class PainelDonoController extends Controller
 
         return [
             ['titulo' => 'Agenda de hoje', 'numero' => (string) $agendaHoje, 'link' => '/agenda', 'icone' => 'M3 5h18v16H3z M7 3v4m10-4v4M3 10h18'],
-            ['titulo' => 'Funcionários', 'numero' => (string) User::query()->where('tenant_id', $tenant)->count(), 'link' => '/painel?aba=funcionarios', 'icone' => 'M16 21v-2a6 6 0 0 0-12 0v2 M14 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M17 12a6 6 0 0 1 4 6'],
+            ['titulo' => 'Funcionários', 'numero' => (string) User::query()->where('tenant_id', $tenant)->where('ativo', true)->count(), 'link' => '/painel?aba=funcionarios', 'icone' => 'M16 21v-2a6 6 0 0 0-12 0v2 M14 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M17 12a6 6 0 0 1 4 6'],
             ['titulo' => 'Estoque', 'numero' => $estoque.($estoque === 1 ? ' item' : ' itens'), 'nota' => 'com controle de estoque. Abre o Catálogo, que também lista serviços.', 'link' => '/cadastros?cadastro=catalogo', 'icone' => 'M3 7l9-5 9 5v10l-9 5-9-5z M3 7l9 5 9-5m-9 5v10'],
             ['titulo' => 'Financeiro', 'numero' => ResultadosClinica::reais($mes['liquido']), 'link' => '/resultados', 'icone' => 'M3 5h18v14H3z M3 9h18m-5 6h2'],
         ];
@@ -122,7 +122,7 @@ class PainelDonoController extends Controller
     {
         $rotulos = (array) config('sentinel.rotulos_papeis', []);
 
-        return User::query()->where('tenant_id', $tenant)->orderBy('name')->limit(self::LIMITE)->get(['name', 'papel', 'supervisor_setor'])
+        return User::query()->where('tenant_id', $tenant)->where('ativo', true)->orderBy('name')->limit(self::LIMITE)->get(['name', 'papel', 'supervisor_setor'])
             ->map(fn (User $u) => ['nome' => $u->name, 'papel' => (string) ($rotulos[$u->papel] ?? $u->papel), 'supervisor' => $u->supervisor_setor])->all();
     }
 

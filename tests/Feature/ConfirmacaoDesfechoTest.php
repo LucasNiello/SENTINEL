@@ -84,48 +84,47 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->assertSame(0, Lancamento::count());
     }
 
-    public function test_cancelado_ou_expirado_quem_decide_e_o_servidor_pelo_horario_da_proposta(): void
+    public function test_cancelar_e_sempre_cancelado_quem_decide_e_o_servidor_nao_o_corpo(): void
     {
-        // Dentro da janela da interface: foi o usuário, mesmo que o corpo diga "expirado".
+        // O corpo dizendo "expirado" não muda nada: foi o usuário.
         $token = $this->propor(self::LANCAMENTO);
         $this->travel(3)->seconds();
         $this->cancelar($token, ['tipo' => 'expirado', 'resultado' => 'expirado', 'emitido_em' => 0])
             ->assertOk()
             ->assertJsonPath('tipo', 'cancelado');
 
-        // Depois da validade: foi o prazo, mesmo que o corpo diga "cancelado".
+        // 25/11 (Lucas): a proposta não vence. Muito depois dos antigos 5 min, encerrar continua sendo cancelamento.
         $token = $this->propor(self::LANCAMENTO);
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->cancelar($token, ['tipo' => 'cancelado', 'resultado' => 'cancelado'])
+        $this->cancelar($token, ['tipo' => 'expirado', 'resultado' => 'expirado'])
             ->assertOk()
-            ->assertJsonPath('tipo', 'expirado')
-            ->assertJsonPath('mensagem', 'Esse pedido ficou parado por muito tempo e expirou, então não alterei nada. É só me pedir de novo.');
+            ->assertJsonPath('tipo', 'cancelado');
 
-        $this->assertSame(['cancelado', 'expirado'], $this->resultadosAuditados());
+        $this->assertSame(['cancelado', 'cancelado'], $this->resultadosAuditados());
     }
 
-    public function test_cancelar_e_confirmar_usam_o_mesmo_limite_de_validade(): void
+    public function test_proposta_nao_vence_cancelar_e_confirmar_valem_horas_depois(): void
     {
-        // Decisão B (13/11): o limite único é o prazo da proposta (5 min), não mais 12 s do token.
-        // Aos 4 min a proposta ainda é confirmável, então encerrá-la é cancelamento, não expiração.
+        // 25/11 (Lucas): quem sai da mesa enquanto o agente pensa não precisa pedir de novo. Sem prazo para cancelar
+        // nem para confirmar; o token continua de uso único.
         $token = $this->propor(self::LANCAMENTO);
         $this->travel(240)->seconds();
         $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'cancelado');
 
-        // A prova de que, com o mesmo tempo decorrido (muito além dos antigos 12 s), ela ainda era confirmável.
         $outro = $this->propor(self::LANCAMENTO);
         $this->travel(240)->seconds();
         $this->postJson('/agente/confirmar', ['token' => $outro])->assertOk();
 
-        // Exatamente no limite ainda é cancelamento; 1 s depois, expiração.
-        $limite = $this->propor(self::LANCAMENTO);
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S)->seconds();
-        $this->cancelar($limite)->assertJsonPath('tipo', 'cancelado');
-        $depois = $this->propor(self::LANCAMENTO);
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->cancelar($depois)->assertJsonPath('tipo', 'expirado');
+        $tarde = $this->propor(self::LANCAMENTO);
+        $this->travel(2)->hours();
+        $this->cancelar($tarde)->assertOk()->assertJsonPath('tipo', 'cancelado');
 
-        $this->assertSame(['cancelado', 'sucesso', 'cancelado', 'expirado'], $this->resultadosAuditados());
+        $muitoTarde = $this->propor(self::LANCAMENTO);
+        $this->travel(2)->hours();
+        $this->postJson('/agente/confirmar', ['token' => $muitoTarde])->assertOk();
+
+        $this->assertSame(['cancelado', 'sucesso', 'cancelado', 'sucesso'], $this->resultadosAuditados());
+        $this->assertSame(2, Lancamento::count());
     }
 
     public function test_cancelar_depois_de_confirmar_nao_tem_efeito_nem_nova_auditoria(): void
@@ -214,24 +213,22 @@ class ConfirmacaoDesfechoTest extends TestCase
             ->assertJsonPath('http_status', 429);
     }
 
-    // ---- confirmar fora do prazo ----
+    // ---- confirmar muito depois (25/11: sem prazo) ----
 
-    public function test_confirmar_fora_do_prazo_audita_expirado_e_nao_grava(): void
+    public function test_confirmar_muito_depois_da_proposta_grava_uma_vez(): void
     {
         $token = $this->propor(self::LANCAMENTO);
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
-        $this->postJson('/agente/confirmar', ['token' => $token])
-            ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
         $log = AuditLog::query()->sole();
-        $this->assertSame('expirado', $log->resultado);
+        $this->assertSame('sucesso', $log->resultado);
         $this->assertSame('criar_lancamento', $log->tool);
-        $this->assertSame([], $log->parametros);
-        $this->assertEquals(self::LANCAMENTO, $log->parametros_propostos);
-        $this->assertEmpty(session('confirmacoes', []));
-        $this->assertSame(0, Lancamento::count());
+        $this->assertEmpty(session('confirmacoes', []), 'R3: saiu da sessão');
+        $this->assertSame(1, Lancamento::count());
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422);
+        $this->assertSame(1, Lancamento::count());
     }
 
     public function test_confirmar_sem_espera_grava_uma_vez_e_queima_o_token(): void
@@ -254,25 +251,24 @@ class ConfirmacaoDesfechoTest extends TestCase
 
     // ---- varredura das vencidas ----
 
-    public function test_proposta_esquecida_e_auditada_como_expirada_na_requisicao_seguinte(): void
+    public function test_proposta_esquecida_nao_vence_na_requisicao_seguinte(): void
     {
+        // 25/11 (Lucas): a varredura continua rodando, mas nenhuma proposta passa do prazo.
         $esquecida = $this->propor(self::LANCAMENTO);
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
-        $this->comando('consultar_lancamentos')->assertOk();
+        $this->postJson('/agente/consultar', ['tool' => 'consultar_lancamentos'])->assertOk();
 
-        $log = AuditLog::query()->where('resultado', 'expirado')->sole();
-        $this->assertSame('criar_lancamento', $log->tool);
-        $this->assertSame('A confirmação expirou sem resposta. Nada foi gravado.', $log->mensagem);
-        $this->assertEquals(self::LANCAMENTO, $log->parametros_propostos);
-        $this->assertNull(session("confirmacoes.{$esquecida}"), 'R3: saiu da sessão');
-        $this->assertSame(2, AuditLog::count(), 'a consulta + a expirada');
+        $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
+        $this->assertNotNull(session("confirmacoes.{$esquecida}"), 'continua valendo');
+        $this->postJson('/agente/confirmar', ['token' => $esquecida])->assertOk();
+        $this->assertSame(1, Lancamento::count());
     }
 
     public function test_varredura_nao_mexe_na_proposta_ainda_valida(): void
     {
         $token = $this->propor(self::LANCAMENTO);
-        $this->travel(240)->seconds(); // decisão B: válida até os 5 min da proposta, muito além dos antigos 12 s
+        $this->travel(240)->seconds(); // muito além dos antigos 12 s (25/11: e sem prazo nenhum)
 
         // Consulta manual (/agente/consultar): passa pela varredura, mas não é um novo pedido ao agente. Um pedido novo
         // (/agente/comando) descartaria a proposta (23/11), coberto em CicloDaPendenciaTest.
@@ -285,15 +281,15 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->assertSame(1, Lancamento::count());
     }
 
-    public function test_abrir_a_tela_do_agente_tambem_varre_as_vencidas(): void
+    public function test_abrir_a_tela_do_agente_nao_vence_a_proposta(): void
     {
-        $this->propor(self::LANCAMENTO);
+        $token = $this->propor(self::LANCAMENTO);
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
         $this->get('/agente')->assertOk();
 
-        $this->assertSame(['expirado'], $this->resultadosAuditados());
-        $this->assertEmpty(session('confirmacoes', []));
+        $this->assertSame([], $this->resultadosAuditados());
+        $this->assertNotNull(session("confirmacoes.{$token}"));
     }
 
     public function test_varredura_nao_audita_de_novo_proposta_ja_confirmada_que_voltou_para_a_sessao(): void
@@ -305,31 +301,23 @@ class ConfirmacaoDesfechoTest extends TestCase
 
         // Uma requisição concorrente regravou a sessão com a proposta já confirmada.
         $this->withSession(['confirmacoes' => [$token => $entrada]]);
-        $this->travel(5)->minutes();
+        $this->travel(3)->hours(); // além do TTL antigo da marca (sessão, 120 min): prova os 30 dias de DIAS_DA_MARCA_DE_DESFECHO
 
         $this->get('/agente')->assertOk();
 
         $this->assertSame(['sucesso'], $this->resultadosAuditados(), 'confirmada não vira expirada');
-        $this->assertEmpty(session('confirmacoes', []));
-    }
-
-    public function test_limite_de_validade_conta_pelo_tempo_real_e_nao_pelo_segundo_cheio(): void
-    {
-        // Decisão B (13/11): o limite é o prazo da proposta (5 min). 300,3 s reais, mas só 300 "segundos cheios"
-        // (de 10:00:00 a 10:05:00): já passou da validade.
-        $this->travelTo(Carbon::parse('2026-10-19 10:00:00.100'));
-        $token = $this->propor(self::LANCAMENTO);
-        $this->travelTo(Carbon::parse('2026-10-19 10:05:00.400'));
-        $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'expirado');
-
-        $this->assertSame(['expirado'], $this->resultadosAuditados());
+        // 25/11: sem varredura por prazo, a cópia ressuscitada pode ficar na sessão, mas a marca de desfecho único barra
+        // uma segunda gravação.
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(409);
+        $this->assertSame(['sucesso'], $this->resultadosAuditados());
+        $this->assertSame(1, Lancamento::count());
     }
 
     public function test_sair_com_card_aberto_audita_o_desfecho_em_nome_de_quem_saiu(): void
     {
         $this->propor(self::LANCAMENTO);
         $usuarioId = Auth::id();
-        $this->travel(240)->seconds(); // decisão B: ainda dentro dos 5 min, então sair é cancelamento
+        $this->travel(240)->seconds(); // sair é cancelamento (25/11: em qualquer tempo)
 
         $this->post('/logout')->assertRedirect('/login');
 
@@ -341,16 +329,16 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->assertGuest();
     }
 
-    public function test_sair_com_proposta_ja_fora_da_janela_audita_expirado(): void
+    public function test_sair_muito_depois_da_proposta_audita_cancelado(): void
     {
         $this->propor(self::LANCAMENTO);
         $this->travel(5)->seconds();
         $this->get('/agente')->assertOk(); // recarregou a tela: a proposta ainda vale e o card sumiu
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S)->seconds(); // decisão B: o prazo é o da proposta (5 min)
+        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S)->seconds(); // 25/11: sem prazo, continua valendo
 
         $this->post('/logout')->assertRedirect('/login');
 
-        $this->assertSame(['expirado'], $this->resultadosAuditados());
+        $this->assertSame(['cancelado'], $this->resultadosAuditados());
         $this->assertGuest();
     }
 
@@ -384,22 +372,17 @@ class ConfirmacaoDesfechoTest extends TestCase
         $this->travel(3)->seconds();
         $cancelou = $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'cancelado');
 
+        // 25/11: sem prazo, o desfecho "tarde" também é cancelamento.
         $token = $this->propor($funcionario, 'criar_funcionario');
         $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $atrasou = $this->postJson('/agente/confirmar', ['token' => $token])
-            ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
-
-        $this->propor($funcionario, 'criar_funcionario');
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->get('/agente')->assertOk();
+        $atrasou = $this->cancelar($token)->assertOk()->assertJsonPath('tipo', 'cancelado');
 
         foreach ([$cancelou, $atrasou] as $resposta) {
             $this->assertStringNotContainsString('insert into', $resposta->getContent());
             $this->assertStringNotContainsString('111.222', $resposta->getContent());
         }
         $this->assertEmpty(session('confirmacoes', []), 'R3 vale mesmo sem auditoria');
-        Log::shouldHaveReceived('warning')->times(3)->withArgs(function ($mensagem, $contexto) {
+        Log::shouldHaveReceived('warning')->times(2)->withArgs(function ($mensagem, $contexto) {
             $json = json_encode($contexto);
 
             return $mensagem === 'AiAgentService: falha ao auditar desfecho'

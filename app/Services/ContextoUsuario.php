@@ -29,6 +29,12 @@ class ContextoUsuario
             throw new AuthenticationException('Nenhum usuário autenticado.');
         }
 
+        // 26/11: conta desativada nunca age, mesmo com a sessão aberta (falha fechada; o middleware GarantirContaAtiva
+        // já a derruba na requisição seguinte). Só um false explícito conta: sem o campo carregado, vale como ativa.
+        if ($usuario->ativo === false) {
+            throw new AuthenticationException('Conta desativada.');
+        }
+
         return $usuario;
     }
 

@@ -72,11 +72,15 @@ class TempoIaTest extends TestCase
         $comErro = $this->comando('criar_cliente', ['nome' => 'B'])->json('proposta');
         $this->postJson('/agente/revisar', ['proposta' => $comErro, 'valores' => ['nome' => '']])->assertStatus(422);
 
+        // 25/11 (Lucas): sem prazo, o rascunho parado não vira "expirado"; encerrá-lo muito depois é cancelamento.
         $this->travel(301)->seconds();
-        $this->get('/agente')->assertOk(); // a varredura audita o rascunho vencido
+        $this->postJson('/agente/cancelar', ['proposta' => $comErro])->assertOk()->assertJsonPath('tipo', 'cancelado');
 
-        foreach (['cancelado', 'revisao_com_erro', 'expirado'] as $resultado) {
-            $this->assertTempoDaIa(AuditLog::query()->where('resultado', $resultado)->sole()->tempo_ia_ms);
+        $this->assertTempoDaIa(AuditLog::query()->where('resultado', 'revisao_com_erro')->sole()->tempo_ia_ms);
+        $cancelados = AuditLog::query()->where('resultado', 'cancelado')->get();
+        $this->assertCount(2, $cancelados);
+        foreach ($cancelados as $log) {
+            $this->assertTempoDaIa($log->tempo_ia_ms);
         }
     }
 

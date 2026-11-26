@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Exceptions\RegraDeNegocioException;
 use App\Models\User;
 use App\Services\Concerns\ConfereTenant;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Clínica vet: quem autoriza estorno (CobrancaService::estornar). Regras (T1, 14/11, respostas A, B e F do Lucas):
@@ -36,6 +38,11 @@ class SupervisaoService
 
         if ($setor !== null && ! in_array($setor, ['clinica', 'petshop'], true)) {
             throw new RegraDeNegocioException('O setor do supervisor deve ser "clinica" ou "petshop".');
+        }
+
+        // 26/11: conta inativa não é marcada supervisora (ao voltar, ela não autoriza com o que ganhou desligada). Desmarcar pode.
+        if ($setor !== null && $usuario->ativo === false) {
+            throw new RegraDeNegocioException('Conta desativada: reative a conta antes de marcar supervisor.');
         }
 
         // O dono já tem PIN sem setor; marcá-lo supervisor não muda nada. Desmarcar um dono que já esteja marcado
@@ -70,6 +77,9 @@ class SupervisaoService
         if (! self::podeTerPin($alvo)) {
             throw new RegraDeNegocioException('Só o dono e os supervisores de setor têm PIN de autorização.');
         }
+        if ($alvo->ativo === false) {
+            throw new RegraDeNegocioException('Conta desativada: reative a conta antes de gerar o PIN.');
+        }
 
         // Diferente da senha de login: quem souber a senha não autoriza estorno com ela.
         for ($tentativa = 0; $tentativa < 10; $tentativa++) {
@@ -97,6 +107,42 @@ class SupervisaoService
         $alvo->forceFill(['pin_autorizacao' => null])->save();
 
         return $alvo;
+    }
+
+    /**
+     * 26/11: liga ou desliga a conta de um funcionário. Função administrativa: o dono dá a ordem, o Administrador/RH
+     * (papel 'admin' num tenant da clínica) executa. Não liga/desliga a própria conta nem a do dono (ninguém se tranca
+     * para fora). Desligar zera a marcação de supervisor e o PIN (quem volta não autoriza com o que tinha), o "lembrar de
+     * mim" e derruba as sessões abertas. Leitura travada: dois cliques seguidos não se atropelam.
+     */
+    public function definirAtivo(int $usuarioId, bool $ativo, int $gestorId, int $tenantId): User
+    {
+        $papeis = ContextoUsuario::tenantDaClinica($tenantId) ? array_values(array_intersect(['admin'], (array) config('sentinel.papeis', []))) : [];
+        $gestor = $this->usuarioDoTenant($gestorId, $tenantId, $papeis, 'o Administrador', 'Só o Administrador liga ou desliga contas.');
+
+        $usuario = User::query()->where('tenant_id', $tenantId)->lockForUpdate()->find($this->idValido($usuarioId))
+            ?? throw new RegraDeNegocioException("Não encontrei o usuário #{$usuarioId}.");
+
+        if ((int) $usuario->id === (int) $gestor->id) {
+            throw new RegraDeNegocioException('Você não pode desativar a sua própria conta.');
+        }
+        if ($usuario->papel === 'dono') {
+            throw new RegraDeNegocioException('A conta do dono não é ligada nem desligada por aqui.');
+        }
+
+        if ((bool) $usuario->ativo !== $ativo) {
+            $campos = ['ativo' => $ativo];
+            if (! $ativo) {
+                $campos += ['supervisor_setor' => null, 'pin_autorizacao' => null, 'remember_token' => null];
+            }
+            $usuario->forceFill($campos)->save();
+
+            if (! $ativo && Schema::hasTable('sessions')) {
+                DB::table('sessions')->where('user_id', $usuario->id)->delete();
+            }
+        }
+
+        return $usuario;
     }
 
     /**

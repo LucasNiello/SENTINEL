@@ -1,6 +1,7 @@
 import { Head, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import Farol from '../Components/Farol';
+import BotaoTema from '../Components/ui/BotaoTema';
 
 const MOBILE = '(max-width: 1023px)';
 
@@ -123,9 +124,12 @@ export default function Workspace({ titulo = 'Sentinel', children }) {
                         </button>
                     )}
                     <div className="workspace-context"><span>Sentinel</span><span className="context-divider" aria-hidden="true">/</span><span>{titulo}</span></div>
-                    {temUsuario && (
-                        <span className="workspace-topbar__note"><i aria-hidden="true" /> Sessão autenticada <span>{usuario.rotuloPapel}</span></span>
-                    )}
+                    <div className="topbar-acoes">
+                        {temUsuario && (
+                            <span className="workspace-topbar__note"><i aria-hidden="true" /> Sessão autenticada <span>{usuario.rotuloPapel}</span></span>
+                        )}
+                        <BotaoTema />
+                    </div>
                 </div>
                 <main id="conteudo" tabIndex={-1}>
                     {children}

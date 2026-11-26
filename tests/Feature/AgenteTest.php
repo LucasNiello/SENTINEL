@@ -200,20 +200,19 @@ class AgenteTest extends TestCase
         $this->assertSame(1, Lancamento::count());
     }
 
-    public function test_rnf02_token_vale_alem_de_12s_e_vence_no_prazo_da_proposta(): void
+    public function test_rnf02_token_vale_alem_de_12s_e_nao_vence(): void
     {
-        // Decisão B (13/11): o token não tem mais validade própria de 12 s; vale até o fim dos 5 min da proposta.
+        // Decisão B (13/11): o token não tem validade própria de 12 s. 25/11 (Lucas): a proposta também não vence mais.
         $token = $this->propor(['descricao' => 'Depois de 13 s', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(13)->seconds();
         $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $vencido = $this->propor(['descricao' => 'Expirado', 'valor' => 1, 'data' => '2026-09-21']);
+        $tarde = $this->propor(['descricao' => 'Depois de 5 min', 'valor' => 1, 'data' => '2026-09-21']);
         $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->postJson('/agente/confirmar', ['token' => $vencido])
-            ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
+        $this->postJson('/agente/confirmar', ['token' => $tarde])->assertOk();
+        $this->postJson('/agente/confirmar', ['token' => $tarde])->assertStatus(422);
 
-        $this->assertSame(['Depois de 13 s'], Lancamento::query()->pluck('descricao')->all());
+        $this->assertSame(2, Lancamento::count(), 'as duas gravaram, uma vez cada');
     }
 
     public function test_falha_da_ia_degrada_para_erro_amigavel(): void

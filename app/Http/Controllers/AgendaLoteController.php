@@ -34,7 +34,8 @@ class AgendaLoteController extends Controller
         }
 
         $ids = array_map('intval', $validador->validated()['ids']);
-        $lista = $this->conversa->lerLista($request->session());
+        // 26/11: só aqui a lista de marcar não vence (envio único, versões e segurar 2 s a protegem); as posições seguem em 30 min.
+        $lista = $this->conversa->lerLista($request->session(), paraEnvioDoLote: true);
 
         // Só vale a lista de cancelar em lote que ESTE usuário (neste tenant) acabou de ver; nunca ids soltos do navegador.
         if ($lista === null || ($lista['selecionavel'] ?? null) !== 'cancelar_agendamentos_em_lote') {

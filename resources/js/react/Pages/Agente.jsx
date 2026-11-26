@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { usePage } from '@inertiajs/react';
 import Workspace from '../Layouts/Workspace';
-import Farol from '../Components/Farol';
 import Confirmacao from '../Components/Confirmacao';
 import TabelaConsulta from '../Components/TabelaConsulta';
+import Aviso from '../Components/ui/Aviso';
 import './Agente.css';
 
 const errosHttp = {
@@ -16,7 +15,6 @@ const errosHttp = {
 };
 
 export default function Agente({ historico = [] }) {
-    const { usuario } = usePage().props;
     const [mensagens, setMensagens] = useState(() => historico
         .filter((m) => ['user', 'assistant'].includes(m.role) && typeof m.content === 'string')
         .map((m) => ({ texto: m.content, classe: m.role === 'user' ? 'msg--usuario' : 'msg--agente' })));
@@ -146,29 +144,32 @@ export default function Agente({ historico = [] }) {
 
     return (
         <Workspace titulo="Agente">
-            <header className="page-header agent-hero react-agent-hero">
-                <p className="eyebrow">Workspace / Inteligência assistida</p>
-                <h1>Converse com seus dados.<br /><span>Decida com contexto.</span></h1>
-                <p className="intro">Consulte informações e prepare operações em linguagem natural.</p>
-                <div className="agent-orbit" aria-hidden="true"><span /><Farol /></div>
-            </header>
-            <div className="command-layout react-command-layout">
+            {/* O título visível é o do topo ("Sentinel / Agente"); aqui só o h1 para leitor de tela, sem repetir na tela. */}
+            <h1 className="sr-only">Agente</h1>
+            <div className="command-layout">
                 <section className="agent-workspace" aria-label="Conversa com o Sentinel">
-                    <header className="deck-header"><div><span className="eyebrow">SENTINEL AGENT</span><p>Consulta e operações assistidas</p></div><span className="deck-badge">REVISÃO HUMANA</span></header>
                     <div id="historico" role="log" aria-live="polite" aria-relevant="additions">
                         {mensagens.length === 0 && <div className="agent-empty">
-                            <p className="eyebrow">SEU PRÓXIMO MOVIMENTO</p>
                             <h2>Por onde começamos?</h2>
-                            <p>Uma pergunta abre caminhos. Uma ação começa pela sua revisão.</p>
+                            <p>Pergunte o que quiser saber ou peça uma ação, do jeito que você falaria.</p>
+                            <ol className="agent-passos">
+                                <li><b>01</b><strong>Peça</strong><span>Escreva o que precisa no campo abaixo.</span></li>
+                                <li><b>02</b><strong>Revise</strong><span>Confira os dados e ajuste o que quiser.</span></li>
+                                <li><b>03</b><strong>Confirme</strong><span>Nada é gravado sem a sua confirmação.</span></li>
+                            </ol>
                         </div>}
                         {mensagens.map((mensagem, indice) => mensagem.proposta
-                            ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} />
+                            ? <Confirmacao key={indice} proposta={mensagem.proposta} adicionar={adicionar} trava={requisicao} ocupado={pensando} definirOcupado={setPensando} abrirFormulario={abrirFormulario} />
                             : mensagem.consulta ? <TabelaConsulta key={indice} consulta={mensagem.consulta} ocupado={pensando} abrirFormulario={abrirFormulario} adicionar={adicionar}
                                 prepararPedido={(pedido) => { if (!requisicao.current) { setTexto(pedido.slice(0, 1000)); campo.current?.focus(); } }} />
-                            : <div key={indice} className={`msg ${mensagem.classe}`}>
-                            <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : mensagem.classe === 'msg--erro' ? 'Atenção' : 'Sentinel'}</span>
-                            <span>{mensagem.texto}</span>
-                        </div>)}
+                            : ['msg--erro', 'msg--aviso'].includes(mensagem.classe)
+                                ? <Aviso key={indice} tipo={mensagem.classe === 'msg--erro' ? 'erro' : 'atencao'} className={`msg ${mensagem.classe}`}>
+                                    <span className="msg__speaker">Atenção: </span>{mensagem.texto}
+                                </Aviso>
+                                : <div key={indice} className={`msg ${mensagem.classe}`}>
+                                    <span className="msg__speaker">{mensagem.classe === 'msg--usuario' ? 'Você' : 'Sentinel'}</span>
+                                    <span>{mensagem.texto}</span>
+                                </div>)}
                     </div>
                     <div id="carregando" className="carregando" hidden={!pensando} role="status">
                         <span>Consultando…</span><div className="carregando__barra" />
@@ -184,17 +185,6 @@ export default function Agente({ historico = [] }) {
                         <p className="composer-note"><span aria-hidden="true">◇</span> Você revisa. Você decide. Nenhuma gravação sem confirmação.</p>
                     </div>
                 </section>
-                <aside className="context-rail" aria-label="Contexto da sessão">
-                    <section className="session-context">
-                        <p className="eyebrow">CONTEXTO ATUAL</p><h2>Seu espaço de decisão.</h2>
-                        <dl><dt>CONTA</dt><dd>{usuario?.nome}</dd><dt>PERFIL</dt><dd>{usuario?.rotuloPapel}</dd><dt>MÓDULO</dt><dd>Agente</dd></dl>
-                    </section>
-                    <section className="decision-flow" aria-label="Fluxo de decisão">
-                        <p className="eyebrow">DO PEDIDO À DECISÃO</p>
-                        <ol><li><span>01</span><div><h3>Peça</h3><p>Descreva o que precisa em linguagem natural.</p></div></li><li><span>02</span><div><h3>Revise</h3><p>Confira os dados e ajuste antes de prosseguir.</p></div></li><li><span>03</span><div><h3>Confirme</h3><p>Uma gravação exige sua confirmação deliberada.</p></div></li></ol>
-                    </section>
-                    <p className="context-protection"><span aria-hidden="true">◇</span> Dados isolados por organização.<br />Operações registradas em auditoria.</p>
-                </aside>
             </div>
         </Workspace>
     );

@@ -14,9 +14,6 @@ class ConversaAgente
     private const CHAVE_LISTA = 'agente_ultima_lista'; // P-C1
     private const PRAZO_LISTA_S = 1800;
 
-    /** Lista com checkbox (cancelar em lote): o mesmo prazo da proposta do agente (ConfirmacoesPendentes::PRAZO_RASCUNHO_S). */
-    private const PRAZO_LISTA_SELECIONAVEL_S = 300;
-
     public function __construct(private ContextoUsuario $contexto) {}
 
     private function identidade(): string
@@ -84,19 +81,35 @@ class ConversaAgente
         ]);
     }
 
-    /** P-C1: a última tabela, se for deste usuário neste tenant e de até PRAZO_LISTA_S atrás; senão, some. */
-    public function lerLista(Session $sessao): ?array
+    /**
+     * P-C1: a última tabela, se for deste usuário neste tenant e de até PRAZO_LISTA_S atrás; senão, some.
+     * 26/11 (Lucas, opção b): a lista com CHECKBOX não vence PARA O ENVIO do lote ($paraEnvioDoLote = true, só o
+     * AgendaLoteController). Vale enquanto for a última tabela mostrada e só para um envio (esquecerLista). O que protege a
+     * escrita sem rascunho nem token: só ids desta lista, a versão de cada linha guardada aqui (o que mudou depois é recusado),
+     * tudo ou nada no servidor e o segurar 2 s na tela. Para as referências por posição ("o segundo") ela continua valendo só
+     * PRAZO_LISTA_S, como qualquer tabela (padrão).
+     */
+    public function lerLista(Session $sessao, bool $paraEnvioDoLote = false): ?array
     {
         $lista = $sessao->get(self::CHAVE_LISTA);
-        if (! is_array($lista) || ($lista['identidade'] ?? null) !== $this->identidade() || now()->getTimestamp() - (int) ($lista['em'] ?? 0) > self::PRAZO_LISTA_S) {
+        $selecionavel = is_array($lista) ? ($lista['selecionavel'] ?? null) : null;
+        if (! is_array($lista) || ($lista['identidade'] ?? null) !== $this->identidade()) {
             $sessao->forget(self::CHAVE_LISTA);
 
             return null;
         }
 
-        // 25/11: a lista com CHECKBOX é um caminho de escrita sem rascunho nem token: vale o mesmo prazo da proposta (5 min). Depois
-        // disso a tabela segue valendo para "o Rex", "o último" (30 min), mas deixa de ser selecionável (o endpoint recusa).
-        $selecionavel = now()->getTimestamp() - (int) ($lista['em'] ?? 0) > self::PRAZO_LISTA_SELECIONAVEL_S ? null : ($lista['selecionavel'] ?? null);
+        $antiga = now()->getTimestamp() - (int) ($lista['em'] ?? 0) > self::PRAZO_LISTA_S;
+        if ($antiga && $selecionavel !== null && ! $paraEnvioDoLote) {
+            // Lista do lote com mais de 30 min: não serve para posição ("o segundo"), mas NÃO é apagada, senão qualquer mensagem
+            // no chat desfaria a decisão de 26/11 (a lista continua marcável na tela até ser substituída ou enviada).
+            return null;
+        }
+        if ($antiga && $selecionavel === null) {
+            $sessao->forget(self::CHAVE_LISTA);
+
+            return null;
+        }
 
         return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? [], 'selecionavel' => $selecionavel, 'versoes' => $lista['versoes'] ?? []];
     }

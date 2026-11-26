@@ -84,3 +84,42 @@
 @media(prefers-reduced-motion:reduce){.revelacao{display:none}}
 /* Volta de um POST com erro de validação: a página já foi vista, a cortina não repete. */
 html.sem-cortina .revelacao{display:none}
+
+/* PAINEL DIREITO (25/11): identidade da vitrine. Fundo neutro, azul da marca só onde tem significado, claro e escuro pelo
+   tema do sistema (o login não tem botão de tema). Sobrescreve por seletor mais específico (.access e o modal de ajuda);
+   o :root, a divisão da tela e o lado esquerdo (cena do farol) não mudam. Contraste: texto 14,5/16,3; suave 5,4/6,0;
+   branco no azul escuro 7,1; noite no azul claro 11,1; borda do campo 3,7/3,5 (claro/escuro). */
+.access,.support-dialog{
+  --acesso-fundo:#F3F5F7;--acesso-superficie:#FFFFFF;--acesso-texto:#1D232A;--acesso-suave:#5B6570;--acesso-borda-campo:#7B8794;
+  --acesso-marca:#A8C8E6;--acesso-marca-forte:#2E5B85;--acesso-sobre-marca:#FFFFFF;--acesso-erro:#B42318;--acesso-sucesso:#2F6B4F;
+  --acesso-brilho:0 0 0 1px color-mix(in srgb,var(--acesso-marca) 70%,transparent),0 0 12px 2px color-mix(in srgb,var(--acesso-marca) 60%,transparent);
+}
+@media (prefers-color-scheme:dark){
+  .access,.support-dialog{
+    --acesso-fundo:#121821;--acesso-superficie:#0A0E13;--acesso-texto:#E6ECF2;--acesso-suave:#8A97A5;--acesso-borda-campo:#5E7084;
+    --acesso-marca-forte:#A8C8E6;--acesso-sobre-marca:#0A0E13;--acesso-erro:#F2877A;--acesso-sucesso:#6FCF97;
+  }
+  .access{color-scheme:dark}
+}
+.access{background:var(--acesso-fundo);color:var(--acesso-texto)}
+.access .access-tag{color:var(--acesso-marca-forte)}
+.access .mobile-brand,.access .mobile-brand svg{color:var(--acesso-marca-forte)}
+.access .form-card h2{color:var(--acesso-texto)}.access .form-card h2 span{color:var(--acesso-marca-forte)}
+.access .form-subtitle{color:var(--acesso-suave)}
+.access .field label{color:var(--acesso-texto)}
+.access .input-wrap{border-color:var(--acesso-borda-campo);background:var(--acesso-superficie);border-radius:8px}
+.access .input-wrap:focus-within{border-color:var(--acesso-marca-forte);box-shadow:var(--acesso-brilho)}
+.access .input-wrap.is-invalid{border:2px solid var(--acesso-erro)}
+.access .input-wrap input{color:var(--acesso-texto)}.access .input-wrap input::placeholder{color:var(--acesso-suave)}
+.access .password-toggle{color:var(--acesso-marca-forte)}.access .password-toggle:hover{background:color-mix(in srgb,var(--acesso-marca) 25%,transparent)}
+.access .field-error{color:var(--acesso-erro);font-weight:500}
+.access .submit-button{border-color:var(--acesso-marca-forte);background:var(--acesso-marca-forte);color:var(--acesso-sobre-marca);border-radius:8px;box-shadow:var(--acesso-brilho)}
+.access .submit-button:hover:enabled{background:var(--acesso-marca-forte);border-color:var(--acesso-marca-forte);filter:brightness(1.08)}
+.access .form-notice{background:color-mix(in srgb,var(--acesso-sucesso) 12%,var(--acesso-superficie));color:var(--acesso-sucesso)}
+.access .form-notice.is-error{background:color-mix(in srgb,var(--acesso-erro) 12%,var(--acesso-superficie));color:var(--acesso-erro);font-weight:500}
+.access .help-link{color:var(--acesso-marca-forte)}
+.access .access-footer{color:var(--acesso-suave)}
+.access :focus-visible{outline-color:var(--acesso-marca-forte)}
+.support-dialog{background:var(--acesso-superficie);color:var(--acesso-texto)}
+.support-dialog p{color:var(--acesso-suave)}.support-dialog .dialog-close{color:var(--acesso-texto)}
+.support-dialog .dialog-confirm{background:var(--acesso-marca-forte);color:var(--acesso-sobre-marca)}

@@ -10,6 +10,7 @@ use App\Http\Controllers\PainelDonoController;
 use App\Http\Controllers\ReactTesteController;
 use App\Http\Controllers\SupervisaoController;
 use App\Http\Controllers\TelasController;
+use App\Http\Middleware\GarantirContaAtiva;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\VarrerConfirmacoesVencidas;
 use Illuminate\Support\Facades\Route;
@@ -24,7 +25,7 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AutenticacaoController::class, 'entrar'])->middleware('throttle:login');
 });
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', GarantirContaAtiva::class])->group(function () {
     Route::post('/logout', [AutenticacaoController::class, 'sair']);
 
     // Migração para React (18/11): página de teste da infraestrutura. 404 com SENTINEL_FRONT=blade (padrão).
@@ -90,5 +91,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/supervisao/supervisores/{id}', [SupervisaoController::class, 'marcar'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/pins/{id}/gerar', [SupervisaoController::class, 'gerarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
         Route::post('/supervisao/pins/{id}/revogar', [SupervisaoController::class, 'revogarPin'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
+        // 26/11: liga ou desliga a conta de um funcionário (só o Administrador/RH; o dono dá a ordem).
+        Route::post('/supervisao/usuarios/{id}/ativo', [SupervisaoController::class, 'definirAtivo'])->whereNumber('id')->middleware('throttle:agente-sem-ia');
     });
 });

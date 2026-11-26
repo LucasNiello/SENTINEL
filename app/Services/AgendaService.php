@@ -353,7 +353,7 @@ class AgendaService
     /** Os profissionais do setor no tenant, em ordem de id (a ordem única de trava e de desempate). @return int[] */
     private function idsDosCandidatos(string $setor, int $tenantId): array
     {
-        return User::query()->where('tenant_id', $tenantId)->whereIn('papel', self::PROFISSIONAIS[$setor] ?? [])->orderBy('id')
+        return User::query()->where('tenant_id', $tenantId)->where('ativo', true)->whereIn('papel', self::PROFISSIONAIS[$setor] ?? [])->orderBy('id')
             ->pluck('id')->map(fn ($id) => (int) $id)->all();
     }
 
@@ -983,7 +983,7 @@ class AgendaService
             throw new RegraDeNegocioException('Não encontrei o serviço.');
         }
 
-        $profissionais = User::query()->where('tenant_id', $tenantId)->whereIn('papel', self::PROFISSIONAIS[$servico->setor] ?? [])
+        $profissionais = User::query()->where('tenant_id', $tenantId)->where('ativo', true)->whereIn('papel', self::PROFISSIONAIS[$servico->setor] ?? [])
             ->orderBy('name')->orderBy('id')->get(['id', 'name'])
             ->map(fn (User $u) => ['id' => (int) $u->id, 'nome' => (string) $u->name])->all();
         $ids = array_column($profissionais, 'id');

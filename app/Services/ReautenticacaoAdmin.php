@@ -226,6 +226,7 @@ class ReautenticacaoAdmin
         $usuario = User::query()
             ->where('email', $email)
             ->where('tenant_id', $this->contexto->tenantId())
+            ->where('ativo', true) // 26/11: conta desativada não autoriza (nem pelo PIN)
             ->whereIn('papel', (array) config('sentinel.papeis', []))
             ->first();
 
@@ -250,6 +251,7 @@ class ReautenticacaoAdmin
             ->where('email', $email)
             ->whereIn('papel', ContextoUsuario::papeisAdministrativosDoTenant($tenantId))
             ->where('tenant_id', $tenantId)
+            ->where('ativo', true) // 26/11: administrador desativado não autoriza
             ->first();
 
         if ($admin === null) {
