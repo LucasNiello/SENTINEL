@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import Botao from './ui/Botao';
+import Toast from './ui/Toast';
 
-export default function ExportarConsulta({ consulta, ocupado, adicionar }) {
+// Todo retorno da exportação sai num toast só, ancorado no botão (sobe de trás dele). Sem texto escondido embaixo
+// e sem repetir a mensagem no chat. "Preparando…" fica até terminar; o erro não fecha sozinho.
+export default function ExportarConsulta({ consulta, ocupado }) {
     const [exportando, setExportando] = useState(false);
-    const [estado, setEstado] = useState('');
+    const [toast, setToast] = useState(null);
     const requisicao = useRef(null);
     const montado = useRef(false);
     useEffect(() => {
@@ -15,7 +19,7 @@ export default function ExportarConsulta({ consulta, ocupado, adicionar }) {
         const controller = new AbortController();
         requisicao.current = controller;
         setExportando(true);
-        setEstado('Preparando o arquivo…');
+        setToast({ tipo: 'info', texto: 'Preparando o arquivo…', fixo: true });
         const timeout = setTimeout(() => controller.abort(), 35000);
         try {
             const resposta = await fetch('/agente/exportar', {
@@ -42,7 +46,7 @@ export default function ExportarConsulta({ consulta, ocupado, adicionar }) {
                 link.download = nome;
                 document.body.appendChild(link);
                 link.click();
-                setEstado(`Download iniciado: ${nome}`);
+                setToast({ tipo: 'sucesso', texto: `Download iniciado: ${nome}` });
             } finally {
                 link.remove();
                 // Dar ao navegador tempo para consumir o blob antes de liberá-lo.
@@ -52,8 +56,7 @@ export default function ExportarConsulta({ consulta, ocupado, adicionar }) {
             if (!montado.current) return;
             const mensagem = erro.name === 'AbortError' ? 'A exportação demorou demais. Tente novamente.'
                 : erro instanceof TypeError ? 'Falha ao contatar o servidor. Tente novamente.' : erro.message;
-            setEstado('Exportação não concluída. Você pode tentar novamente.');
-            adicionar(mensagem, 'msg--erro');
+            setToast({ tipo: 'erro', texto: mensagem });
         } finally {
             clearTimeout(timeout);
             requisicao.current = null;
@@ -61,8 +64,8 @@ export default function ExportarConsulta({ consulta, ocupado, adicionar }) {
         }
     }
 
-    return <div style={{ minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere' }} aria-busy={exportando}>
-        <button type="button" className="btn-exportar" disabled={ocupado || exportando} onClick={exportar}>{exportando ? 'Exportando…' : 'Exportar CSV'}</button>
-        <p role="status">{estado}</p>
+    return <div className="exportar" style={{ minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere' }} aria-busy={exportando}>
+        <Botao variante="secundario" className="btn-exportar" disabled={ocupado || exportando} onClick={exportar}>{exportando ? 'Exportando…' : 'Exportar CSV'}</Botao>
+        {toast && <Toast ancorado tipo={toast.tipo} fixo={!!toast.fixo} aoFechar={() => setToast(null)}>{toast.texto}</Toast>}
     </div>;
 }

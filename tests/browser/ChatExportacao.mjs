@@ -51,7 +51,7 @@ async function startExport() {
     await until(() => !!release);
     assert.equal(requests.length, before + 1, 'duplicate click blocked synchronously');
     assert.equal(await page.getByRole('button', { name: 'Exportando…', exact: true }).isDisabled(), true);
-    assert.match(await page.locator('#historico').innerText(), /Preparando o arquivo/);
+    assert.match(await page.locator('.toast-ancorado').innerText(), /Preparando o arquivo/);
     assert.equal(requests.at(-1).method, 'POST');
     assert.deepEqual(requests.at(-1).body, { consulta: id });
     assert.equal(requests.at(-1).headers['x-csrf-token'], 'qa');
@@ -71,17 +71,17 @@ try {
     const file = await downloaded;
     assert.equal(file.suggestedFilename(), fileName);
     assert.deepEqual(await readFile(await file.path()), bytes, 'byte-for-byte: BOM, accents, separators and masked data');
-    assert.match(await page.locator('#historico').innerText(), /Download iniciado: clientes-2026-11-24-120000.csv/);
+    assert.match(await page.locator('.toast-ancorado').innerText(), /Download iniciado: clientes-2026-11-24-120000.csv/);
     assert.equal(downloads, 1);
     for (const code of [403, 500]) {
         status = code; await startExport();
-        assert.match(await page.locator('#historico .msg--erro').last().innerText(), code === 403 ? /Sem permissão/ : /Falha simulada/);
+        assert.match(await page.locator('.toast-ancorado .aviso--erro').innerText(), code === 403 ? /Sem permissão/ : /Falha simulada/);
         assert.equal(downloads, 1);
     }
     status = 200; invalidContent = true; await startExport();
-    assert.match(await page.locator('#historico .msg--erro').last().innerText(), /CSV válido/);
+    assert.match(await page.locator('.toast-ancorado .aviso--erro').innerText(), /CSV válido/);
     invalidContent = false; networkFailure = true; await startExport();
-    assert.match(await page.locator('#historico .msg--erro').last().innerText(), /Falha ao contatar/);
+    assert.match(await page.locator('.toast-ancorado .aviso--erro').innerText(), /Falha ao contatar/);
     const recovered = page.waitForEvent('download'); await startExport();
     assert.deepEqual(await readFile(await (await recovered).path()), bytes);
     assert.equal(downloads, 2);

@@ -65,6 +65,14 @@ class AutenticacaoController extends Controller
         // tenant o usuário não teria como agir, então nem entra.
         $usuario = Auth::user();
 
+        // 26/11: conta desativada pelo Administrador/RH não entra. A mensagem específica só vem depois da senha certa
+        // (quem não sabe a senha continua vendo a mensagem genérica, sem descobrir quais contas existem).
+        if ($usuario->ativo === false) {
+            Auth::logout();
+
+            throw ValidationException::withMessages(['email' => 'Esta conta foi desativada. Fale com o administrador.']);
+        }
+
         if (! in_array($usuario->papel, (array) config('sentinel.papeis', []), true) || $usuario->tenant_id === null) {
             Auth::logout();
 

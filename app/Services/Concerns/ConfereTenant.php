@@ -42,7 +42,8 @@ trait ConfereTenant
     {
         $usuario = $this->doTenant(User::class, $id, $tenantId, $rotulo);
 
-        if (! in_array($usuario->papel, $papeis, true)) {
+        // 26/11: conta desativada não vale como profissional nem como quem autoriza (a regra do dado, como o papel).
+        if (! in_array($usuario->papel, $papeis, true) || $usuario->ativo === false) {
             throw new RegraDeNegocioException($recusa);
         }
 

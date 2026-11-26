@@ -230,9 +230,12 @@ class SupervisaoEndpointsTest extends TestCase
 
         $ids = collect($this->getJson('/supervisao/supervisores')->assertOk()->json('usuarios'))->pluck('id');
         $this->assertContains($vet->id, $ids);
-        $this->assertNotContains($deFora->id, $ids);
-        $this->assertNotContains($semSetor->id, $ids, 'o Administrador só vê o dono e os supervisores');
-        $this->assertNotContains(auth()->id(), $ids);
+        $this->assertNotContains($deFora->id, $ids, 'nunca de outro tenant');
+        // 26/11: o Administrador/RH vê a equipe toda (para ligar e desligar contas); o PIN continua só de quem pode ter.
+        $this->assertContains($semSetor->id, $ids);
+        $porId = collect($this->getJson('/supervisao/supervisores')->json('usuarios'))->keyBy('id');
+        $this->assertFalse($porId[$semSetor->id]['pode_pin'], 'sem setor, sem PIN');
+        $this->assertTrue($porId[$vet->id]['pode_pin']);
     }
 
     public function test_dono_marca_lista_e_desmarca_com_auditoria_e_desmarcar_zera_o_pin(): void
@@ -241,7 +244,7 @@ class SupervisaoEndpointsTest extends TestCase
         $outro = $this->usuarioClinica('atendente');
 
         $lista = $this->getJson('/supervisao/supervisores')->assertOk()->json('usuarios');
-        $this->assertSame(['id', 'nome', 'papel', 'supervisor_setor', 'tem_pin'], array_keys($lista[0]), 'sem e-mail nem hash');
+        $this->assertSame(['id', 'nome', 'papel', 'supervisor_setor', 'tem_pin', 'pode_pin', 'ativo', 'pode_ativar'], array_keys($lista[0]), 'sem e-mail nem hash');
 
         $this->postJson("/supervisao/supervisores/{$outro->id}", ['setor' => 'petshop'])->assertOk();
         $this->assertSame('petshop', $outro->fresh()->supervisor_setor);

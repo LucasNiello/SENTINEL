@@ -33,7 +33,7 @@ await page.route('**/agente/*', async (route) => {
         if (modo === 'permissao') return route.fulfill({ status: 403, json: { tipo: 'negado', codigo: 'AI_FORBIDDEN', mensagem: 'Seu perfil não permite esta ação.' } });
         if (modo === 'transitorio') return route.fulfill({ status: 503, json: { tipo: 'erro', mensagem: 'Serviço indisponível.' } });
         if (modo === 'item-invalido') return route.fulfill({ status: 422, json: { tipo: 'erro', mensagem: 'O lote mudou. Nada foi gravado.', formulario: { ...formulario, itens: [itens[0], { ...itens[1], erro: 'O lançamento #8 não está mais pendente.' }] } } });
-        return route.fulfill({ json: { tipo: 'revisada', token, formulario } });
+        return route.fulfill({ json: { tipo: 'revisada', token, segurar: true, formulario } });
     }
     if (action === 'cancelar') {
         cancels++; assert.deepEqual(body, { proposta });
@@ -61,9 +61,15 @@ async function revisar() {
     await page.getByRole('button', { name: 'Revisar', exact: true }).click();
     await until(async () => !await page.getByRole('button', { name: 'Confirmar', exact: true }).isDisabled());
 }
+// 25/11: conciliação em lote é destrutiva (segurar: true). O clique sozinho não confirma; é preciso segurar 2 s.
 async function confirmar() {
     const antes = confirms;
-    await page.getByRole('button', { name: 'Confirmar', exact: true }).evaluate((b) => { b.click(); b.click(); });
+    const botao = page.getByRole('button', { name: 'Confirmar', exact: true });
+    await botao.evaluate((b) => { b.click(); b.click(); });
+    await new Promise((r) => setTimeout(r, 300)); assert.equal(confirms, antes, 'clique não confirma ação de segurar');
+    const caixa = await botao.boundingBox();
+    await page.mouse.move(caixa.x + caixa.width / 2, caixa.y + caixa.height / 2);
+    await page.mouse.down(); await new Promise((r) => setTimeout(r, 2300)); await page.mouse.up();
     await until(() => !!release);
     assert.equal(confirms, antes + 1);
     assert.equal(await page.getByRole('button', { name: 'Cancelar', exact: true }).isDisabled(), true);

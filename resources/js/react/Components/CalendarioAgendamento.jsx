@@ -114,7 +114,8 @@ export default function CalendarioAgendamento({ ficha, valores, bloqueado, selec
             <legend>3. Horário</legend>
             <p className="ficha-estado" role="status">{!servico ? 'Escolha o serviço para ver os horários.' : carregando ? 'Carregando disponibilidade…' : erro || `${extenso(dia)}: ${horarios.filter((h) => h.vagas > 0).length} horário(s) livre(s). Clicar num horário já revisa.`}</p>
             {erro && <button type="button" onClick={() => { setErro(''); setTentativa((n) => n + 1); }}>Tentar novamente</button>}
-            {erros.filter(Boolean).map((e, i) => <p key={i} className="campo-erro" role="alert">{e}</p>)}
+            {/* Erro de horário/profissional: só aqui (o resumo do card é o alerta). Não repete a mensagem do estado acima. */}
+            {erros.filter((e) => e && e !== erro).map((e, i) => <p key={i} className="campo-erro">{e}</p>)}
             <div className="ficha-horarios">{horarios.map((h) => <button key={h.inicio} type="button" className="ficha-horario mono" disabled={carregando || !dias[dia] || h.vagas < 1} aria-current={valores.inicio === h.inicio && (!profissional || valores.profissional_id === profissional) ? 'true' : undefined} onClick={() => escolherHorario(h)}>
                 {h.hora}{comVagas ? ` · ${h.vagas < 1 ? 'lotado' : `${h.vagas} vaga(s)`}` : diario.modelo === 'blocos' ? ` · ${h.vagas < 1 ? 'ocupado' : 'livre'}` : ''}
             </button>)}</div>

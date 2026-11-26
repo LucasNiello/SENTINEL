@@ -69,7 +69,7 @@ class IsolamentoDeTenantTest extends TestCase
             'VendaService::registrar', 'VendaService::registrarPagamento', 'VendaService::cancelar', 'VendaService::previa',
             'VendaService::estornar', 'VendaService::planoDoEstorno', 'VendaService::linhasParaEstornar', 'VendaService::buscarPorFiltro', 'VendaService::localizar',
             'MensagemService::buscarPorFiltro', 'MensagemService::localizar', 'MensagemService::marcarTratada',
-            'SupervisaoService::marcarSupervisor', 'SupervisaoService::gerarPin', 'SupervisaoService::revogarPin',
+            'SupervisaoService::marcarSupervisor', 'SupervisaoService::gerarPin', 'SupervisaoService::revogarPin', 'SupervisaoService::definirAtivo',
         ];
 
         return array_combine($nomes, array_map(fn (string $n) => [$n], $nomes));
@@ -443,6 +443,13 @@ class IsolamentoDeTenantTest extends TestCase
                 $supervisao->marcarSupervisor($usuario->id, 'clinica', $this->usuarioClinica('dono')->id, self::T);
                 $this->inexistente(fn () => $supervisao->gerarPin($usuario->id, $this->usuarioClinica('admin', self::B)->id, self::B));
                 $this->assertNull($usuario->fresh()->pin_autorizacao);
+            },
+            // 26/11: o Administrador de OUTRA clínica não liga nem desliga a conta de um usuário de T.
+            'SupervisaoService::definirAtivo' => function () use ($supervisao) {
+                config(['sentinel.tenants_clinica' => [self::T, self::B]]);
+                $usuario = $this->usuarioClinica('recepcao');
+                $this->inexistente(fn () => $supervisao->definirAtivo($usuario->id, false, $this->usuarioClinica('admin', self::B)->id, self::B));
+                $this->assertTrue($usuario->fresh()->ativo);
             },
             'SupervisaoService::revogarPin' => function () use ($supervisao) {
                 config(['sentinel.tenants_clinica' => [self::T, self::B]]);

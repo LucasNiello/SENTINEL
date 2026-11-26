@@ -51,11 +51,14 @@ class SupervisaoController extends Controller
             return $resposta;
         }
 
-        $admin = $this->contexto->ehAdminDaClinica();
+        // 26/11: o Administrador/RH agora vê a equipe toda (para ligar e desligar contas); o PIN continua só de quem pode
+        // ter ("pode_pin"). "ativo" e "pode_ativar" dizem o estado da conta e se este usuário pode ser ligado/desligado.
+        $eu = (int) $this->contexto->usuario()->id;
         $usuarios = User::query()->where('tenant_id', $this->contexto->tenantId())->orderBy('name')->get()
-            ->filter(fn (User $u) => ! $admin || SupervisaoService::podeTerPin($u))
             ->map(fn (User $u) => ['id' => $u->id, 'nome' => $u->name, 'papel' => $u->papel,
-                'supervisor_setor' => $u->supervisor_setor, 'tem_pin' => $u->pin_autorizacao !== null])
+                'supervisor_setor' => $u->supervisor_setor, 'tem_pin' => $u->pin_autorizacao !== null,
+                'pode_pin' => SupervisaoService::podeTerPin($u), 'ativo' => $u->ativo !== false,
+                'pode_ativar' => $u->papel !== 'dono' && (int) $u->id !== $eu])
             ->values()->all();
 
         return response()->json(['tipo' => 'lista', 'usuarios' => $usuarios]);
@@ -144,6 +147,38 @@ class SupervisaoController extends Controller
 
         return $this->executar('revogar_pin', $id, [], fn () => 'PIN revogado para '.$this->nome($id).' por '.$gestor->name.'.',
             fn () => $this->supervisao->revogarPin($id, $gestor->id, $this->contexto->tenantId()));
+    }
+
+    /**
+     * POST /supervisao/usuarios/{id}/ativo {ativo: true|false}: liga ou desliga a conta de um funcionário. Função
+     * administrativa (26/11): só o Administrador/RH; o dono dá a ordem. Auditado em todo desfecho.
+     */
+    public function definirAtivo(Request $request, int $id): JsonResponse
+    {
+        if ($resposta = $this->barrar('alterar_ativo_usuario', 'atualizar', $id, ['admin'], 'Só o Administrador liga ou desliga contas.')) {
+            return $resposta;
+        }
+
+        $validador = Validator::make($request->all(), ['ativo' => 'required|boolean'],
+            ['ativo.*' => 'Informe se a conta fica ativa (true) ou inativa (false).']);
+        if ($validador->fails()) {
+            return $this->erro(422, 'AI_VALIDATION_ERROR', 'validation_error', $validador->errors()->first());
+        }
+        $ativo = $request->boolean('ativo');
+        $gestor = $this->contexto->usuario();
+
+        // Como no marcar (nº 6-4): a auditoria guarda o estado de ANTES (inclusive o setor e o PIN que desligar zera) e diz
+        // "Sem mudança" quando a conta já estava assim (ex.: desligada em outra aba). Leitura só do tenant.
+        $antes = User::query()->where('tenant_id', $this->contexto->tenantId())->whereKey($id)->first(['ativo', 'supervisor_setor', 'pin_autorizacao']);
+        $anterior = $antes === null ? null : $antes->ativo !== false;
+        $parametros = ['ativo' => $ativo, 'ativo_anterior' => $anterior]
+            + ($antes === null ? [] : ['setor_anterior' => $antes->supervisor_setor, 'tinha_pin' => $antes->pin_autorizacao !== null]);
+        $semMudanca = $anterior === $ativo;
+
+        return $this->executar('alterar_ativo_usuario', $id, $parametros,
+            fn () => $semMudanca ? 'Sem mudança: '.$this->nome($id).' já estava '.($ativo ? 'ativa.' : 'inativa.')
+                : $this->nome($id).($ativo ? ' foi ativada.' : ' foi desativada. A pessoa perde o acesso agora.'),
+            fn () => $this->supervisao->definirAtivo($id, $ativo, $gestor->id, $this->contexto->tenantId()));
     }
 
     /** Nome de um usuário do tenant, para a frase da auditoria (fora do tenant: só o número). */

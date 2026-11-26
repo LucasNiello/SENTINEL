@@ -174,8 +174,8 @@ class AgenteController extends Controller
      * Bloco 2b: o humano revisa o formulário e o servidor valida sem gravar (RBAC,
      * tenant e as regras da tool). Com erro, o formulário volta com a frase de cada
      * campo, sem token, e a proposta segue em rascunho. Sem erro, os valores
-     * revisados ficam na sessão e sai o token de confirmação (uso único, até o fim
-     * dos 5 min da proposta), e o /confirmar com {token} só usa estes valores (no passo único, o Confirmar revalida os do card). "segurar" diz à
+     * revisados ficam na sessão e sai o token de confirmação (uso único, sem
+     * prazo desde 25/11), e o /confirmar com {token} só usa estes valores (no passo único, o Confirmar revalida os do card). "segurar" diz à
      * tela se o Confirmar pede o gesto de 2 s (ações destrutivas; decisão B, 13/11).
      *
      * Contrato: { "proposta": "<uuid do /agente/comando>", "valores": { campo: valor } }.

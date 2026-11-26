@@ -1,0 +1,336 @@
+/* SENTINEL / tema do front React (25/11). Identidade da vitrine (farol): preto, branco, cinza, azul claro e azul escuro.
+   Só vale com html[data-tema], que o React define (tema.js). O Blade não carrega este arquivo e continua com o workspace.css.
+   Toda cor vem dos tokens abaixo; os nomes antigos do workspace.css (--sentinel-*, --color-*) são remapeados para eles,
+   então as regras herdadas mudam de cor sem tocar no CSS do Blade. Sem reset do Tailwind (Preflight): só utilitários. */
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "./";
+
+/* Tokens expostos ao Tailwind (bg-fundo, text-texto, border-borda...). Sem paleta padrão: cor fixa não existe aqui. */
+@theme inline {
+    --color-fundo: var(--cor-fundo);
+    --color-superficie: var(--cor-superficie);
+    --color-superficie-suave: var(--cor-superficie-suave);
+    --color-texto: var(--cor-texto);
+    --color-texto-suave: var(--cor-texto-suave);
+    --color-borda: var(--cor-borda);
+    --color-marca: var(--cor-marca);
+    --color-marca-forte: var(--cor-marca-forte);
+    --color-sucesso: var(--cor-sucesso);
+    --color-atencao: var(--cor-atencao);
+    --color-erro: var(--cor-erro);
+    --color-info: var(--cor-info);
+}
+
+/* ---------- TOKENS ---------- */
+/* Claro. Pares de contraste medidos (WCAG): texto/fundo 14,49; texto/superfície 15,84; texto-suave/fundo 5,43;
+   texto-suave/superfície 5,93; branco/marca-forte 7,12; marca-forte/fundo 6,51; borda-campo/superfície 3,66 (não texto);
+   sucesso 6,29, atenção 5,91, erro 6,57, info 6,04 sobre branco; nas faixas (12% da cor) entre 5,1 e 5,4. */
+html[data-tema] {
+    color-scheme: light;
+    --cor-fundo: #F3F5F7;
+    --cor-superficie: #FFFFFF;
+    --cor-superficie-suave: #E9EDF1;
+    --cor-texto: #1D232A;
+    --cor-texto-suave: #5B6570;
+    --cor-borda: #D5DBE1;
+    --cor-borda-campo: #7B8794;
+    --cor-marca: #A8C8E6;
+    --cor-marca-forte: #2E5B85;
+    --cor-marca-suave: #DCE8F4;
+    --cor-primario: var(--cor-marca-forte);
+    --cor-sobre-primario: #FFFFFF;
+    --cor-sucesso: #2F6B4F;
+    --cor-atencao: #8A5A12;
+    --cor-erro: #B42318;
+    --cor-info: #0F6E6E;
+    --cor-sobre-erro: #FFFFFF;
+    --cor-sombra: #000000;
+    --sombra-suave: 0 1px 2px color-mix(in srgb, var(--cor-texto) 6%, transparent), 0 6px 20px color-mix(in srgb, var(--cor-texto) 5%, transparent);
+}
+/* Escuro. Pares: texto/fundo 16,26; texto/superfície 14,97; texto-suave/superfície 5,98; noite/marca (botão) 11,12;
+   marca/superfície 10,24; borda-campo/superfície 3,50 (não texto); sucesso 9,38, atenção 9,43, erro 7,23, info 8,64
+   sobre a superfície; nas faixas entre 6,5 e 8,0. */
+html[data-tema="escuro"] {
+    color-scheme: dark;
+    --cor-fundo: #0A0E13;
+    --cor-superficie: #121821;
+    --cor-superficie-suave: #1A2230;
+    --cor-texto: #E6ECF2;
+    --cor-texto-suave: #8A97A5;
+    --cor-borda: #223040;
+    --cor-borda-campo: #5E7084;
+    --cor-marca: #A8C8E6;
+    --cor-marca-forte: #A8C8E6;
+    --cor-marca-suave: #243246;
+    --cor-primario: var(--cor-marca);
+    --cor-sobre-primario: #0A0E13;
+    --cor-sucesso: #6FCF97;
+    --cor-atencao: #E8B45A;
+    --cor-erro: #F2877A;
+    --cor-info: #5FC4C4;
+    --cor-sobre-erro: #0A0E13;
+    --sombra-suave: 0 1px 2px color-mix(in srgb, var(--cor-sombra) 40%, transparent);
+}
+html[data-tema] {
+    /* Faixas: o tom do estado misturado na superfície (sem hex novo). */
+    --cor-sucesso-faixa: color-mix(in srgb, var(--cor-sucesso) 12%, var(--cor-superficie));
+    --cor-atencao-faixa: color-mix(in srgb, var(--cor-atencao) 12%, var(--cor-superficie));
+    --cor-erro-faixa: color-mix(in srgb, var(--cor-erro) 12%, var(--cor-superficie));
+    --cor-info-faixa: color-mix(in srgb, var(--cor-info) 12%, var(--cor-superficie));
+    /* Brilho das estrelas cadentes da vitrine (meteoro: 0 0 8px 2px, gelo a 90%). Só em 3 lugares: ação principal, card
+       aguardando confirmação e foco. Erro nunca brilha. */
+    --brilho-destaque: 0 0 0 1px color-mix(in srgb, var(--cor-marca) 70%, transparent), 0 0 12px 2px color-mix(in srgb, var(--cor-marca) 60%, transparent);
+    --raio: 10px;
+
+    /* Nomes antigos do workspace.css apontando para os tokens (a sidebar escura usa os --sentinel-* de noite e fica igual). */
+    --sentinel-cream: var(--cor-fundo);
+    --sentinel-cream-alt: var(--cor-superficie-suave);
+    --sentinel-paper: var(--cor-superficie);
+    --sentinel-ink: var(--cor-texto);
+    --sentinel-ink-muted: var(--cor-texto-suave);
+    --sentinel-blue: var(--cor-marca-forte);
+    --sentinel-border: var(--cor-borda);
+    --color-creme: var(--cor-fundo);
+    --color-tinta: var(--cor-texto);
+    --color-tinta-2: var(--cor-texto-suave);
+    --color-aco: var(--cor-marca-forte);
+    --color-borda: var(--cor-borda);
+    --color-borda-campo: var(--cor-borda-campo);
+    --color-sucesso: var(--cor-sucesso);
+    --color-sucesso-faixa: var(--cor-sucesso-faixa);
+    --color-aviso: var(--cor-atencao);
+    --color-aviso-faixa: var(--cor-atencao-faixa);
+    --color-erro: var(--cor-erro);
+    --color-erro-faixa: var(--cor-erro-faixa);
+    --foco: var(--cor-marca-forte);
+    --surface-base: var(--cor-fundo);
+    --surface-raised: var(--cor-superficie);
+    --surface-muted: var(--cor-superficie-suave);
+    --border-soft: var(--cor-borda);
+    --border-default: var(--cor-borda);
+    --border-strong: var(--cor-texto-suave);
+}
+
+/* ---------- BASE ---------- */
+/* Botões e links comuns já usam as variáveis remapeadas acima no workspace.css; regra genérica aqui venceria a sidebar. */
+html[data-tema] body {background: var(--cor-fundo); color: var(--cor-texto)}
+html[data-tema] ::selection {background: var(--cor-marca); color: var(--sentinel-night)}
+html[data-tema] .workspace-main :focus-visible {outline: 2px solid var(--cor-marca-forte); outline-offset: 2px; box-shadow: var(--brilho-destaque)}
+html[data-tema] .lighthouse-window {fill: var(--sentinel-text-dark)}
+html[data-tema] .workspace-main button {border-radius: 8px}
+
+/* ---------- CASCA: sidebar, topo, rodapé ---------- */
+html[data-tema="escuro"] .workspace-sidebar {border-right: 1px solid var(--cor-borda)}
+html[data-tema] .workspace-topbar {background: var(--cor-superficie); border-bottom: 1px solid var(--cor-borda); height: 60px}
+html[data-tema] .workspace-context {font-size: 15px; color: var(--cor-texto-suave)}
+html[data-tema] .workspace-context span:last-child {color: var(--cor-texto); font-weight: 500}
+html[data-tema] .workspace-topbar__note {color: var(--cor-texto-suave)}
+html[data-tema] .workspace-topbar__note i {background: var(--cor-sucesso)}
+html[data-tema] .workspace-topbar__note span {border-left-color: var(--cor-borda)}
+html[data-tema] .topbar-acoes {display: flex; align-items: center; gap: 16px; margin-left: auto}
+html[data-tema] .workspace-menu-toggle {color: var(--cor-texto)}
+html[data-tema] .rodape {border-top-color: var(--cor-borda); color: var(--cor-texto-suave)}
+html[data-tema] .botao-tema {display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px; border: 1px solid var(--cor-borda); background: transparent; color: var(--cor-texto); font-size: 15px}
+html[data-tema] .botao-tema:hover {background: var(--cor-superficie-suave)}
+html[data-tema] .botao-tema svg {width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round}
+@media (max-width: 599px) {html[data-tema] .botao-tema__texto {position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap}}
+
+/* ---------- AGENTE: uma coluna central, sem caixa em volta ---------- */
+html[data-tema] main:has(.command-layout) {padding-top: 0}
+html[data-tema] .command-layout {display: flex; flex-direction: column; max-width: 960px; width: 100%; margin: 0 auto}
+html[data-tema] .agent-workspace {flex: 1; border: 0; border-radius: 0; background: transparent; box-shadow: none}
+html[data-tema] .agent-workspace #historico {padding: 24px 4px 16px; gap: 20px}
+html[data-tema] .agent-workspace .msg--usuario {background: var(--cor-marca-suave); color: var(--cor-texto); border-radius: 18px 18px 4px 18px}
+html[data-tema] .agent-workspace .msg--agente {color: var(--cor-texto)}
+html[data-tema] .agent-empty {padding: 32px 0 8px; gap: 0}
+html[data-tema] .agent-empty h2 {font-size: 26px; margin: 0 0 8px; color: var(--cor-texto)}
+html[data-tema] .agent-empty > p {color: var(--cor-texto-suave); margin: 0 0 24px; max-width: 52ch; font-size: 16px}
+html[data-tema] .agent-passos {display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; width: 100%}
+html[data-tema] .agent-passos li {display: grid; gap: 4px; padding: 16px; border-radius: var(--raio); background: var(--cor-superficie); box-shadow: var(--sombra-suave)}
+html[data-tema] .agent-passos strong {font: 500 16px var(--fonte-titulo); color: var(--cor-texto)}
+html[data-tema] .agent-passos span {color: var(--cor-texto-suave); font-size: 15px}
+html[data-tema] .agent-passos b {font: 500 12px var(--fonte-mono); color: var(--cor-marca-forte); letter-spacing: .1em}
+html[data-tema] .agent-composer {background: transparent; border-top: 0; padding: 8px 4px 16px}
+html[data-tema] form#form-comando {background: var(--cor-superficie); border: 1px solid var(--cor-borda-campo); box-shadow: var(--sombra-suave)}
+html[data-tema] form#form-comando:focus-within {outline: 2px solid var(--cor-marca-forte); outline-offset: 2px; box-shadow: var(--brilho-destaque)}
+html[data-tema] #campo-mensagem {color: var(--cor-texto); font-size: 16px}
+html[data-tema] #campo-mensagem:focus-visible {outline: none; box-shadow: none}
+html[data-tema] #campo-mensagem::placeholder {color: var(--cor-texto-suave)}
+html[data-tema] #botao-enviar {background: var(--cor-primario); border-color: var(--cor-primario); color: var(--cor-sobre-primario)}
+html[data-tema] #botao-enviar:hover:not(:disabled) {background: var(--cor-primario); filter: brightness(1.08)}
+html[data-tema] #botao-enviar:disabled {background: var(--cor-superficie-suave); border-color: var(--cor-borda); color: var(--cor-texto-suave); opacity: 1}
+html[data-tema] .composer-note {justify-content: center; color: var(--cor-texto-suave); font-size: 15px; margin-top: 8px}
+html[data-tema] .composer-note > span {color: var(--cor-marca-forte)}
+html[data-tema] .agent-conversa > .carregando, html[data-tema] .carregando {padding: 0 4px 8px; color: var(--cor-texto-suave)}
+html[data-tema] .carregando__barra {height: 2px; border-radius: 2px; background: var(--cor-marca-forte)}
+@media (max-width: 599px) {
+    html[data-tema] .agent-passos {grid-template-columns: minmax(0, 1fr)}
+    html[data-tema] .agent-workspace #historico {padding: 16px 0 12px}
+    html[data-tema] .composer-note {font-size: 15px}
+}
+
+/* ---------- COMPONENTES ui/ ---------- */
+/* Aviso: padrão único (info, sucesso, atenção, erro). Ícone + texto curto + cor do estado; sem borda. */
+html[data-tema] .aviso {display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--raio); border: 0; font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; max-width: 100%}
+html[data-tema] .aviso__icone {width: 20px; height: 20px; margin-top: 1px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round}
+html[data-tema] .aviso__texto {min-width: 0}
+html[data-tema] .aviso__texto strong {display: block; font-weight: 600}
+html[data-tema] .aviso--info {background: var(--cor-info-faixa); color: var(--cor-info)}
+html[data-tema] .aviso--sucesso {background: var(--cor-sucesso-faixa); color: var(--cor-sucesso)}
+html[data-tema] .aviso--atencao {background: var(--cor-atencao-faixa); color: var(--cor-atencao)}
+html[data-tema] .aviso--erro {background: var(--cor-erro-faixa); color: var(--cor-erro); font-weight: 500}
+html[data-tema] .aviso .msg__speaker {position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap}
+html[data-tema] .agent-workspace .aviso.msg {padding: 12px 14px; border-radius: var(--raio); max-width: 75ch}
+
+/* Campo: rótulo, *obrigatório em vermelho forte, borda vermelha no erro e a mensagem embaixo (o erro fica só aqui). */
+html[data-tema] .campo label {color: var(--cor-texto); font-weight: 500}
+html[data-tema] .campo-obrigatorio {color: var(--cor-erro); font-weight: 600; font-size: 15px}
+html[data-tema] .campo input, html[data-tema] .campo select {background: var(--cor-superficie); color: var(--cor-texto); border: 1px solid var(--cor-borda-campo); border-radius: 8px}
+html[data-tema] .campo input:hover, html[data-tema] .campo select:hover {border-color: var(--cor-texto-suave)}
+html[data-tema] .campo input:focus, html[data-tema] .campo select:focus {border-color: var(--cor-marca-forte)}
+html[data-tema] .campo--erro input, html[data-tema] .campo--erro select {border: 2px solid var(--cor-erro)}
+html[data-tema] .campo-info {color: var(--cor-texto-suave)}
+html[data-tema] .campo-erro {color: var(--cor-erro); font-weight: 500; display: flex; gap: 6px; align-items: flex-start}
+html[data-tema] .campo-erro::before {content: "!"; flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 3px; border-radius: 50%; background: var(--cor-erro); color: var(--cor-sobre-erro); font: 700 12px/1 var(--fonte-corpo)}
+
+/* ResumoErros: uma linha no topo, leva ao primeiro campo com erro. */
+html[data-tema] .resumo-erros {display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px}
+html[data-tema] .resumo-erros button {min-height: 36px; padding: 4px 12px; border: 0; background: transparent; color: inherit; text-decoration: underline; text-underline-offset: 3px; font-weight: 600}
+html[data-tema] .resumo-erros button:hover {background: color-mix(in srgb, var(--cor-erro) 10%, transparent)}
+
+/* Toast: no topo, 6 s no mínimo, pausa com o mouse ou o foco em cima, botão de fechar; erro não some sozinho. */
+html[data-tema] .toast-area {position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column; gap: 8px; width: max-content; max-width: min(520px, calc(100vw - 32px)); pointer-events: none}
+html[data-tema] .toast-area .aviso {pointer-events: auto; box-shadow: var(--sombra-suave); background: var(--cor-superficie); padding-right: 4px; align-items: center}
+html[data-tema] .toast-area .aviso--erro {background: var(--cor-erro-faixa)}
+html[data-tema] .toast__fechar {flex: none; width: 40px; min-width: 40px; min-height: 40px; padding: 0; border: 0; background: transparent; color: inherit; font-size: 22px; line-height: 1}
+html[data-tema] .toast__fechar:hover {background: color-mix(in srgb, currentColor 10%, transparent)}
+@media (max-width: 599px) {html[data-tema] .toast-area {left: 16px; right: 16px; transform: none; width: auto; max-width: none}}
+
+/* Botão: primário (azul da marca), secundário, perigo e fantasma; o primário é a única ação que brilha. */
+html[data-tema] .botao {position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; min-width: 112px; padding: 10px 18px; border-radius: 8px; font-weight: 500}
+html[data-tema] .botao--primario {background: var(--cor-primario); border: 1px solid var(--cor-primario); color: var(--cor-sobre-primario); box-shadow: var(--brilho-destaque)}
+html[data-tema] .botao--primario:hover:not(:disabled) {background: var(--cor-primario); filter: brightness(1.08)}
+html[data-tema] .botao--secundario {background: var(--cor-superficie); border: 1px solid var(--cor-borda-campo); color: var(--cor-texto)}
+html[data-tema] .botao--perigo {background: var(--cor-erro); border: 1px solid var(--cor-erro); color: var(--cor-sobre-erro)}
+html[data-tema] .botao--perigo:hover:not(:disabled) {background: var(--cor-erro); filter: brightness(1.06)}
+html[data-tema] .botao--fantasma {background: transparent; border: 1px solid transparent; color: var(--cor-texto-suave)}
+html[data-tema] .botao--fantasma:hover:not(:disabled) {background: var(--cor-superficie-suave); color: var(--cor-texto)}
+html[data-tema] .botao:disabled {box-shadow: none; cursor: not-allowed}
+/* Segurar: a barra enche por baixo do rótulo; a cor é a do botão, mais escura. */
+html[data-tema] .botao__barra {position: absolute; inset: auto 0 0 0; height: 100%; width: 0%; background: color-mix(in srgb, var(--cor-sombra) 22%, transparent); pointer-events: none}
+html[data-tema="escuro"] .botao--perigo .botao__barra {background: color-mix(in srgb, var(--cor-sombra) 30%, transparent)}
+html[data-tema] .botao__rotulo {position: relative; z-index: 1; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.2; pointer-events: none}
+html[data-tema] .botao__rotulo small {font: 12px var(--fonte-mono); opacity: .9}
+
+/* ---------- CARD DE AÇÃO PROPOSTA: um nível só ---------- */
+html[data-tema] .card-confirmacao {border: 1px solid var(--cor-borda); border-left: 4px solid var(--cor-risco); border-radius: var(--raio); background: var(--cor-superficie); padding: 20px 24px; box-shadow: var(--sombra-suave)}
+html[data-tema] .card--risco-leitura {--cor-risco: var(--cor-info); --cor-risco-faixa: var(--cor-info-faixa)}
+html[data-tema] .card--risco-escrita {--cor-risco: var(--cor-atencao); --cor-risco-faixa: var(--cor-atencao-faixa)}
+html[data-tema] .card--risco-exclusao {--cor-risco: var(--cor-erro); --cor-risco-faixa: var(--cor-erro-faixa)}
+html[data-tema] .card-confirmacao.card--aguardando {box-shadow: var(--brilho-destaque)}
+html[data-tema] .card-overline {margin-bottom: 8px; color: var(--cor-texto-suave)}
+html[data-tema] .card-risco {color: var(--cor-risco); background: var(--cor-risco-faixa); font-weight: 500; text-transform: uppercase; letter-spacing: .06em}
+html[data-tema] .card-titulo {font-size: 20px; margin-bottom: 12px; color: var(--cor-texto)}
+html[data-tema] .card-confirmacao > p {color: var(--cor-texto-suave); margin-bottom: 16px}
+html[data-tema] .card-registro {margin: 0 0 20px; padding: 12px 16px; border-radius: 8px; background: var(--cor-superficie-suave)}
+html[data-tema] .card-registro dt {color: var(--cor-texto-suave)}
+html[data-tema] .card-form {gap: 20px}
+html[data-tema] .card-autorizacao {border: 0; border-radius: 8px; padding: 16px; background: var(--cor-superficie-suave)}
+html[data-tema] .card-autorizacao legend {float: left; width: 100%; padding: 0; margin-bottom: 4px; font-weight: 600}
+html[data-tema] .card-autorizacao legend + * {clear: both}
+html[data-tema] .autorizacao-info {margin: 0; color: var(--cor-texto-suave); font-size: 15px}
+html[data-tema] .card-etapa {margin: 20px 0 0; padding: 0; border: 0; background: transparent; color: var(--cor-texto-suave); font-size: 15px}
+html[data-tema] .card-confirmacao .aviso {margin-top: 12px}
+html[data-tema] .card-confirmacao .acoes {border-top: 0; margin-top: 16px; padding-top: 0; gap: 12px; align-items: center}
+html[data-tema] .card-confirmacao .acoes .btn-cancelar {margin-left: auto}
+html[data-tema] .card-confirmacao .acoes .botao {min-height: 48px}
+html[data-tema] .card-confirmacao.card--encerrado {box-shadow: none; opacity: .92}
+@media (max-width: 599px) {
+    html[data-tema] .card-confirmacao {padding: 16px}
+    html[data-tema] .card-confirmacao .acoes .botao {flex: 1 1 calc(50% - 12px); min-width: 0}
+    html[data-tema] .card-confirmacao .acoes .btn-cancelar {margin-left: 0}
+}
+
+/* ---------- FICHA DE AGENDAMENTO / CALENDÁRIO: passos por espaço, sem caixa ---------- */
+html[data-tema] .ficha-agenda {gap: 20px}
+html[data-tema] .ficha-atalhos {display: flex; flex-wrap: wrap; align-items: center; gap: 8px}
+html[data-tema] .ficha-atalhos > span {color: var(--cor-texto-suave); font-size: 15px}
+html[data-tema] .ficha-passo {border: 0; padding: 0; background: transparent; gap: 10px}
+html[data-tema] .ficha-passo legend {float: left; width: 100%; padding: 0; margin-bottom: 8px; font: 500 16px var(--fonte-titulo); color: var(--cor-texto)}
+html[data-tema] .ficha-passo legend + * {clear: both}
+html[data-tema] .ficha-rotulo {color: var(--cor-texto-suave)}
+html[data-tema] .ficha-busca, html[data-tema] .ficha-profissional {min-height: 44px; width: 100%; max-width: 360px; padding: 8px 12px; border: 1px solid var(--cor-borda-campo); border-radius: 8px; background: var(--cor-superficie); color: var(--cor-texto)}
+html[data-tema] .ficha-dias-rapidos button, html[data-tema] .ficha-mes-topo button {background: var(--cor-superficie); border-color: var(--cor-borda-campo)}
+html[data-tema] .ficha-mes {padding: 12px; border-radius: var(--raio); background: var(--cor-superficie-suave)}
+html[data-tema] .ficha-dia {background: var(--cor-superficie); border: 1px solid var(--cor-borda); border-radius: 8px}
+html[data-tema] .ficha-dia[aria-pressed="true"], html[data-tema] .ficha-horario[aria-current="true"] {background: var(--cor-primario); border: 2px solid var(--cor-primario); color: var(--cor-sobre-primario); font-weight: 600}
+html[data-tema] .ficha-dia:disabled, html[data-tema] .ficha-horario:disabled {background: transparent; border-color: transparent; color: var(--cor-texto-suave); opacity: 1}
+html[data-tema] .ficha-horario {min-width: 88px; border-color: var(--cor-borda-campo)}
+html[data-tema] .ficha-estado {color: var(--cor-texto)}
+html[data-tema] .ficha-quem {display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--cor-info-faixa)}
+html[data-tema] .ficha-quem p {margin: 0; color: var(--cor-texto); font-weight: 500}
+html[data-tema] .ficha-quem-lista {display: flex; flex-wrap: wrap; gap: 8px}
+
+/* ---------- TABELAS: colunas próximas, cabeçalho preso, sem moldura dupla ---------- */
+html[data-tema] .tabela-rolagem {width: fit-content; max-width: 100%; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-superficie); scrollbar-color: var(--cor-texto-suave) var(--cor-superficie-suave)}
+html[data-tema] .tabela-rolagem table {min-width: 0; width: auto}
+html[data-tema] .agent-workspace #historico .tabela-rolagem {max-height: min(60dvh, 520px)}
+html[data-tema] th, html[data-tema] td {border-bottom-color: var(--cor-borda)}
+html[data-tema] th {background: var(--cor-superficie-suave); color: var(--cor-texto-suave); position: sticky; top: 0; z-index: 1}
+html[data-tema] .agent-workspace #historico :is(th, td) {padding: 8px 14px; font-size: 15px}
+html[data-tema] td {color: var(--cor-texto); max-width: 42ch}
+html[data-tema] tbody tr:hover {background: var(--cor-superficie-suave)}
+html[data-tema] .linha--aviso td {background: var(--cor-atencao-faixa); color: var(--cor-atencao)}
+html[data-tema] .tabela-resumo {color: var(--cor-texto-suave)}
+html[data-tema] .agent-workspace #historico > .tabela-resumo {padding: 0; margin: 0 0 -12px}
+html[data-tema] .btn-editar-linha {color: var(--cor-marca-forte); background: transparent; border-color: transparent; min-height: 40px}
+html[data-tema] .btn-editar-linha:hover:not(:disabled) {background: var(--cor-superficie-suave); border-color: transparent}
+html[data-tema] .btn-editar-linha.btn-danger {color: var(--cor-erro)}
+html[data-tema] .exportar {display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: -8px}
+html[data-tema] .exportar p {margin: 0; color: var(--cor-texto-suave); font-size: 15px}
+/* Lote e estorno dentro do card: a tabela ocupa a largura do card (sem caixa extra). */
+html[data-tema] .card-confirmacao .tabela-rolagem {width: 100%; margin-bottom: 16px}
+html[data-tema] .card-lote tr.item-erro td {background: var(--cor-erro-faixa)}
+html[data-tema] .card-lote .item-erro-texto {color: var(--cor-erro); font-weight: 500}
+html[data-tema] .estorno-itens__origem, html[data-tema] .estorno-itens__resta {color: var(--cor-texto-suave)}
+html[data-tema] .estorno-itens input {min-height: 44px; width: 88px; padding: 8px; border: 1px solid var(--cor-borda-campo); border-radius: 8px; background: var(--cor-superficie); color: var(--cor-texto)}
+@media (max-width: 599px) {
+    html[data-tema] .estorno-itens tr {border-color: var(--cor-borda); background: var(--cor-superficie)}
+    html[data-tema] td {max-width: none}
+}
+
+/* ---------- MOVIMENTO ---------- */
+@media (prefers-reduced-motion: reduce) {html[data-tema] .botao__barra {transition: none}}
+
+/* ---------- SELEÇÃO EM LOTE (checkbox + barra fixa + aviso com segurar) ---------- */
+html[data-tema] .selecao-celula input {accent-color: var(--cor-marca-forte)}
+html[data-tema] .selecao-barra {position: sticky; bottom: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 12px 16px; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-superficie); box-shadow: var(--sombra-suave)}
+html[data-tema] .selecao-barra__conta {font-weight: 600; color: var(--cor-texto)}
+html[data-tema] .selecao-barra > .aviso {flex: 1 1 100%; margin: 0}
+html[data-tema] .aviso-confirmacao .aviso__texto {display: grid; gap: 6px; width: 100%}
+html[data-tema] .aviso-confirmacao__pergunta {margin: 0; font-weight: 600; color: var(--cor-texto); font-size: 16px}
+html[data-tema] .aviso-confirmacao__dica {margin: 0; color: var(--cor-texto-suave)}
+html[data-tema] .aviso-confirmacao__acoes {display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px}
+html[data-tema] .linha-cancelada td {color: var(--cor-texto-suave); text-decoration: line-through}
+html[data-tema] .linha-bloqueada td {color: var(--cor-texto-suave)}
+@media (max-width: 599px) {
+    html[data-tema] .selecao-barra .botao {flex: 1 1 100%}
+}
+
+/* ---------- TIRA DO CARD FINALIZADO: 1 linha, no máximo metade da largura, sem parecer divisão de chat ---------- */
+html[data-tema] .card-tira {display: flex; align-items: center; gap: 8px; width: fit-content; max-width: min(50%, 520px); min-width: 0; padding: 4px 12px; border-radius: 999px; background: var(--cor-superficie-suave); color: var(--cor-texto-suave); font-size: 15px; line-height: 1.4}
+html[data-tema] .card-tira__texto {min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+html[data-tema] .card-tira__marca {flex: none; font-weight: 700}
+html[data-tema] .card-tira__hora {flex: none; font: 12px var(--fonte-mono); opacity: .85}
+html[data-tema] .card-tira--sucesso .card-tira__marca {color: var(--cor-sucesso)}
+html[data-tema] .card-tira--erro .card-tira__marca {color: var(--cor-erro)}
+html[data-tema] .card-erro:focus {outline: none}
+/* Celular: metade de 360 px (~160 px) corta o título; fica em até 80% (decisão registrada no relatório). */
+@media (max-width: 599px) {html[data-tema] .card-tira {max-width: 80%}}
+
+/* Toast ancorado no botão (Exportar CSV): sai de trás dele e sobe. Mesma aparência do toast do topo. */
+html[data-tema] .exportar {position: relative}
+html[data-tema] .toast-ancorado {position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 5; width: max-content; max-width: min(420px, calc(100vw - 48px)); animation: toast-sobe .22s ease-out}
+html[data-tema] .toast-ancorado .aviso {box-shadow: var(--sombra-suave); background: var(--cor-superficie); padding-right: 4px; align-items: center}
+html[data-tema] .toast-ancorado .aviso--erro {background: var(--cor-erro-faixa)}
+@keyframes toast-sobe {from {opacity: 0; transform: translateY(14px) scale(.98)} to {opacity: 1; transform: translateY(0) scale(1)}}

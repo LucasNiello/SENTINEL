@@ -12,16 +12,17 @@ use Illuminate\Support\Str;
  * sessão. Cada proposta passa por dois estados (RF04, Bloco 2b):
  *
  * - "rascunho": criado pelo /agente/comando com o que a IA propôs. É o
- *   formulário em edição, sem token de segurar, com prazo de PRAZO_RASCUNHO_S
- *   contado desde a proposta (não reinicia no "Editar").
+ *   formulário em edição, sem token de segurar. 25/11 (Lucas): sem prazo
+ *   (antes, PRAZO_RASCUNHO_S desde a proposta).
  * - "revisada": criada pelo /agente/revisar depois de validar os valores. Guarda
  *   os valores revisados e o token de confirmação (uso único). Decisão B do Lucas
- *   (13/11): não há mais janela de 2 a 12 s; o token vale até o fim dos 5 min da
- *   proposta. O segurar de 2 s virou só gesto visual, nas ações destrutivas.
+ *   (13/11): não há janela de 2 a 12 s; 25/11: o token também não vence. O
+ *   segurar de 2 s é só gesto visual, nas ações destrutivas.
  *   "Editar" mata esse token sem desfecho; o rascunho continua.
  *
- * Toda proposta tem um desfecho só (confirmada, cancelada ou expirada) e, quando
- * ele acontece, o rascunho e os tokens dela saem da sessão (R3).
+ * Toda proposta tem um desfecho só (confirmada ou cancelada; "expirada" só se o
+ * prazo voltar) e, quando ele acontece, o rascunho e os tokens dela saem da
+ * sessão (R3).
  *
  * RISCO ACEITO (Lucas, 19/10): a sessão do Laravel não serializa requisições
  * simultâneas — a última a gravar vence. Se um cancelamento (que grava a
@@ -36,8 +37,8 @@ class ConfirmacoesPendentes
     private const CHAVE = 'confirmacoes';
 
     /**
-     * Prazo da proposta, contado desde a proposta da IA e absoluto: vale para o rascunho (não reinicia no "Editar")
-     * e para o token de confirmação dele. É o limite único entre "cancelado" e "expirado" (decisão B, 13/11).
+     * Prazo antigo da proposta (decisão B, 13/11: 5 min absolutos desde a proposta). 25/11 (Lucas): não vale mais para
+     * nenhuma origem (prazoS() é null); fica como referência e para os testes medirem "depois dos antigos 5 min".
      */
     public const PRAZO_RASCUNHO_S = 300;
 
@@ -51,10 +52,17 @@ class ConfirmacoesPendentes
      */
     private const DIAS_DA_MARCA_DE_DESFECHO = 30;
 
-    /** O prazo, em segundos, de uma proposta de origem $origem; null = sem prazo (card aberto por tela). O front só cria timer se vier número. */
+    /**
+     * O prazo, em segundos, de uma proposta de origem $origem; null = sem prazo. O front só cria timer se vier número.
+     * 25/11 (decisão do Lucas): nenhuma proposta vence mais, nem a da IA. Quem sai da mesa enquanto o agente pensa não pode
+     * ter de pedir de novo. O Confirmar revalida tudo no servidor (vaga, versão, permissão, tenant) e o token continua de uso
+     * único; o que limita a sessão é LIMITE_RASCUNHOS_DE_TELA nos cards de tela (o mais antigo sai como "cancelado"), o
+     * descarte da pendente a cada pedido novo no chat e o fim da sessão de login.
+     * PRAZO_RASCUNHO_S fica só como referência do prazo antigo.
+     */
     public static function prazoS(string $origem): ?int
     {
-        return $origem === 'formulario' ? null : self::PRAZO_RASCUNHO_S;
+        return null;
     }
 
     /** Guarda o que a IA propôs como rascunho e devolve o id da proposta. */
@@ -92,8 +100,9 @@ class ConfirmacoesPendentes
      */
     public function retirarExcedentesDeTela(Session $sessao): array
     {
+        // Só card de TELA: a proposta do chat não acumula (um pedido novo descarta a pendente; AgenteController::descartarPendencias).
         $meus = array_filter((array) $sessao->get(self::CHAVE, []), fn ($p) => is_array($p) && ($p['estado'] ?? null) === 'rascunho'
-            && self::prazoS(self::origem($p)) === null && $this->pertenceAoUsuario($p));
+            && self::origem($p) === 'formulario' && $this->pertenceAoUsuario($p));
 
         if (count($meus) <= self::LIMITE_RASCUNHOS_DE_TELA) {
             return [];
@@ -177,9 +186,9 @@ class ConfirmacoesPendentes
             'dono_user_id' => $rascunho['dono_user_id'] ?? null,
             'dono_tenant_id' => $rascunho['dono_tenant_id'] ?? null,
             'origem' => self::origem($rascunho),
-            // Os 5 min do rascunho são absolutos: o token também vence quando eles acabam (expirou()).
+            // Hora da proposta: o token usaria o mesmo prazo dela (expirou()); 25/11, sem prazo, só fica registrada.
             'proposta_criada_em' => $rascunho['criado_em'],
-            // Em segundos, com milissegundos (o prazo é o da proposta; ver expirou()).
+            // Em segundos, com milissegundos (hora da emissão; 25/11, sem prazo).
             'emitido_em' => self::agora(),
         ];
     }
@@ -187,7 +196,7 @@ class ConfirmacoesPendentes
     /**
      * Revisão recusada: o rascunho passa a guardar o que o humano já editou (o card
      * volta com esses valores, e campo sensível em branco mantém o editado, não o
-     * da IA). O proposto da IA fica em "propostos"; o prazo não muda.
+     * da IA). O proposto da IA fica em "propostos".
      */
     public function atualizarRascunho(Session $sessao, string $proposta, array $rascunho, array $revisados): void
     {
@@ -198,7 +207,7 @@ class ConfirmacoesPendentes
         ]);
     }
 
-    /** A proposta tem um token de segurar já vencido? (o desfecho dela é "expirado", dado pela varredura). */
+    /** A proposta tem um token de segurar já vencido? 25/11: nunca (sem prazo); fica para o caso de o prazo voltar. */
     public function temTokenVencido(Session $sessao, string $proposta): bool
     {
         foreach ((array) $sessao->get(self::CHAVE, []) as $pendente) {
@@ -332,15 +341,15 @@ class ConfirmacoesPendentes
     }
 
     /**
-     * Passou do prazo: 5 min desde a proposta, absoluto, para o rascunho e para o token dele. Decisão B (13/11):
+     * Passou do prazo? 25/11: nunca (prazoS() é null). Antes, decisão B (13/11): 5 min desde a proposta, absoluto, e
      * o token não tem mais validade própria (eram 12 s). É o limite único entre "cancelado" e "expirado" em todas
      * as rotas (confirmar, cancelar, sair e varredura).
      */
     public function expirou(array $pendente): bool
     {
-        // 25/11 (decisão do Lucas): card aberto por uma TELA (origem "formulario") não tem prazo: quem abriu é o humano, sem IA
-        // propondo nada. O Confirmar revalida tudo no servidor (vaga, versão, permissão, tenant), então um card parado não grava
-        // dado velho; a sessão de login continua vencendo sozinha. O prazo de 5 min fica para a proposta da IA (chat).
+        // 25/11 (decisão do Lucas): primeiro o card de TELA, depois também a proposta do chat deixaram de ter prazo (prazoS() é
+        // sempre null). O Confirmar revalida tudo no servidor (vaga, versão, permissão, tenant), então um card parado não grava
+        // dado velho; a sessão de login continua vencendo sozinha. O resto do método fica para o caso de o prazo voltar.
         if (self::prazoS(self::origem($pendente)) === null) {
             return false;
         }
@@ -380,7 +389,7 @@ class ConfirmacoesPendentes
     /**
      * Uma pendência por proposta volta (a primeira que sair), e todas as da proposta
      * saem da sessão. Tokens de segurar vêm antes dos rascunhos: o token já carrega
-     * o prazo da proposta (decisão B, 13/11: o token não tem prazo próprio). Entrada malformada sai sem auditoria; a
+     * o prazo da proposta, se houver (decisão B, 13/11: o token não tem prazo próprio; 25/11: sem prazo). Entrada malformada sai sem auditoria; a
      * proposta já concluída por outra requisição (ver concluir()) sai sem voltar.
      */
     private function retirarOnde(Session $sessao, Closure $sai): array

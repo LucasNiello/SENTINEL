@@ -30,7 +30,7 @@ await page.route('**/agente/*', async (route) => {
     if (acao === 'revisar') {
         reviews++;
         if (modo === 'exigir-na-revisao') formulario = { ...formulario, reautenticar: true, tipo_autorizacao: 'crmv' };
-        return route.fulfill({ json: { tipo: 'revisada', proposta, token, formulario } });
+        return route.fulfill({ json: { tipo: 'revisada', proposta, token, segurar: false, formulario } });
     }
     if (acao === 'editar') return route.fulfill({ json: { tipo: 'rascunho', proposta } });
     if (acao === 'cancelar') return route.fulfill({ json: { tipo: 'cancelado', mensagem: 'Proposta cancelada.' } });

@@ -386,36 +386,32 @@ class FormularioAgenteTest extends TestCase
         $this->assertSame('Segunda', Cliente::query()->sole()->nome);
     }
 
-    public function test_rascunho_expira_em_5_minutos_e_e_auditado(): void
+    public function test_rascunho_nao_expira(): void
     {
+        // 25/11 (Lucas): quem sai da mesa enquanto o agente pensa não precisa pedir de novo.
         $proposta = $this->rascunho(['nome' => 'Esquecida'], 'criar_cliente');
-        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S - 1)->seconds();
-        $this->get('/agente')->assertOk();
-        $this->assertNotNull(session("confirmacoes.{$proposta}"), 'antes dos 5 min o rascunho fica');
-
-        $this->travel(2)->seconds();
+        $this->travel(ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 60)->seconds();
         $this->get('/agente')->assertOk();
 
-        $log = AuditLog::query()->sole();
-        $this->assertSame('expirado', $log->resultado);
-        $this->assertSame(['nome' => 'Esquecida'], $log->parametros_propostos);
-        $this->assertEmpty(session('confirmacoes', []));
+        $this->assertNotNull(session("confirmacoes.{$proposta}"), 'o rascunho continua valendo');
+        $this->assertSame(0, AuditLog::count());
+        $this->revisarEConfirmar($proposta, ['nome' => 'Esquecida'])->assertOk();
+        $this->assertSame('Esquecida', Cliente::query()->sole()->nome);
     }
 
-    public function test_prazo_do_rascunho_nao_reinicia_no_editar(): void
+    public function test_editar_e_revisar_de_novo_depois_dos_antigos_5_minutos(): void
     {
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
         $this->travel(200)->seconds();
         $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
         $this->postJson('/agente/editar', ['token' => $token])->assertOk();
-        $this->travel(101)->seconds(); // 301 s desde a proposta
+        $this->travel(101)->seconds(); // 301 s desde a proposta: 25/11, sem prazo
 
-        $this->revisar($proposta, ['nome' => 'Loja'])
-            ->assertStatus(422)
-            ->assertJsonPath('codigo', 'AI_PROPOSAL_EXPIRED');
+        $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->assertSame(['expirado'], AuditLog::query()->pluck('resultado')->all(), 'a varredura deu o desfecho');
-        $this->assertSame(0, Cliente::count());
+        $this->assertSame(['sucesso'], AuditLog::query()->pluck('resultado')->all());
+        $this->assertSame(1, Cliente::count());
     }
 
     public function test_cancelar_ainda_no_formulario_usa_a_proposta(): void
@@ -447,53 +443,50 @@ class FormularioAgenteTest extends TestCase
         $this->assertSame('999.***.**7-66', $sucesso->parametros['documento']);
     }
 
-    public function test_os_5_minutos_do_rascunho_valem_tambem_para_o_token_de_segurar(): void
+    public function test_token_de_segurar_tambem_nao_vence(): void
     {
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
         $this->travel(295)->seconds();
         $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
-        $this->travel(6)->seconds(); // token com 6 s, proposta com 301 s
+        $this->travel(6)->seconds(); // token com 6 s, proposta com 301 s: 25/11, sem prazo
 
-        $this->postJson('/agente/confirmar', ['token' => $token])
-            ->assertStatus(422)
-            ->assertJsonPath('mensagem', 'Confirmação fora do prazo. Refaça o comando.');
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertOk();
 
-        $this->assertSame(0, Cliente::count());
-        $this->assertSame(['expirado'], AuditLog::query()->pluck('resultado')->all());
+        $this->assertSame(1, Cliente::count());
+        $this->assertSame(['sucesso'], AuditLog::query()->pluck('resultado')->all());
     }
 
-    public function test_cancelar_ou_sair_com_rascunho_decide_pelo_prazo_de_5_minutos(): void
+    public function test_cancelar_ou_sair_com_rascunho_e_sempre_cancelado(): void
     {
-        $vencido = $this->rascunho(['nome' => 'Vencida'], 'criar_cliente');
+        // 25/11 (Lucas): sem prazo, o tempo parado não muda o desfecho.
+        $antigo = $this->rascunho(['nome' => 'Antiga'], 'criar_cliente');
         $this->travel(301)->seconds();
-        $this->postJson('/agente/cancelar', ['proposta' => $vencido])->assertOk()->assertJsonPath('tipo', 'expirado');
+        $this->postJson('/agente/cancelar', ['proposta' => $antigo])->assertOk()->assertJsonPath('tipo', 'cancelado');
 
         $this->rascunho(['nome' => 'Aberta'], 'criar_cliente');
-        $this->travel(60)->seconds();
+        $this->travel(600)->seconds();
         $this->post('/logout')->assertRedirect('/login');
 
-        $this->assertSame(['expirado', 'cancelado'], AuditLog::query()->orderBy('id')->pluck('resultado')->all());
+        $this->assertSame(['cancelado', 'cancelado'], AuditLog::query()->orderBy('id')->pluck('resultado')->all());
     }
 
-    public function test_editar_ou_revisar_com_token_vencido_nao_ressuscita_a_proposta(): void
+    public function test_editar_ou_revisar_muito_depois_continua_funcionando(): void
     {
+        // 25/11 (Lucas): sem prazo. Editar e revisar de novo depois dos antigos 5 min não perdem o que foi feito.
         $proposta = $this->rascunho(['nome' => 'Loja'], 'criar_cliente');
         $token = $this->revisar($proposta, ['nome' => 'Loja'])->assertOk()->json('token');
-        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds(); // decisão B: vence com a proposta
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
 
-        $this->postJson('/agente/editar', ['token' => $token])
-            ->assertStatus(422)
-            ->assertJsonPath('codigo', 'AI_PROPOSAL_EXPIRED');
+        $this->postJson('/agente/editar', ['token' => $token])->assertOk();
+        $this->postJson('/agente/confirmar', ['token' => $token])->assertStatus(422); // o token do Editar morreu
 
         $outra = $this->rascunho(['nome' => 'Outra'], 'criar_cliente');
         $this->revisar($outra, ['nome' => 'Outra'])->assertOk();
         $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
-        $this->revisar($outra, ['nome' => 'Outra'])
-            ->assertStatus(422)
-            ->assertJsonPath('codigo', 'AI_PROPOSAL_EXPIRED');
+        $this->revisar($outra, ['nome' => 'Outra'])->assertOk();
 
-        $this->assertSame(['expirado', 'expirado'], AuditLog::query()->pluck('resultado')->all(), 'um desfecho por proposta');
-        $this->assertEmpty(session('confirmacoes', []));
+        $this->assertSame(0, AuditLog::query()->where('resultado', 'expirado')->count());
+        $this->assertSame(0, Cliente::count(), 'nada confirmado');
     }
 
     public function test_confirmar_reaplica_a_validacao_quando_o_dado_muda_depois_do_revisar(): void
@@ -555,14 +548,14 @@ class FormularioAgenteTest extends TestCase
         $this->travel(1)->seconds();
         $this->postJson('/agente/cancelar', ['token' => $token])->assertOk();
 
-        // Esquecido no segurar (a varredura audita como expirado).
+        // Esquecido no segurar e encerrado ao sair (25/11: sem prazo, o desfecho é cancelado).
         $proposta = $this->rascunho(['nome' => 'Outra'], 'criar_cliente');
         $this->revisar($proposta, ['nome' => 'Também editado'])->assertOk();
-        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds(); // decisão B: vence com a proposta
-        $this->get('/agente')->assertOk();
+        $this->travel(\App\Services\ConfirmacoesPendentes::PRAZO_RASCUNHO_S + 1)->seconds();
+        $this->post('/logout')->assertRedirect('/login');
 
         $desfechos = AuditLog::query()->whereIn('resultado', ['cancelado', 'expirado'])->orderBy('id')->get();
-        $this->assertSame(['cancelado', 'expirado'], $desfechos->pluck('resultado')->all());
+        $this->assertSame(['cancelado', 'cancelado'], $desfechos->pluck('resultado')->all());
         $this->assertSame(['nome' => 'Loja'], $desfechos[0]->parametros_propostos);
         $this->assertSame(['nome' => 'Outra'], $desfechos[1]->parametros_propostos);
         $this->assertEmpty(session('confirmacoes', []));

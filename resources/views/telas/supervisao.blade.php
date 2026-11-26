@@ -15,6 +15,20 @@
         .supervisao-secao td .campo {min-width:140px}
         .supervisao-secao select {font-size:16px}
         .supervisao-secao .campo label.sr-only {position:static;width:auto;height:auto;padding:0;margin:0;overflow:visible;clip:auto;clip-path:none;white-space:normal}
+        /* 26/11: interruptor Ativo/Inativo (só o Administrador muda; o dono vê o estado). Texto + posição, não só cor. */
+        .chave-conta {display:inline-flex;align-items:center;gap:10px;min-height:44px;padding:4px 12px 4px 4px;border:1px solid var(--color-borda-campo);border-radius:999px;background:var(--sentinel-paper);color:var(--color-tinta);font-weight:500}
+        .chave-conta__trilho {position:relative;flex:none;width:44px;height:26px;border-radius:999px;background:var(--color-tinta-2)}
+        .chave-conta__bola {position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--sentinel-paper)}
+        .chave-conta[aria-checked="true"] {border-color:var(--color-sucesso);color:var(--color-sucesso)}
+        .chave-conta[aria-checked="true"] .chave-conta__trilho {background:var(--color-sucesso)}
+        .chave-conta[aria-checked="true"] .chave-conta__bola {left:21px}
+        .estado-conta {display:inline-flex;align-items:center;min-height:44px;font-weight:500}
+        .estado-conta--inativo, .linha-inativa td:not(:last-child) {color:var(--color-tinta-2)}
+        @media (max-width:599px) {
+            #tabela-supervisores td:nth-child(5)::before {content:"Conta: "}
+            #tabela-supervisores td:nth-child(5) {padding-top:4px}
+            #tabela-supervisores td:nth-child(6) {padding-top:12px}
+        }
         .gerar-pin-para {flex-basis:100%;margin:0}
         .pin-gerado {margin:0 0 24px;padding:16px;border:2px solid var(--color-aviso);border-radius:var(--radius);background:var(--color-aviso-faixa);color:var(--color-tinta)}
         .pin-gerado p {margin:0 0 8px}
@@ -78,7 +92,7 @@
         <div class="tabela-rolagem" id="tabela-supervisores" hidden>
             <table>
                 <thead>
-                    <tr><th scope="col">Nome</th><th scope="col">Papel</th><th scope="col">Setor que supervisiona</th><th scope="col">PIN</th><th scope="col">Ações</th></tr>
+                    <tr><th scope="col">Nome</th><th scope="col">Papel</th><th scope="col">Setor que supervisiona</th><th scope="col">PIN</th><th scope="col">Conta</th><th scope="col">Ações</th></tr>
                 </thead>
                 <tbody id="linhas-supervisores"></tbody>
             </table>
@@ -145,6 +159,43 @@
                 return b;
             }
 
+            // 26/11: "Ativo" (ligado) ou "Inativo" (desligado). O Administrador/RH liga e desliga; o dono só vê (dá a ordem).
+            function tdConta(u) {
+                const td = document.createElement('td');
+                const ativo = u.ativo !== false;
+                if (!EH_ADMIN || !u.pode_ativar) {
+                    const estado = document.createElement('span');
+                    estado.className = 'estado-conta' + (ativo ? '' : ' estado-conta--inativo');
+                    estado.textContent = ativo ? 'Ativo' : 'Inativo';
+                    td.append(estado);
+                    return td;
+                }
+                const chave = document.createElement('button');
+                chave.type = 'button';
+                chave.className = 'chave-conta';
+                chave.setAttribute('role', 'switch');
+                chave.setAttribute('aria-checked', String(ativo));
+                chave.setAttribute('aria-label', 'Conta de ' + u.nome + ': ' + (ativo ? 'ativa' : 'inativa'));
+                const trilho = document.createElement('span');
+                trilho.className = 'chave-conta__trilho';
+                trilho.setAttribute('aria-hidden', 'true');
+                const bola = document.createElement('span');
+                bola.className = 'chave-conta__bola';
+                trilho.append(bola);
+                const texto = document.createElement('span');
+                texto.textContent = ativo ? 'Ativo' : 'Inativo';
+                chave.append(trilho, texto);
+                chave.addEventListener('click', async () => {
+                    chave.disabled = true;
+                    const { ok, dados } = await enviar('/supervisao/usuarios/' + u.id + '/ativo', 'POST', { ativo: !ativo });
+                    mostrar(ok ? (dados.mensagem || 'Conta atualizada.') : (dados.mensagem || 'Não consegui alterar a conta. Nada foi gravado.'), ok ? 'sucesso' : 'erro');
+                    // Recarrega sempre: mostra o estado real do servidor (se falhou, o interruptor volta ao que era).
+                    carregar();
+                });
+                td.append(chave);
+                return td;
+            }
+
             function linha(u) {
                 const tr = document.createElement('tr');
                 tr.append(celula(u.nome), celula(ROTULOS_PAPEIS[u.papel] || u.papel));
@@ -159,7 +210,7 @@
                     tdSetor.textContent = 'Todos (dono)';
                 } else if (u.papel === 'admin') {
                     tdSetor.textContent = 'Não autoriza (Administrador)';
-                } else if (EH_DONO) {
+                } else if (EH_DONO && u.ativo !== false) {
                     const campo = document.createElement('div');
                     campo.className = 'campo';
                     const rotulo = document.createElement('label');
@@ -185,10 +236,12 @@
                     tdSetor.textContent = u.supervisor_setor === 'clinica' ? 'Clínica' : u.supervisor_setor === 'petshop' ? 'Petshop' : 'Nenhum';
                 }
 
-                tr.append(tdSetor, celula(u.tem_pin ? 'Gerado' : 'Sem PIN'));
+                tr.append(tdSetor, celula(u.pode_pin ? (u.tem_pin ? 'Gerado' : 'Sem PIN') : '—'), tdConta(u));
+                if (u.ativo === false) tr.classList.add('linha-inativa');
 
-                // O Administrador vê só quem pode ter PIN; o dono vê a equipe toda e gera o dele e o dos supervisores.
-                if (EH_ADMIN || (EH_DONO && (u.id === EU || (u.papel !== 'dono' && u.papel !== 'admin' && u.supervisor_setor)))) {
+                // O Administrador e o dono veem a equipe toda; o PIN é só de quem pode ter (o dono, e o supervisor marcado).
+                // Conta inativa não recebe PIN nem setor: o Administrador reativa antes (ao voltar, não autoriza com o que tinha).
+                if (u.ativo !== false && ((EH_ADMIN && u.pode_pin) || (EH_DONO && (u.id === EU || (u.papel !== 'dono' && u.papel !== 'admin' && u.supervisor_setor))))) {
                     acoes.append(botao('Gerar novo PIN', 'Gerar novo PIN para ' + u.nome, '', () => abrirGerar(u)));
                     if (u.tem_pin) {
                         acoes.append(botao('Revogar PIN', 'Revogar o PIN de ' + u.nome, 'btn-danger', async (revogar) => {

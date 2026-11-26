@@ -49,7 +49,7 @@ await page.route('**/agente/*', async (route) => {
         await route.fulfill({ status: failed.status || 422, json: { tipo: 'erro', codigo: failed.code || 'AI_VALIDATION_ERROR', mensagem: 'Falha simulada', ...(failed.formulario ? { formulario: failed.formulario } : {}) } }); return;
     }
     const responses = { comando: commandResponse, formulario: formProposal, editar: { tipo: 'rascunho', proposta: proposal.proposta },
-        revisar: { tipo: 'revisada', token: nextToken, ...(reviewWithoutForm ? {} : { formulario: { ...formProposal.formulario, avisos: ['Revisão validada pelo servidor'] } }) },
+        revisar: { tipo: 'revisada', token: nextToken, segurar: false, ...(reviewWithoutForm ? {} : { formulario: { ...formProposal.formulario, avisos: ['Revisão validada pelo servidor'] } }) },
         confirmar: { tipo: 'resultado_escrita', mensagem: 'Cliente cadastrado.' }, cancelar: { tipo: 'cancelado', mensagem: 'Cancelado. Nada foi gravado.' } };
     await route.fulfill({ json: responses[action] });
 });
@@ -145,7 +145,7 @@ try {
     await card().getByRole('button', { name: 'Revisar', exact: true }).click();
     assert.equal(calls.length, beforeInvalid, 'required field prevents review');
     assert.equal(await card().getByRole('button', { name: 'Confirmar', exact: true }).isDisabled(), true);
-    await card().getByLabel('Nome (obrigatório)', { exact: true }).fill('Nome preenchido');
+    await card().getByLabel('Nome *obrigatório', { exact: true }).fill('Nome preenchido');
     await card().getByLabel('E-mail', { exact: true }).fill('invalido');
     await card().getByRole('button', { name: 'Revisar', exact: true }).click();
     assert.equal(calls.length, beforeInvalid, 'invalid email prevents review');
@@ -159,21 +159,21 @@ try {
     assert.equal(calls.at(-1).body.valores.cliente_id, '');
     assert.equal('documento' in calls.at(-1).body.valores, false);
     assert.equal(await card().getByLabel('Valor', { exact: true }).inputValue(), '4.567,89');
-    assert.equal(await card().getByLabel('Nome (obrigatório)', { exact: true }).inputValue(), 'Nome preenchido');
+    assert.equal(await card().getByLabel('Nome *obrigatório', { exact: true }).inputValue(), 'Nome preenchido');
     assert.equal(await card().getByLabel('Valor', { exact: true }).getAttribute('aria-invalid'), 'true');
     await card().getByLabel('Valor', { exact: true }).fill('4567.89');
     reviewWithoutForm = true;
     await action('Revisar', 'revisar');
     assert.equal(await card().getByLabel('Valor', { exact: true }).getAttribute('aria-invalid'), null);
-    assert.equal(await card().getByLabel('Nome (obrigatório)', { exact: true }).isDisabled(), true);
+    assert.equal(await card().getByLabel('Nome *obrigatório', { exact: true }).isDisabled(), true);
     failure = { action: 'editar', status: 503 }; await action('Editar', 'editar');
     assert.deepEqual(calls.at(-1).body, { token });
     assert.equal(await card().getByRole('button', { name: 'Confirmar', exact: true }).isDisabled(), true);
-    assert.equal(await card().getByLabel('Nome (obrigatório)', { exact: true }).isDisabled(), true);
+    assert.equal(await card().getByLabel('Nome *obrigatório', { exact: true }).isDisabled(), true);
     await action('Editar', 'editar');
-    assert.equal(await card().getByLabel('Nome (obrigatório)', { exact: true }).isEnabled(), true);
+    assert.equal(await card().getByLabel('Nome *obrigatório', { exact: true }).isEnabled(), true);
     assert.match(await page.locator('#historico .msg--agente').last().innerText(), /nova revisão/);
-    await card().getByLabel('Nome (obrigatório)', { exact: true }).fill('Nome editado');
+    await card().getByLabel('Nome *obrigatório', { exact: true }).fill('Nome editado');
     nextToken = '33333333-3333-4333-8333-333333333333';
     const confirmations = calls.filter((c) => c.action === 'confirmar').length;
     await action('Revisar', 'revisar');
@@ -263,7 +263,7 @@ try {
     await until(async () => await calendar().getByRole('button', { name: '10:00 · 1 vaga(s)', exact: true }).count() > 0);
     assert.equal(availabilityCalls.at(-1).ignorar, '17');
     assert.equal(availabilityCalls.at(-1).profissional, '8');
-    await card().getByLabel('Serviço (obrigatório)', { exact: true }).selectOption('21');
+    await card().getByLabel('Serviço *obrigatório', { exact: true }).selectOption('21');
     await slotsReady();
     assert.equal(availabilityCalls.at(-1).servico, '21');
     assert.equal(availabilityCalls.at(-1).profissional, undefined);
