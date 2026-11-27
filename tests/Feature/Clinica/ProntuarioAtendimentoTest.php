@@ -47,6 +47,30 @@ class ProntuarioAtendimentoTest extends TestCase
         $this->assertSame(1, Prontuario::count());
     }
 
+    public function test_papeis_barrados_nao_atualizam_assinam_nem_adendam_nem_o_admin_da_clinica(): void
+    {
+        $vet = $this->usuarioClinica('veterinario');
+        $pet = $this->pet();
+        $this->actingAs($vet);
+        $id = $this->abrir($pet->id);
+        $this->postJson('/prontuarios/'.$id.'/assinar', ['crmv' => $vet->crmv, 'senha' => 'password'])->assertOk();
+        $aberto = $this->prontuarioDireto($pet, $vet);
+        $antes = $aberto->fresh()->conduta;
+
+        foreach (['admin', 'recepcao', 'atendente', 'vendedor'] as $papel) {
+            $u = $this->usuarioClinica($papel);
+            $this->actingAs($u);
+            $this->postJson('/prontuarios/'.$aberto->id, $this->corpo(['conduta' => 'Invasão']))->assertForbidden();
+            $this->postJson('/prontuarios/'.$aberto->id.'/assinar', ['crmv' => 'CRMV-SP 10001', 'senha' => 'password'])->assertForbidden();
+            $this->postJson('/prontuarios/'.$id.'/adendos', ['texto' => 'Invasão', 'crmv' => 'CRMV-SP 10001', 'senha' => 'password'])->assertForbidden();
+            $this->get('/prontuarios/'.$id)->assertForbidden();
+        }
+
+        $this->assertSame($antes, $aberto->fresh()->conduta);
+        $this->assertFalse($aberto->fresh()->estaAssinado());
+        $this->assertSame(0, \App\Models\ProntuarioAdendo::count());
+    }
+
     public function test_fluxo_abrir_editar_assinar_e_adendar_com_auditoria_sem_texto_clinico(): void
     {
         config(['sentinel.front' => 'react']);
@@ -112,6 +136,13 @@ class ProntuarioAtendimentoTest extends TestCase
         $this->postJson('/prontuarios/'.$id, $this->corpo())->assertNotFound();
         $this->postJson('/prontuarios/'.$id.'/assinar', ['crmv' => $outro->crmv, 'senha' => 'password'])->assertNotFound();
         $this->get('/pets/'.$pet->id)->assertInertia(fn ($x) => $x->count('prontuarios', 0));
+
+        // Rascunho alheio e id inexistente respondem IGUAL (mesmo corpo): o vet não descobre que o id existe.
+        $alheio = $this->postJson('/prontuarios/'.$id, $this->corpo());
+        $inexistente = $this->postJson('/prontuarios/999999', $this->corpo());
+        // (Só a mensagem: com APP_DEBUG ligado nos testes o corpo traz o trace, que muda de linha.)
+        $this->assertSame('Prontuário não encontrado.', $inexistente->json('message'));
+        $this->assertSame($inexistente->json('message'), $alheio->json('message'));
 
         // O dono lê o rascunho alheio, mas não o edita nem assina.
         $this->actingAs($dono);

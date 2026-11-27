@@ -244,9 +244,10 @@ class ProntuarioController extends Controller
     /** Rascunho de outro veterinário só o dono vê; o veterinário vê os assinados e os próprios. Fora disso (ou outro tenant): 404. */
     private function visivel(int $id, int $tenant): Prontuario
     {
-        $p = Prontuario::query()->where('tenant_id', $tenant)->with(['veterinario:id,name', 'adendos' => fn ($q) => $q->orderBy('assinado_em')->orderBy('id')])->findOrFail($id);
-        if ($this->contexto->papel() !== 'dono' && ! $p->estaAssinado() && $p->veterinario_id !== $this->usuarioId()) {
-            abort(404);
+        // Mesma resposta (404 com a mesma mensagem) para inexistente, de outro tenant ou rascunho alheio: não revela qual.
+        $p = Prontuario::query()->where('tenant_id', $tenant)->with(['veterinario:id,name', 'adendos' => fn ($q) => $q->orderBy('assinado_em')->orderBy('id')])->find($id);
+        if ($p === null || ($this->contexto->papel() !== 'dono' && ! $p->estaAssinado() && $p->veterinario_id !== $this->usuarioId())) {
+            abort(404, 'Prontuário não encontrado.');
         }
 
         return $p;
