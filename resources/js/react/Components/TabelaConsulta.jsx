@@ -20,6 +20,9 @@ const textoCelula = (valor) => valor == null ? '' : typeof valor === 'object' ? 
 // Texto de cada ação em lote, pela URL que o servidor manda em `selecao`. Ação nova = uma linha aqui.
 const ACOES_EM_LOTE = {
     '/agente/agenda/cancelar-lote': { verbo: 'cancelar', singular: 'agendamento', plural: 'agendamentos', botao: 'Cancelar', feito: 'cancelado' },
+    // 26/11: remarcar em lote (o servidor propõe o novo horário de cada linha; "novo_horario" é uma coluna da tabela). Não é destrutivo: botão
+    // primário e a linha não fica riscada.
+    '/agente/agenda/remarcar-lote': { verbo: 'remarcar', singular: 'agendamento', plural: 'agendamentos', botao: 'Remarcar', feito: 'remarcado', variante: 'primario', semRisco: true },
 };
 const INCERTO = 'Não consegui confirmar o resultado. A ação pode ter sido processada; confira a situação antes de tentar de novo.';
 const SOLTOU_CEDO ='Você soltou antes da hora, então não fiz nada. Se quiser, é só segurar de novo.';
@@ -121,7 +124,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
     const classeLinha = (linha) => [
         destacar.includes(linha.id) ? 'linha-destaque' : '',
         linha.destaque === 'aviso' || motivos[String(linha.id)] ? 'linha--aviso' : '',
-        selecao && feitos.has(linha.id) ? 'linha-cancelada' : '',
+        selecao && feitos.has(linha.id) && !acao.semRisco ? 'linha-cancelada' : '',
         selecao && linha.bloqueado === true ? 'linha-bloqueada' : '',
     ].filter(Boolean).join(' ') || undefined;
     const quantos = (q) => `${q} ${q === 1 ? acao.singular : acao.plural}`;
@@ -168,7 +171,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
                         aoSoltarCedo={() => setToast({ tipo: 'atencao', texto: SOLTOU_CEDO })} />
                     : <>
                         <span className="selecao-barra__conta" role="status">{n} {n === 1 ? 'selecionado' : 'selecionados'}</span>
-                        <Botao variante="perigo" disabled={ocupado || enviando} onClick={() => mostrarPergunta(true)}>{acao.botao} {acao.plural}</Botao>
+                        <Botao variante={acao.variante ?? 'perigo'} disabled={ocupado || enviando} onClick={() => mostrarPergunta(true)}>{acao.botao} {acao.plural}</Botao>
                     </>}
             </div>}
             {typeof consulta.exportar === 'string' && consulta.exportar && <ExportarConsulta consulta={consulta.exportar} ocupado={ocupado} adicionar={adicionar} />}

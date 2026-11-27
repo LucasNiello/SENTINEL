@@ -70,4 +70,57 @@ class AgendaLoteController extends Controller
             default => 200,
         });
     }
+
+    /**
+     * Remarcar em lote (26/11): grava SÓ os ids marcados, cada um no horário que o servidor propôs e guardou na lista (nunca um
+     * horário do navegador), e só se estavam na lista de remarcar que ESTE usuário acabou de ver. Tudo ou nada entre os marcados.
+     */
+    public function remarcar(Request $request): JsonResponse
+    {
+        $validador = Validator::make($request->all(), [
+            'ids' => 'required|array|min:1|max:'.AgendaService::LIMITE_REMARCAR_EM_LOTE,
+            'ids.*' => 'required|integer|min:1|distinct',
+        ]);
+
+        if ($validador->fails()) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_VALIDATION_ERROR', 'http_status' => 422,
+                'mensagem' => 'Marque ao menos um agendamento (até '.AgendaService::LIMITE_REMARCAR_EM_LOTE.') para remarcar.'], 422);
+        }
+
+        $ids = array_map('intval', $validador->validated()['ids']);
+        $lista = $this->conversa->lerLista($request->session(), paraEnvioDoLote: true);
+
+        if ($lista === null || ($lista['selecionavel'] ?? null) !== 'remarcar_agendamentos_em_lote') {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_BATCH_LIST_EXPIRED', 'http_status' => 422,
+                'mensagem' => 'Essa lista não vale mais. Peça de novo e marque os agendamentos.'], 422);
+        }
+        $doPlano = array_map('intval', array_filter($lista['linhas'] ?? [], 'is_int'));
+        $novos = array_map('strval', (array) ($lista['novos'] ?? []));
+        // Só dá para remarcar o que estava na lista E tinha horário proposto (linha bloqueada nunca tem).
+        if (array_diff($ids, $doPlano) !== [] || array_diff($ids, array_map('intval', array_keys($novos))) !== []) {
+            return response()->json(['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_BATCH_IDS_NOT_LISTED', 'http_status' => 422,
+                'mensagem' => 'Só dá para remarcar agendamentos que estavam na lista e tinham um horário proposto. Peça de novo.'], 422);
+        }
+
+        try {
+            $resposta = $this->agente->remarcarAgendamentosEmLote($ids, array_map('strval', (array) ($lista['versoes'] ?? [])), $novos, $doPlano);
+        } catch (\Illuminate\Auth\AuthenticationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $resposta = $this->agente->erroTecnicoTool($e);
+        }
+
+        if (($resposta['tipo'] ?? null) === 'resultado_escrita') {
+            $this->conversa->esquecerLista($request->session());
+            $this->conversa->encerrarSelecao($request->session(), $ids);
+            $n = count($ids);
+            $this->conversa->registrarResultado($request->session(), $resposta['mensagem'], null, $n === 1 ? 'Remarcar 1 agendamento' : "Remarcar {$n} agendamentos");
+        }
+
+        return response()->json($resposta, $resposta['http_status'] ?? match ($resposta['tipo'] ?? null) {
+            'negado' => 403,
+            'erro' => 422,
+            default => 200,
+        });
+    }
 }

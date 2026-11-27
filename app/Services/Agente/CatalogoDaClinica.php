@@ -395,6 +395,49 @@ trait CatalogoDaClinica
                 mensagemErro: 'Não consegui montar a lista agora. Tente novamente.',
                 colunas: ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'status', 'observacao'],
             ),
+            // Remarcar vários agendamentos (26/11, decisão do Lucas): MESMO desenho do cancelar em lote. A tool só MONTA o plano (o servidor
+            // propõe o novo horário de cada um, simulando a grade de verdade, sem gravar); o usuário revisa, marca quais remarcar e segura
+            // 2 s. Quem grava é /agente/agenda/remarcar-lote, com os horários CONGELADOS aqui, tudo ou nada entre os marcados.
+            $this->definirTool(
+                nome: 'remarcar_agendamentos_em_lote',
+                descricao: 'Para remarcar VÁRIOS agendamentos de uma vez ("dia 27 estaremos fechados, remarque todos", "passe os de amanhã para o próximo horário livre"): o servidor propõe o novo horário de cada um e mostra a lista com caixas de seleção; o usuário revisa, marca e confirma. Nada é remarcado por esta tool. Os agendamentos de origem: dia (um dia só) ou data_inicio/data_fim (AAAA-MM-DD; padrão hoje até 6 dias depois), com filtros opcionais de setor, tutor, pet e profissional. modo: "mesmo_horario" (padrão: mesmo horário e profissional, o primeiro dia em que todos cabem) ou "proximo_livre" (cada um vai, por ordem de horário, para o primeiro horário livre do mesmo profissional; use quando o usuário disser que os clientes não aceitam o outro dia, ou pedir "o próximo horário disponível"). para_o_dia: só se o usuário disser o dia de destino. a_partir_de: só se o usuário disser "a partir de segunda". NUNCA invente datas: use o que o usuário disse, e deixe o servidor achar o dia. Para remarcar um só, use remarcar_agendamento. Ação de leitura: a confirmação é do usuário, marcando e segurando o botão.',
+                tipo: 'leitura',
+                risco: 'leitura',
+                acao: 'consultar',
+                entidade: 'Agendamento',
+                papeis: self::PAPEIS_DA_AGENDA,
+                propriedades: [
+                    'dia' => ['type' => 'string', 'format' => 'date', 'description' => 'O dia dos agendamentos a remarcar (AAAA-MM-DD): "dia 27 estaremos fechados". Vale no lugar de data_inicio/data_fim.'],
+                    'data_inicio' => ['type' => 'string', 'format' => 'date'],
+                    'data_fim' => ['type' => 'string', 'format' => 'date'],
+                    'setor' => ['type' => 'string', 'enum' => CatalogoItem::SETORES],
+                    'tutor' => ['type' => 'string', 'description' => 'Nome do CLIENTE (tutor), se o usuário restringiu a um cliente.'],
+                    'pet' => ['type' => 'string', 'description' => 'Nome do pet/animal, se o usuário restringiu a um pet.'],
+                    'profissional' => ['type' => 'string', 'description' => 'Nome do veterinário ou atendente, se o usuário restringiu a um profissional.'],
+                    'modo' => ['type' => 'string', 'enum' => ['mesmo_horario', 'proximo_livre']],
+                    'para_o_dia' => ['type' => 'string', 'format' => 'date', 'description' => 'Só se o usuário disse o dia de destino (AAAA-MM-DD). Só vale no modo mesmo_horario e quando os agendamentos são de um único dia.'],
+                    'a_partir_de' => ['type' => 'string', 'format' => 'date', 'description' => 'Só se o usuário disse "a partir de" um dia (AAAA-MM-DD): a busca de vaga começa nele.'],
+                ],
+                obrigatorios: [],
+                executar: function (array $a) use ($agenda) {
+                    try {
+                        $linhas = $agenda->planoParaRemarcarEmLote($a['dia'] ?? $a['data_inicio'] ?? null, $a['dia'] ?? $a['data_fim'] ?? null, $this->setorDaAgendaPedido($a['setor'] ?? null),
+                            is_string($a['pet'] ?? null) ? $a['pet'] : null, is_string($a['tutor'] ?? null) ? $a['tutor'] : null, is_string($a['profissional'] ?? null) ? $a['profissional'] : null,
+                            is_string($a['modo'] ?? null) && $a['modo'] !== '' ? $a['modo'] : 'mesmo_horario', is_string($a['para_o_dia'] ?? null) ? $a['para_o_dia'] : null,
+                            is_string($a['a_partir_de'] ?? null) ? $a['a_partir_de'] : null, $this->setoresDaAgenda(), (int) $a['tenant_id']);
+                    } catch (\App\Exceptions\RegraDeNegocioException $e) {
+                        throw new \App\Exceptions\ToolRecusadaException($e->getMessage());
+                    }
+
+                    if ($linhas === []) {
+                        throw new \App\Exceptions\ToolRecusadaException('Não encontrei nenhum agendamento em aberto com esses filtros, então não há nada para remarcar. Quer tentar outro período, cliente, animal ou profissional?');
+                    }
+
+                    return $linhas;
+                },
+                mensagemErro: 'Não consegui montar o plano de remarcação agora. Tente novamente.',
+                colunas: ['id', 'horario', 'pet', 'tutor', 'servico', 'profissional', 'novo_horario', 'observacao'],
+            ),
             $this->definirAcao(
                 nome: 'alterar_status_agendamento',
                 descricao: 'Muda o status de um agendamento em aberto (agendado ou confirmado) para confirmado, realizado, cancelado ou faltou. Achado pelo id ou pelo nome do pet.',

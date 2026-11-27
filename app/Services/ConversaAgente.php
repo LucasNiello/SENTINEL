@@ -125,6 +125,8 @@ class ConversaAgente
             'selecionavel' => $lista['selecionavel'] ?? null,
             // A "versão" (updated_at) de cada linha NO MOMENTO em que o usuário a viu: a gravação recusa o que mudou depois.
             'versoes' => $lista['versoes'] ?? [],
+            // 26/11: remarcar em lote: o horário proposto de cada linha (id → AAAA-MM-DD HH:MM), congelado pelo servidor.
+            'novos' => $lista['novos'] ?? [],
         ]);
     }
 
@@ -158,7 +160,7 @@ class ConversaAgente
             return null;
         }
 
-        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? [], 'selecionavel' => $selecionavel, 'versoes' => $lista['versoes'] ?? []];
+        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? [], 'selecionavel' => $selecionavel, 'versoes' => $lista['versoes'] ?? [], 'novos' => $lista['novos'] ?? []];
     }
 
     /** Uma tabela com checkboxes só vale para UM envio: depois de gravar, some (reenviar o mesmo pedido não cancela de novo). */

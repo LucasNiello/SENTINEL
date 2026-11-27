@@ -90,6 +90,7 @@ Route::middleware(['auth', GarantirContaAtiva::class])->group(function () {
         Route::post('/agente/nova', [AgenteController::class, 'nova'])->middleware('throttle:agente-sem-ia');
         // 25/11: cancelar agendamentos em lote, só com os ids MARCADOS numa lista que o usuário viu (nunca às cegas).
         Route::post('/agente/agenda/cancelar-lote', [AgendaLoteController::class, 'cancelar'])->middleware('throttle:agente-sem-ia');
+        Route::post('/agente/agenda/remarcar-lote', [AgendaLoteController::class, 'remarcar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/editar', [AgenteController::class, 'editar'])->middleware('throttle:agente-sem-ia');
         Route::post('/agente/formulario', [AgenteController::class, 'formulario'])->middleware('throttle:agente-sem-ia');
         // B2 (RF05/RNF05): modo manual, lista e busca sem IA.

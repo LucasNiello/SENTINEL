@@ -12,3 +12,10 @@
 ## Atendimento do prontuário fora do motor do agente (aprovado pelo Lucas em 26/11)
 - Rotas `/prontuarios` em `ProntuarioController`; o agente continua sem tool de prontuário (`AgenteSemProntuarioTest`). Assinar e adendar: CRMV + senha + segurar 2 s.
 - Revisão (2ª passada, 26/11): campos travados com o painel de assinatura aberto; 404 com a mesma mensagem para inexistente, de outro tenant ou rascunho alheio.
+
+## Remarcar em lote (26/11, decisão do Lucas)
+- **Decidi:** tool `remarcar_agendamentos_em_lote` (leitura) + `POST /agente/agenda/remarcar-lote`, no desenho do cancelar em lote: o servidor monta o plano (simulação da grade numa transação desfeita), o usuário marca (caixas), segura 2 s, e só os marcados gravam, nos horários congelados na sessão, tudo ou nada, auditoria por item com o mesmo `lote_id`. Depois o servidor confere quem do pedido ficou para trás.
+- **Dois modos:** `mesmo_horario` (primeiro dia em que todos cabem; se nenhum, o que acomoda mais, o resto bloqueado com o motivo) e `proximo_livre` (por ordem de horário, mesmo profissional, cada um ocupa a vaga do seguinte).
+- **Descartei:** vários cards individuais abertos (oito confirmações); gravar parcialmente o que passa (estado que o usuário não revisou); escolher o horário por linha no card (fica para depois: a linha em conflito vem bloqueada e se remarca à parte).
+- **Fora do lote:** cirurgia e internação (CRMV + senha, um a um).
+- **Testes:** só `RemarcarEmLoteTest` e `CancelarEmLoteTest` (40/40). Sem suíte completa e sem passadas do reviewer (economia de uso até o reset de sábado); pendentes antes de enviar para a main.
