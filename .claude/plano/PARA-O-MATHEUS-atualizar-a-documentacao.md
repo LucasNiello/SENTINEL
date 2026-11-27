@@ -31,3 +31,25 @@ Também continuam só planejados: a ficha em abas completa, as despesas proporci
 3. Quais papéis arquivam pet, e `arquivar_pet` segura 2 s?
 4. A Administração continua "só PINs"? (depende dos bloqueios de agenda.)
 5. O link "Clientes" saiu do menu e o Cadastros ficou como tela única de tutores e pets: documentar assim?
+
+---
+
+# PARTE 2 (opcional) — adiantar o código da cobrança completa
+
+**Só depois da documentação** (a documentação é o que a banca lê; o código abaixo é um extra). O Lucas faz o que sobrar no sábado à noite (28/11). O roteiro completo, com arquivos, testes e critérios de "pronto", está em `.claude/plano/plano-2026-11-27-cobranca-completa.md` (seção "ROTEIRO DE EXECUÇÃO"). Leia-o inteiro antes de mexer.
+
+## O que dá para adiantar sem conflito
+- **Passo 1 — receber sem Revisar** (~30 min): acrescentar `receber_cobranca` e `cobrar_atendimento` à lista de `AiAgentService::confirmaEmUmPasso()`. Cancelar e estornar NÃO entram.
+- **Passo 2 — entrada de estoque** (~1 a 1,5 h): tool nova `dar_entrada_estoque` + ação na linha do produto em Cadastros → Catálogo. É independente do resto.
+
+## O que NÃO adiantar (fica para o Lucas, para não haver conflito de arquivo e de decisão)
+- **Passo 3** (editar a cobrança) e **Passo 4** (desconto geral): mexem em `CobrancaService`, migration e total da cobrança.
+- **Passo 5** (reviewer, suíte completa, documentos e commit): o Lucas faz no fim.
+
+## Como trabalhar para o Lucas conseguir juntar
+1. **Branch própria** (por exemplo `matheus-cobranca-p1p2`), saindo da última `migracao-react`/`main` do Lucas. Nada na branch dele.
+2. **Um passo por commit**, com a mensagem dizendo o passo ("passo 1: receber sem Revisar").
+3. **Só os testes dos arquivos tocados** (a suíte completa fica para o Lucas). Cada passo termina com testes verdes ou não entra; não deixe nenhum pela metade.
+4. As regras do `CLAUDE.md` valem para a IA: ela **não executa `git add`, `git commit` nem `git push`** (quem comita é você); testes pelo subagente `test-runner`; registrar decisões em `.claude/decisoes/AAAA-MM-DD.md`.
+5. Valores assumidos (o Lucas confirma no sábado): desconto de até 10% sem PIN; edição da cobrança por quem a registra no setor; "a receber" editável. **Isso só importa nos passos 3 e 4, que você não faz.**
+6. **Avise o Lucas por mensagem** quando terminar cada passo, com o nome da branch e o que os testes mostraram, para ele não refazer.
