@@ -53,6 +53,28 @@ class ConversaAgente
     {
         $sessao->forget(self::CHAVE);
         $sessao->forget(self::CHAVE_LISTA);
+        $sessao->forget(self::CHAVE_ULTIMO_LOTE);
+    }
+
+    private const CHAVE_ULTIMO_LOTE = 'agente_ultimo_lote';
+
+    /** 26/11: os ids do último lote REMARCADO por este usuário, para realçá-los nas consultas da agenda seguintes (só ids, por PRAZO_CONVERSA_S). */
+    public function guardarUltimoLote(Session $sessao, array $ids): void
+    {
+        $sessao->put(self::CHAVE_ULTIMO_LOTE, ['identidade' => $this->identidade(), 'em' => now()->getTimestamp(), 'ids' => array_values(array_map('intval', $ids))]);
+    }
+
+    /** @return int[] os ids do último lote remarcado (deste usuário e tenant, dentro do prazo da conversa); senão, vazio. */
+    public function lerUltimoLote(Session $sessao): array
+    {
+        $lote = $sessao->get(self::CHAVE_ULTIMO_LOTE);
+        if (! is_array($lote) || ($lote['identidade'] ?? null) !== $this->identidade() || now()->getTimestamp() - (int) ($lote['em'] ?? 0) > self::PRAZO_CONVERSA_S) {
+            $sessao->forget(self::CHAVE_ULTIMO_LOTE);
+
+            return [];
+        }
+
+        return array_map('intval', (array) ($lote['ids'] ?? []));
     }
 
     private function gravar(Session $sessao, array $mensagens): void

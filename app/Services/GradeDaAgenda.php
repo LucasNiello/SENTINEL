@@ -337,6 +337,12 @@ final class GradeDaAgenda
         return $dia->startOfDay()->setTime((int) $m[1], (int) $m[2]);
     }
 
+    /** 26/11: o funcionamento por extenso, para o agente explicar um dia sem expediente ("de segunda a sábado, das 08:00 às 18:00"). */
+    public function funcionamento(): string
+    {
+        return $this->expedientePorExtenso();
+    }
+
     /** "de segunda a sábado, das 08:00 às 18:00" */
     private function expedientePorExtenso(): string
     {

@@ -114,6 +114,7 @@ class AgendaLoteController extends Controller
             $this->conversa->esquecerLista($request->session());
             $this->conversa->encerrarSelecao($request->session(), $ids);
             $n = count($ids);
+            $this->conversa->guardarUltimoLote($request->session(), $ids); // as consultas da agenda seguintes realçam estes
             $this->conversa->registrarResultado($request->session(), $resposta['mensagem'], null, $n === 1 ? 'Remarcar 1 agendamento' : "Remarcar {$n} agendamentos");
         }
 

@@ -1086,6 +1086,18 @@ class AiAgentService
         $linhas = is_array($resposta['resultado'] ?? null) ? array_values($resposta['resultado']) : [];
         $filtros = \App\Services\AgendaService::sanearFiltros($filtros);
         $apresentacao = \App\Services\Agente\FraseDaAgenda::montar($linhas, $filtros);
+        // 26/11: busca de UM dia sem resultado e a clínica não abre nele (domingo, por ora): a frase diz o porquê, em vez de só "não encontrei".
+        if ($linhas === [] && ($dia = $filtros['dia'] ?? (($filtros['data_inicio'] ?? null) !== null && ($filtros['data_inicio'] ?? null) === ($filtros['data_fim'] ?? null) ? $filtros['data_inicio'] : null)) !== null) {
+            try {
+                $data = \Carbon\CarbonImmutable::createFromFormat('!Y-m-d', (string) $dia, (string) config('app.timezone'));
+                $grade = \App\Services\GradeDaAgenda::daConfiguracao($this->contexto->tenantId());
+                if ($data !== false && $grade->expediente($data) === null) {
+                    $apresentacao['frase'] = 'Não há agendamentos em '.$data->format('d/m/Y').' ('.$data->locale('pt_BR')->dayName.'): a clínica não abre nesse dia. Ela funciona '.$grade->funcionamento().'.';
+                }
+            } catch (\Throwable) {
+                // a explicação é um extra: sem ela, vale a frase de sempre
+            }
+        }
         $colunas = is_array($resposta['colunas'] ?? null) ? $resposta['colunas'] : [];
         foreach (['gravacao' => 'gravado_em', 'alteracao' => 'alterado_em'] as $tipo => $coluna) {
             if (($filtros['tipo_data'] ?? null) === $tipo || ($filtros['ordenar'] ?? null) === $tipo) {
@@ -2809,7 +2821,16 @@ class AiAgentService
 
         return ['tipo' => 'resultado_escrita', 'tool' => $tool, 'lote_id' => $loteId, 'remarcados' => $ids,
             'mensagem' => ($n === 1 ? 'Pronto, remarquei o agendamento que você marcou.' : 'Pronto, remarquei os '.$n.' agendamentos que você marcou.')
-                .' '.$this->conferenciaDoPedido($doPlano, $ids, $tenantId)];
+                .' '.$this->destinosDoLote($ids, $tenantId).' '.$this->conferenciaDoPedido($doPlano, $ids, $tenantId)];
+    }
+
+    /** Para onde cada remarcado foi (lido do banco, depois de gravar): "Remarcados: Pipoca para 28/11 13:00; Fred para 28/11 15:00." */
+    private function destinosDoLote(array $ids, int $tenantId): string
+    {
+        $linhas = \App\Models\Agendamento::query()->where('agendamentos.tenant_id', $tenantId)->whereIn('agendamentos.id', $ids)
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')->orderBy('agendamentos.inicio')->get(['agendamentos.inicio', 'pets.nome as pet']);
+
+        return $linhas->isEmpty() ? '' : 'Remarcados: '.$linhas->map(fn ($a) => $a->getAttribute('pet').' para '.$a->inicio->format('d/m H:i'))->implode('; ').'.';
     }
 
     /** Conferência feita pelo servidor (não pela IA) depois de remarcar: quem do plano continua em aberto no dia de origem. */

@@ -22,7 +22,7 @@ const ACOES_EM_LOTE = {
     '/agente/agenda/cancelar-lote': { verbo: 'cancelar', singular: 'agendamento', plural: 'agendamentos', botao: 'Cancelar', feito: 'cancelado' },
     // 26/11: remarcar em lote (o servidor propõe o novo horário de cada linha; "novo_horario" é uma coluna da tabela). Não é destrutivo: botão
     // primário e a linha não fica riscada.
-    '/agente/agenda/remarcar-lote': { verbo: 'remarcar', singular: 'agendamento', plural: 'agendamentos', botao: 'Remarcar', feito: 'remarcado', variante: 'primario', semRisco: true },
+    '/agente/agenda/remarcar-lote': { verbo: 'remarcar', singular: 'agendamento', plural: 'agendamentos', botao: 'Remarcar', feito: 'remarcado', variante: 'primario', semRisco: true, rotuloBotao: 'Remarcar selecionados' },
 };
 const INCERTO = 'Não consegui confirmar o resultado. A ação pode ter sido processada; confira a situação antes de tentar de novo.';
 const SOLTOU_CEDO ='Você soltou antes da hora, então não fiz nada. Se quiser, é só segurar de novo.';
@@ -43,6 +43,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
     const [enviando, setEnviando] = useState(false);
     const [feitos, setFeitos] = useState(() => new Set());
     const [motivos, setMotivos] = useState({});
+    const [final, setFinal] = useState(null); // a mensagem do servidor depois de gravar (fica na tela; o aviso passageiro some)
     const [toast, setToast] = useState(null);
     const montado = useRef(true);
     useEffect(() => () => { montado.current = false; }, []);
@@ -92,6 +93,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
             }
             if (resposta.ok && dados.tipo === 'resultado_escrita') {
                 setFeitos(new Set(ids));
+                setFinal(dados.mensagem || null);
                 setMarcados(new Set());
                 setPerguntando(false);
                 setToast({ tipo: 'sucesso', texto: dados.mensagem || 'Feito.' });
@@ -115,6 +117,8 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
 
     const celula = (linha, coluna) => {
         if (feitos.has(linha.id) && coluna === 'status') return acao.feito;
+        // Remarcar: a linha mostra o horário NOVO e "Remarcado" (senão a tabela parece não ter mudado).
+        if (acao?.semRisco && feitos.has(linha.id)) { if (coluna === 'horario') return linha.novo_horario; if (coluna === 'observacao') return 'Remarcado'; }
         if (coluna === 'observacao' && (feitos.has(linha.id) || motivos[String(linha.id)])) return motivos[String(linha.id)] ?? '';
         return textoCelula(linha[coluna]);
     };
@@ -131,7 +135,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
 
     return <>
         {consulta.mensagem && <div className="msg msg--agente"><span className="msg__speaker">Sentinel</span><span>{consulta.mensagem}</span></div>}
-        {!linhas.length ? <div className="msg msg--agente"><span className="msg__speaker">Sentinel</span><span>Nenhum registro encontrado.</span></div> : <>
+        {!linhas.length ? (consulta.mensagem ? null : <div className="msg msg--agente"><span className="msg__speaker">Sentinel</span><span>Nenhum registro encontrado.</span></div>) : <>
             <div className="tabela-resumo">{linhas.length} registro(s) encontrado(s)</div>
             <div ref={tabela} className="tabela-rolagem" tabIndex={0} role="region" aria-label="Resultado da consulta">
                 <table>
@@ -163,6 +167,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
                     })}</tbody>
                 </table>
             </div>
+            {selecao && concluido && final && <Aviso tipo="sucesso" role="status">{final}</Aviso>}
             {selecao && invalida && <Aviso tipo="atencao">Essa lista não vale mais. Peça de novo no chat e marque os agendamentos.</Aviso>}
             {selecao && !concluido && !invalida && n > 0 && <div ref={barra} tabIndex={-1} className="selecao-barra" role="region" aria-label="Ação com os marcados">
                 {perguntando
@@ -171,7 +176,7 @@ export default function TabelaConsulta({ consulta, ocupado, abrirFormulario, pre
                         aoSoltarCedo={() => setToast({ tipo: 'atencao', texto: SOLTOU_CEDO })} />
                     : <>
                         <span className="selecao-barra__conta" role="status">{n} {n === 1 ? 'selecionado' : 'selecionados'}</span>
-                        <Botao variante={acao.variante ?? 'perigo'} disabled={ocupado || enviando} onClick={() => mostrarPergunta(true)}>{acao.botao} {acao.plural}</Botao>
+                        <Botao variante={acao.variante ?? 'perigo'} disabled={ocupado || enviando} onClick={() => mostrarPergunta(true)}>{acao.rotuloBotao ?? `${acao.botao} ${acao.plural}`}</Botao>
                     </>}
             </div>}
             {typeof consulta.exportar === 'string' && consulta.exportar && <ExportarConsulta consulta={consulta.exportar} ocupado={ocupado} adicionar={adicionar} />}

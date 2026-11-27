@@ -123,6 +123,7 @@ class RemarcarEmLoteTest extends TestCase
         $this->assertSame('2026-11-12 10:00', $this->inicio($b));
         $this->assertSame('2026-11-11 11:00', $this->inicio($c), 'o que não foi marcado fica onde estava');
         $this->assertStringContainsString('ficaram 1 sem remarcar', $resposta->json('mensagem'), 'a conferência aponta quem ficou para trás');
+        $this->assertStringContainsString('Remarcados: Thor para 12/11 09:00; Thor para 12/11 10:00.', $resposta->json('mensagem'), 'diz para onde cada um foi');
 
         $linhas = AuditLog::where('tool', 'remarcar_agendamento')->where('resultado', 'sucesso')->get();
         $this->assertCount(2, $linhas, 'uma linha de auditoria por item');
@@ -189,6 +190,36 @@ class RemarcarEmLoteTest extends TestCase
         $this->assertStringContainsString('um a um', $linha['observacao']);
         $this->remarcar([$c->id])->assertStatus(422)->assertJsonPath('codigo', 'AI_BATCH_IDS_NOT_LISTED');
         $this->assertSame('2026-11-11 09:00', $this->inicio($c));
+    }
+
+    public function test_consulta_do_dia_de_destino_realca_so_os_do_ultimo_lote_remarcado(): void
+    {
+        $a = $this->marcar('2026-11-11', '09:00');
+        $b = $this->marcar('2026-11-11', '10:00');
+        $antigo = $this->marcar('2026-11-12', '14:00', null, $this->usuarioClinica('atendente'));
+        $this->plano();
+        $this->remarcar([$a->id, $b->id])->assertOk();
+
+        $consulta = $this->comando('consultar_agenda', ['dia' => '2026-11-12'])->assertOk();
+
+        $this->assertEqualsCanonicalizing([$a->id, $b->id], $consulta->json('destacar'), 'só os remarcados brilham, não o que já estava lá');
+        $this->assertNotContains($antigo->id, $consulta->json('destacar'));
+        $this->assertStringContainsString('Os 2 realçados foram remarcados por você há pouco', $consulta->json('frase'));
+
+        // Uma consulta que não inclui nenhum deles não muda.
+        $outra = $this->comando('consultar_agenda', ['dia' => '2026-11-16'])->assertOk();
+        $this->assertStringNotContainsString('remarcados por você', (string) $outra->json('frase'));
+    }
+
+    public function test_consulta_vazia_num_dia_sem_expediente_diz_o_porque(): void
+    {
+        $domingo = $this->comando('consultar_agenda', ['dia' => '2026-11-15'])->assertOk()->json('frase');
+        $this->assertStringContainsString('a clínica não abre nesse dia', $domingo);
+        $this->assertStringContainsString('domingo', $domingo);
+        $this->assertStringContainsString('de segunda a sábado', $domingo);
+
+        $util = $this->comando('consultar_agenda', ['dia' => '2026-11-16'])->assertOk()->json('frase');
+        $this->assertStringNotContainsString('não abre', $util, 'dia útil vazio mantém a frase de sempre');
     }
 
     public function test_papel_sem_acesso_a_agenda_e_negado(): void
