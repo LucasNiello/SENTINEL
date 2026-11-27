@@ -28,5 +28,6 @@ class DatabaseSeeder extends Seeder
         }
 
         $this->call(ClinicaSeeder::class);
+        $this->call(MovimentoDemoSeeder::class); // 26/11: agenda, atendimentos e vendas de novembro e dezembro (aditivo)
     }
 }

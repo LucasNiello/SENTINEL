@@ -118,7 +118,8 @@ class ClinicaSeederTest extends TestCase
     {
         // 17/11: um único tenant. O DatabaseSeeder chama só o ClinicaSeeder e é o único outro seeder da pasta.
         $this->assertStringContainsString('ClinicaSeeder::class', file_get_contents(database_path('seeders/DatabaseSeeder.php')));
-        $this->assertEqualsCanonicalizing(['ClinicaSeeder.php', 'DatabaseSeeder.php'], array_map('basename', glob(database_path('seeders/*.php'))));
+        // 26/11: o MovimentoDemoSeeder (aditivo, mesmo tenant) enche novembro e dezembro; prova em MovimentoDemoSeederTest.
+        $this->assertEqualsCanonicalizing(['ClinicaSeeder.php', 'DatabaseSeeder.php', 'MovimentoDemoSeeder.php'], array_map('basename', glob(database_path('seeders/*.php'))));
         $this->assertSame([self::T], User::query()->distinct()->pluck('tenant_id')->map(fn ($t) => (int) $t)->all());
     }
 
