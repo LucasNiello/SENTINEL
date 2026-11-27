@@ -532,3 +532,6 @@ html[data-tema] .prontuario > details > summary {display: flex; flex-wrap: wrap;
 html[data-tema] .prontuario > details > summary::-webkit-details-marker {display: none}
 html[data-tema] .prontuario > details[open] > summary {margin-bottom: 12px}
 @media (prefers-reduced-motion: reduce) {html[data-tema] .secao > summary::before, html[data-tema] .prontuario > details > summary::before {transition: none}}
+
+/* 27/11: a linha da lista que abriu o card (Receber, Cancelar...) fica realçada enquanto o card está aberto. */
+html[data-tema] tr.linha-em-edicao {outline: 2px solid var(--cor-marca-forte); outline-offset: -2px; background: color-mix(in srgb, var(--cor-marca-forte) 12%, transparent)}
