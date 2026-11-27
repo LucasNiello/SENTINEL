@@ -1052,6 +1052,205 @@ class AgendaService
         ];
     }
 
+    public const LIMITE_REMARCAR_EM_LOTE = 25;
+
+    /** Até quantos dias à frente a remarcação em lote procura vaga. */
+    private const DIAS_DE_BUSCA_NO_LOTE = 30;
+
+    /**
+     * Remarcar em lote (26/11, decisão do Lucas): o PLANO, nada é gravado. Os agendamentos em aberto que casam com o filtro, cada um
+     * com o novo horário que o servidor propõe. Dois modos:
+     * - "mesmo_horario": mesmo horário e mesmo profissional, todos deslocados pelo mesmo número de dias: o primeiro dia (a partir do
+     *   dia seguinte, ou de $aPartirDe) em que TODOS cabem; se nenhum couber, o dia que acomoda mais (o resto vem bloqueado, com o motivo).
+     *   $diaDestino fixa o dia (só quando os agendamentos são de um único dia).
+     * - "proximo_livre" (exploratório): por ordem de horário, cada um vai para o primeiro horário livre do mesmo profissional, e o
+     *   seguinte já enxerga o que o anterior ocupou.
+     * A simulação roda numa transação DESFEITA no fim (como a prévia da venda): usa as regras reais da grade, e nada fica gravado.
+     * Cada linha traz "bloqueado" (sem horário, com o motivo em "observacao"), "novo_inicio" e "versao" (só para o servidor guardar).
+     *
+     * @param  string[]  $setoresDoPapel
+     * @return array<int, array<string, mixed>>
+     */
+    public function planoParaRemarcarEmLote(?string $de, ?string $ate, ?string $setor, ?string $petNome, ?string $tutorNome, ?string $profissionalNome,
+        string $modo, ?string $diaDestino, ?string $aPartirDe, array $setoresDoPapel, int $tenantId): array
+    {
+        if (! in_array($modo, ['mesmo_horario', 'proximo_livre'], true)) {
+            throw new RegraDeNegocioException('O modo da remarcação deve ser "mesmo_horario" ou "proximo_livre".');
+        }
+        foreach (['de destino' => $diaDestino, 'a partir de' => $aPartirDe] as $qual => $dia) {
+            if (is_string($dia) && trim($dia) !== '' && $this->dia(trim($dia)) === null) {
+                throw new RegraDeNegocioException("A data {$qual} deve estar no formato AAAA-MM-DD (ex.: 2026-11-28).");
+            }
+        }
+        $diaDestino = is_string($diaDestino) && trim($diaDestino) !== '' ? trim($diaDestino) : null;
+        $aPartirDe = is_string($aPartirDe) && trim($aPartirDe) !== '' ? trim($aPartirDe) : null;
+
+        $achados = $this->buscarPorFiltro($de, $ate, $setor, null, null, null, $tenantId, $petNome, $tutorNome, $profissionalNome);
+        if ($achados->count() >= self::LIMITE_DA_CONSULTA) {
+            throw new RegraDeNegocioException('Achei agendamentos demais para listar de uma vez. Pode restringir por período, cliente, animal ou profissional?');
+        }
+        $itens = $achados
+            ->filter(fn (Agendamento $a) => array_key_exists((string) $a->status, self::TRANSICOES) && in_array((string) $a->setor, $setoresDoPapel, true))
+            ->values();
+        if ($itens->count() > self::LIMITE_REMARCAR_EM_LOTE) {
+            throw new RegraDeNegocioException('Achei mais de '.self::LIMITE_REMARCAR_EM_LOTE.' agendamentos em aberto: são muitos para remarcar de uma vez. Pode restringir por dia, cliente, animal ou profissional?');
+        }
+        if ($itens->isEmpty()) {
+            return [];
+        }
+
+        $fuso = (string) config('app.timezone');
+        // Cirurgia e internação (CRMV + senha, um a um) ficam fora do lote, com o motivo na linha.
+        $bloqueios = [];
+        foreach ($itens as $a) {
+            if ($this->exigeCrmv((int) $a->id, null, $tenantId)) {
+                $bloqueios[(int) $a->id] = 'Cirurgia ou internação: remarque um a um (exige CRMV e senha).';
+            }
+        }
+        $remarcaveis = $itens->reject(fn (Agendamento $a) => isset($bloqueios[(int) $a->id]))->values();
+
+        // Tudo numa transação desfeita no fim: as remarcações simuladas ocupam vaga para as seguintes, e nada fica gravado.
+        DB::beginTransaction();
+        try {
+            $resultado = $modo === 'proximo_livre'
+                ? $this->planoDoProximoLivre($remarcaveis, $aPartirDe, $setoresDoPapel, $tenantId, $fuso)
+                : $this->planoDoMesmoHorario($remarcaveis, $diaDestino, $aPartirDe, $tenantId, $fuso);
+        } finally {
+            DB::rollBack();
+        }
+
+        return $itens->map(function (Agendamento $a) use ($resultado, $bloqueios) {
+            $r = $resultado[(int) $a->id] ?? ['ok' => false, 'motivo' => $bloqueios[(int) $a->id] ?? 'Sem horário para este agendamento.'];
+
+            return [
+                'id' => (int) $a->id,
+                'horario' => $a->inicio->format('d/m/Y H:i').'–'.$a->fim->format('H:i'),
+                'pet' => $a->getAttribute('pet'),
+                'tutor' => $a->getAttribute('tutor'),
+                'servico' => $a->getAttribute('servico'),
+                'profissional' => $a->getAttribute('profissional'),
+                'setor' => $a->setor,
+                'status' => $a->status,
+                'novo_horario' => $r['ok'] ? $r['inicio']->format('d/m/Y H:i').'–'.$r['fim']->format('H:i') : '—',
+                'observacao' => $r['ok'] ? '' : (string) $r['motivo'],
+                'bloqueado' => ! $r['ok'],
+                // Só para o servidor guardar (o navegador não recebe): o horário PROPOSTO e a versão de quando o usuário viu a linha.
+                'novo_inicio' => $r['ok'] ? $r['inicio']->format('Y-m-d H:i') : null,
+                'versao' => (string) $a->getRawOriginal('updated_at'),
+            ];
+        })->all();
+    }
+
+    /**
+     * Tenta remarcar (de verdade, dentro da transação desfeita do plano) e diz se coube. Recusa de regra = a frase, nunca erro.
+     *
+     * @return array{ok: bool, inicio?: CarbonInterface, fim?: CarbonInterface, motivo?: string}
+     */
+    private function tentarRemarcarNoPlano(Agendamento $a, CarbonInterface $novoInicio, int $tenantId): array
+    {
+        try {
+            $r = $this->remarcar((int) $a->id, $novoInicio->format('Y-m-d H:i'), $tenantId);
+
+            return ['ok' => true, 'inicio' => $r->inicio, 'fim' => $r->fim];
+        } catch (RegraDeNegocioException $e) {
+            return ['ok' => false, 'motivo' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * @param  Collection<int, Agendamento>  $itens
+     * @return array<int, array<string, mixed>>
+     */
+    private function planoDoMesmoHorario(Collection $itens, ?string $diaDestino, ?string $aPartirDe, int $tenantId, string $fuso): array
+    {
+        if ($itens->isEmpty()) {
+            return [];
+        }
+        $primeiroDia = CarbonImmutable::instance($itens->first()->inicio)->setTimezone($fuso)->startOfDay();
+        $dias = $itens->map(fn (Agendamento $a) => CarbonImmutable::instance($a->inicio)->setTimezone($fuso)->format('Y-m-d'))->unique();
+
+        if ($diaDestino !== null) {
+            if ($dias->count() !== 1) {
+                throw new RegraDeNegocioException('Para mandar todos para um dia só, os agendamentos precisam ser de um único dia. Restrinja o período ou use o próximo horário livre.');
+            }
+            $deltas = [(int) $primeiroDia->diffInDays(CarbonImmutable::parse($diaDestino, $fuso)->startOfDay(), false)];
+            if ($deltas[0] < 1) {
+                throw new RegraDeNegocioException('O dia de destino deve ser depois do dia dos agendamentos.');
+            }
+        } else {
+            $minimo = $aPartirDe === null ? 1 : max(1, (int) $primeiroDia->diffInDays(CarbonImmutable::parse($aPartirDe, $fuso)->startOfDay(), false));
+            $deltas = range($minimo, $minimo + self::DIAS_DE_BUSCA_NO_LOTE - 1);
+        }
+
+        $melhor = null;
+        $melhorCabem = -1;
+        foreach ($deltas as $delta) {
+            $grade = $this->grade($tenantId);
+            if ($grade->expediente($primeiroDia->addDays($delta)) === null) {
+                continue; // dia sem expediente (domingo): nem tenta
+            }
+            DB::beginTransaction(); // savepoint: cada tentativa começa do zero
+            try {
+                $tentativa = [];
+                foreach ($itens as $a) {
+                    $tentativa[(int) $a->id] = $this->tentarRemarcarNoPlano($a, CarbonImmutable::instance($a->inicio)->setTimezone($fuso)->addDays($delta), $tenantId);
+                }
+            } finally {
+                DB::rollBack();
+            }
+            $cabem = count(array_filter($tentativa, fn (array $r) => $r['ok']));
+            if ($cabem > $melhorCabem) {
+                [$melhor, $melhorCabem] = [$tentativa, $cabem];
+            }
+            if ($cabem === $itens->count()) {
+                break; // o primeiro dia em que todos cabem
+            }
+        }
+
+        return $melhor ?? $itens->mapWithKeys(fn (Agendamento $a) => [(int) $a->id => ['ok' => false, 'motivo' => 'Não achei um dia com expediente nos próximos '.self::DIAS_DE_BUSCA_NO_LOTE.' dias.']])->all();
+    }
+
+    /**
+     * @param  Collection<int, Agendamento>  $itens
+     * @param  string[]  $setoresDoPapel
+     * @return array<int, array<string, mixed>>
+     */
+    private function planoDoProximoLivre(Collection $itens, ?string $aPartirDe, array $setoresDoPapel, int $tenantId, string $fuso): array
+    {
+        if ($itens->isEmpty()) {
+            return [];
+        }
+        $ultimoDia = $itens->map(fn (Agendamento $a) => CarbonImmutable::instance($a->inicio)->setTimezone($fuso)->startOfDay())->max();
+        $busca = $aPartirDe !== null ? CarbonImmutable::parse($aPartirDe, $fuso)->startOfDay() : $ultimoDia->addDay();
+        $resultado = [];
+
+        // Por ordem de horário (e de id): quem estava marcado antes é atendido primeiro; as remarcações que ficam gravadas AQUI
+        // (a transação é desfeita no fim) ocupam a vaga para o seguinte.
+        foreach ($itens->sortBy([['inicio', 'asc'], ['id', 'asc']]) as $a) {
+            $achou = null;
+            for ($d = 0; $d < self::DIAS_DE_BUSCA_NO_LOTE && $achou === null; $d++) {
+                try {
+                    $disp = $this->disponibilidadeDoDia((int) $a->catalogo_item_id, $busca->addDays($d)->format('Y-m-d'), (int) $a->profissional_id, (int) $a->id, $setoresDoPapel, $tenantId);
+                } catch (RegraDeNegocioException) {
+                    continue;
+                }
+                foreach ($disp['horarios'] as $h) {
+                    if ($h['vagas'] < 1) {
+                        continue;
+                    }
+                    $tentativa = $this->tentarRemarcarNoPlano($a, CarbonImmutable::parse($h['inicio'], $fuso), $tenantId);
+                    if ($tentativa['ok']) {
+                        $achou = $tentativa;
+                        break;
+                    }
+                }
+            }
+            $resultado[(int) $a->id] = $achou ?? ['ok' => false, 'motivo' => 'Não achei horário livre nos próximos '.self::DIAS_DE_BUSCA_NO_LOTE.' dias.'];
+        }
+
+        return $resultado;
+    }
+
     /** @param  string[]  $palavras */
     private function pedeOMaisRecente(array $palavras): bool
     {

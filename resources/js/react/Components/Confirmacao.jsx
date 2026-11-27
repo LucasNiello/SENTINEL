@@ -223,6 +223,8 @@ export default function Confirmacao({ proposta, adicionar, adicionarTabela, trav
         cartao.current?.scrollIntoView({ block: 'start' });
         avisoErro.current?.focus({ preventScroll: true });
     }, [erroSeq, formulario.erro]);
+    // 27/11: o card terminou (confirmado, cancelado ou recusado): avisa a tela de origem para voltar à linha de onde saiu (usarCartao escuta).
+    useEffect(() => { if (encerrado) window.dispatchEvent(new Event('sentinel:cartao-encerrado')); }, [encerrado]);
     // Card finalizado: vira uma tira pequena (1 linha, no máximo meia largura), para o chat não ficar com um buraco.
     if (encerrado && fechamento) {
         const marca = { sucesso: '✓', erro: '!', neutro: '–' }[fechamento.tipo];
@@ -235,7 +237,7 @@ export default function Confirmacao({ proposta, adicionar, adicionarTabela, trav
             {fechamento.tipo === 'erro' && mensagemErro && <div ref={avisoErro} tabIndex={-1} className="card-erro"><Aviso tipo="erro" role="alert">{mensagemErro}</Aviso></div>}
         </>;
     }
-    return <section ref={cartao} className={`card-confirmacao card--risco-${risco}${aguardando ? ' card--aguardando' : ''}${encerrado ? ' card--encerrado' : ''}`}
+    return <section ref={cartao} data-cartao-aberto="" className={`card-confirmacao card--risco-${risco}${aguardando ? ' card--aguardando' : ''}${encerrado ? ' card--encerrado' : ''}`}
         aria-label="Confirmação de ação" aria-busy={processando} style={{ overflowWrap: 'anywhere' }}>
         <div className="card-overline"><span>AÇÃO PROPOSTA</span><span className="card-risco">{risco}</span></div>
         <strong className="card-titulo">{formulario.titulo || 'Confirmar a ação'}</strong>

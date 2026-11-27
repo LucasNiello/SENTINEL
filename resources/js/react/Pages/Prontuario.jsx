@@ -84,18 +84,18 @@ export default function Prontuario({ prontuario, pet, agendamento, tipos, permis
         <form className="prontuario-form" onSubmit={(e) => { e.preventDefault(); if (editavel) salvar(); }}>
             <div className="campo">
                 <label htmlFor="p-tipo">Tipo do atendimento</label>
-                <select id="p-tipo" value={form.tipo} onChange={muda('tipo')} disabled={!editavel}>{tipos.map((t) => <option key={t} value={t}>{TIPOS[t] ?? t}</option>)}</select>
+                <select id="p-tipo" value={form.tipo} onChange={muda('tipo')} disabled={!editavel || assinando}>{tipos.map((t) => <option key={t} value={t}>{TIPOS[t] ?? t}</option>)}</select>
             </div>
             {form.tipo === 'internacao' && <div className="prontuario-form__linha">
-                <div className="campo"><label htmlFor="p-entrada">Entrada</label><input id="p-entrada" type="datetime-local" value={form.entrada_em} onChange={muda('entrada_em')} disabled={!editavel} /></div>
-                <div className="campo"><label htmlFor="p-alta">Alta</label><input id="p-alta" type="datetime-local" value={form.alta_em} onChange={muda('alta_em')} disabled={!editavel} /></div>
+                <div className="campo"><label htmlFor="p-entrada">Entrada</label><input id="p-entrada" type="datetime-local" value={form.entrada_em} onChange={muda('entrada_em')} disabled={!editavel || assinando} /></div>
+                <div className="campo"><label htmlFor="p-alta">Alta</label><input id="p-alta" type="datetime-local" value={form.alta_em} onChange={muda('alta_em')} disabled={!editavel || assinando} /></div>
             </div>}
             {CAMPOS.map(([k, rotulo, dica]) => <div className="campo" key={k}>
                 <label htmlFor={`p-${k}`}>{rotulo}</label>
-                <textarea id={`p-${k}`} rows={4} maxLength={10000} value={form[k]} onChange={muda(k)} disabled={!editavel} placeholder={editavel ? dica : ''} />
+                <textarea id={`p-${k}`} rows={4} maxLength={10000} value={form[k]} onChange={muda(k)} disabled={!editavel || assinando} placeholder={editavel ? dica : ''} />
             </div>)}
             {editavel && <div className="painel__acoes">
-                <Botao type="submit" variante="primario" disabled={ocupado}>{novo ? 'Salvar rascunho' : 'Salvar alterações'}</Botao>
+                <Botao type="submit" variante="primario" disabled={ocupado || assinando}>{novo ? 'Salvar rascunho' : 'Salvar alterações'}</Botao>
                 {!novo && !assinando && permissoes.assinar && <Botao variante="secundario" disabled={ocupado || sujo} onClick={() => setAssinando(true)}>Assinar prontuário…</Botao>}
             </div>}
             {editavel && sujo && <p className="campo-info" role="status">Há alterações não salvas. Salve antes de assinar: o que é assinado é a versão gravada.</p>}

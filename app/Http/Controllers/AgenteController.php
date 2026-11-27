@@ -192,6 +192,7 @@ class AgenteController extends Controller
             $resposta = $this->aiAgentService->erroTecnicoTool($e);
         }
         $this->conversa->guardar($request->session(), $mensagem, $resposta);
+        $resposta = $this->realcarUltimoLote($request, $resposta);
 
         // P-C1: a tabela mostrada fica congelada na sessão (ids em ordem); o front não recebe esta chave.
         if (isset($resposta['lista'])) {
@@ -224,6 +225,34 @@ class AgenteController extends Controller
             'erro' => 422,
             default => 200,
         });
+    }
+
+    /**
+     * 26/11: numa consulta da agenda, os agendamentos do último lote remarcado por este usuário ficam realçados (e a frase diz isso),
+     * onde quer que apareçam ("dia 1 só tem esses?", "quais foram transferidos para esse dia?"). Só realce: o resultado não muda.
+     *
+     * @param  array<string, mixed>  $resposta
+     * @return array<string, mixed>
+     */
+    private function realcarUltimoLote(Request $request, array $resposta): array
+    {
+        if (($resposta['tipo'] ?? null) !== 'resultado_leitura' || ($resposta['tool'] ?? null) !== 'consultar_agenda' || ! is_array($resposta['resultado'] ?? null)) {
+            return $resposta;
+        }
+        $lote = $this->conversa->lerUltimoLote($request->session());
+        $nesta = $lote === [] ? [] : array_values(array_intersect($lote, array_map(fn ($l) => is_array($l) ? (int) ($l['id'] ?? 0) : 0, $resposta['resultado'])));
+        if ($nesta === []) {
+            return $resposta;
+        }
+
+        $n = count($nesta);
+        $resposta['destacar'] = $nesta; // só os remarcados (uma lista curta já realçaria todas as linhas, e isso apagaria a diferença)
+        $nota = $n === 1 ? ' O agendamento realçado foi remarcado por você há pouco.' : " Os {$n} realçados foram remarcados por você há pouco.";
+        if (is_string($resposta['frase'] ?? null) && ! str_contains($resposta['frase'], 'foram remarcados por você')) {
+            $resposta['frase'] = rtrim($resposta['frase']).$nota;
+        }
+
+        return $resposta;
     }
 
     /**

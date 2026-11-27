@@ -518,3 +518,20 @@ html[data-tema] .prontuario-form textarea:disabled, html[data-tema] .prontuario-
 html[data-tema] .prontuario-conferencia {display: grid; gap: 12px; max-width: 520px; padding: 16px 20px; margin: 0 0 24px; border: 1px solid var(--cor-borda); border-left: 4px solid var(--cor-atencao); border-radius: var(--raio); background: var(--cor-superficie)}
 html[data-tema] .prontuario__adendos-lista {list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 12px}
 html[data-tema] .prontuario__abrir {margin-left: auto; min-height: 36px; padding: 4px 12px; font-size: 14px}
+
+/* 27/11: ficha do pet em seções que abrem e fecham (<details>), com contador; cada prontuário também. */
+html[data-tema] .secao {margin: 0 0 16px; border: 1px solid var(--cor-borda); border-radius: var(--raio)}
+html[data-tema] .secao > summary {display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; font-size: 18px; font-weight: 600}
+html[data-tema] .secao > summary::-webkit-details-marker {display: none}
+html[data-tema] .secao > summary::before, html[data-tema] .prontuario > details > summary::before {content: ""; width: 8px; height: 8px; flex: none; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s}
+html[data-tema] .secao[open] > summary::before, html[data-tema] .prontuario > details[open] > summary::before {transform: rotate(45deg)}
+html[data-tema] .secao__conta {min-width: 24px; padding: 0 8px; border: 1px solid var(--cor-borda); border-radius: 999px; font-size: 13px; font-weight: 500; text-align: center}
+html[data-tema] .secao__corpo {padding: 4px 16px 16px; display: grid; gap: 12px}
+html[data-tema] .secao__mais {margin: 0}
+html[data-tema] .prontuario > details > summary {display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; cursor: pointer; list-style: none}
+html[data-tema] .prontuario > details > summary::-webkit-details-marker {display: none}
+html[data-tema] .prontuario > details[open] > summary {margin-bottom: 12px}
+@media (prefers-reduced-motion: reduce) {html[data-tema] .secao > summary::before, html[data-tema] .prontuario > details > summary::before {transition: none}}
+
+/* 27/11: a linha da lista que abriu o card (Receber, Cancelar...) fica realçada enquanto o card está aberto. */
+html[data-tema] tr.linha-em-edicao {outline: 2px solid var(--cor-marca-forte); outline-offset: -2px; background: color-mix(in srgb, var(--cor-marca-forte) 12%, transparent)}

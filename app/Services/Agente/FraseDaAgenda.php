@@ -47,6 +47,23 @@ class FraseDaAgenda
         // Pedido que aponta UM registro (o último, o primeiro, um id) realça a linha; uma lista curta realça todas.
         $destacar = $ordenou || isset($f['id']) ? [(int) $primeira['id']] : ($total <= 3 ? array_map(fn ($l) => (int) $l['id'], $linhas) : []);
 
+        // 26/11: ordenado pela última alteração (ou pela gravação), com ou sem limite, "o que foi remarcado" é o LOTE: todas as linhas que
+        // compartilham o mesmo minuto da primeira ficam realçadas (um lote grava vários agendamentos de uma vez), não só a primeira.
+        $campo = ['alteracao' => 'alterado_em', 'gravacao' => 'gravado_em'][$f['ordenar'] ?? ''] ?? null;
+        if ($campo !== null && $total > 1 && ! empty($primeira[$campo])) {
+            $mesmoMomento = array_values(array_filter($linhas, fn ($l) => ($l[$campo] ?? null) === $primeira[$campo]));
+            $destacar = array_map(fn ($l) => (int) $l['id'], array_slice($mesmoMomento, 0, 25));
+
+            // A frase diz o que o realce significa (senão "5 encontrados" e 3 realçados parece contradição).
+            $n = count($destacar);
+            if ($n > 1) {
+                $hora = preg_replace('/^\S+ (\d{2}:\d{2}).*$/u', 'às $1', (string) $primeira[$campo]);
+                $frase = "Encontrei {$total} agendamentos".self::filtros($f).". Os {$n} realçados foram "
+                    .($campo === 'alterado_em' ? 'alterados' : 'gravados')." juntos, {$hora} (o mais recente)"
+                    .($total > $n ? '; os outros '.($total - $n).' são de '.($campo === 'alterado_em' ? 'alterações' : 'gravações').' anteriores.' : '.');
+            }
+        }
+
         return ['frase' => $frase, 'destacar' => $destacar];
     }
 

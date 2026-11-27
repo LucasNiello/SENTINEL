@@ -53,6 +53,28 @@ class ConversaAgente
     {
         $sessao->forget(self::CHAVE);
         $sessao->forget(self::CHAVE_LISTA);
+        $sessao->forget(self::CHAVE_ULTIMO_LOTE);
+    }
+
+    private const CHAVE_ULTIMO_LOTE = 'agente_ultimo_lote';
+
+    /** 26/11: os ids do último lote REMARCADO por este usuário, para realçá-los nas consultas da agenda seguintes (só ids, por PRAZO_CONVERSA_S). */
+    public function guardarUltimoLote(Session $sessao, array $ids): void
+    {
+        $sessao->put(self::CHAVE_ULTIMO_LOTE, ['identidade' => $this->identidade(), 'em' => now()->getTimestamp(), 'ids' => array_values(array_map('intval', $ids))]);
+    }
+
+    /** @return int[] os ids do último lote remarcado (deste usuário e tenant, dentro do prazo da conversa); senão, vazio. */
+    public function lerUltimoLote(Session $sessao): array
+    {
+        $lote = $sessao->get(self::CHAVE_ULTIMO_LOTE);
+        if (! is_array($lote) || ($lote['identidade'] ?? null) !== $this->identidade() || now()->getTimestamp() - (int) ($lote['em'] ?? 0) > self::PRAZO_CONVERSA_S) {
+            $sessao->forget(self::CHAVE_ULTIMO_LOTE);
+
+            return [];
+        }
+
+        return array_map('intval', (array) ($lote['ids'] ?? []));
     }
 
     private function gravar(Session $sessao, array $mensagens): void
@@ -125,6 +147,8 @@ class ConversaAgente
             'selecionavel' => $lista['selecionavel'] ?? null,
             // A "versão" (updated_at) de cada linha NO MOMENTO em que o usuário a viu: a gravação recusa o que mudou depois.
             'versoes' => $lista['versoes'] ?? [],
+            // 26/11: remarcar em lote: o horário proposto de cada linha (id → AAAA-MM-DD HH:MM), congelado pelo servidor.
+            'novos' => $lista['novos'] ?? [],
         ]);
     }
 
@@ -158,7 +182,7 @@ class ConversaAgente
             return null;
         }
 
-        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? [], 'selecionavel' => $selecionavel, 'versoes' => $lista['versoes'] ?? []];
+        return ['entidade' => $lista['entidade'] ?? null, 'linhas' => $lista['linhas'] ?? [], 'selecionavel' => $selecionavel, 'versoes' => $lista['versoes'] ?? [], 'novos' => $lista['novos'] ?? []];
     }
 
     /** Uma tabela com checkboxes só vale para UM envio: depois de gravar, some (reenviar o mesmo pedido não cancela de novo). */

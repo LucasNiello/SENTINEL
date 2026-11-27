@@ -15,6 +15,20 @@ use Tests\TestCase;
 /** 26/11: consulta da agenda com tipo de data (marcado/gravação/alteração), ordenar, limite, serviço, hora, passado/futuro e a frase do servidor. */
 class AgendaConsultaTest extends TestCase
 {
+    public function test_ordenado_pela_alteracao_realca_todas_as_linhas_do_mesmo_lote(): void
+    {
+        $linha = fn (int $id, string $alterado) => ['id' => $id, 'horario' => '28/11/2026 09:00–10:00', 'pet' => 'Thor', 'tutor' => 'Ana', 'servico' => 'Banho',
+            'profissional' => 'Ana', 'status' => 'agendado', 'gravado_em' => '20/11/2026 10:00', 'alterado_em' => $alterado];
+        $linhas = [$linha(3, '26/11/2026 23:33'), $linha(2, '26/11/2026 23:33'), $linha(1, '26/11/2026 23:24')];
+
+        $comLimite = \App\Services\Agente\FraseDaAgenda::montar($linhas, ['ordenar' => 'alteracao', 'limite' => 10]);
+        $this->assertSame([3, 2], $comLimite['destacar'], 'o lote inteiro (mesmo minuto), não só a primeira');
+        $this->assertStringContainsString('Os 2 realçados foram alterados juntos, às 23:33 (o mais recente); os outros 1 são de alterações anteriores.', $comLimite['frase']);
+
+        $porMarcado = \App\Services\Agente\FraseDaAgenda::montar($linhas, ['ordenar' => 'marcado', 'limite' => 10]);
+        $this->assertSame([3], $porMarcado['destacar'], 'outras ordenações continuam realçando só a primeira');
+    }
+
     use CenarioClinica, RefreshDatabase, SimulaAgente;
 
     private AgendaService $agenda;

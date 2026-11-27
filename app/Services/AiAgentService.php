@@ -799,10 +799,15 @@ class AiAgentService
             'linhas' => $linhas,
             // 25/11: a tabela de cancelar em lote tem checkboxes; só os ids dela entram no endpoint de gravação.
             // Também a lista de "qual deles cancelar?" (alterar_status_agendamento → cancelado): ela traz a "versao" de cada linha.
-            'selecionavel' => $this->ehListaParaMarcar($tool, $resultado) ? 'cancelar_agendamentos_em_lote' : null,
+            'selecionavel' => $this->ehListaParaMarcar($tool, $resultado) ? ($tool === 'remarcar_agendamentos_em_lote' ? 'remarcar_agendamentos_em_lote' : 'cancelar_agendamentos_em_lote') : null,
             // A versão de cada linha como o usuário a VIU (a gravação recusa o que mudou depois); nunca vai ao navegador.
             'versoes' => $this->ehListaParaMarcar($tool, $resultado)
                 ? collect($resultado)->filter(fn ($l) => is_array($l) && isset($l['id'], $l['versao']))->mapWithKeys(fn (array $l) => [(int) $l['id'] => (string) $l['versao']])->all()
+                : [],
+            // 26/11: remarcar em lote: o novo horário PROPOSTO de cada linha, congelado aqui. O endpoint grava estes, nunca um horário do navegador.
+            'novos' => $tool === 'remarcar_agendamentos_em_lote'
+                ? collect($resultado)->filter(fn ($l) => is_array($l) && isset($l['id'], $l['novo_inicio']) && ($l['bloqueado'] ?? false) !== true)
+                    ->mapWithKeys(fn (array $l) => [(int) $l['id'] => (string) $l['novo_inicio']])->all()
                 : [],
             'frase' => $n === 0
                 ? "A consulta ({$tool}) não encontrou registros."
@@ -813,7 +818,7 @@ class AiAgentService
     /** A lista tem caixa de marcar (cancelar agendamentos): a tool do lote, ou o "qual deles?" do cancelamento, cujas linhas levam a "versao". */
     private function ehListaParaMarcar(string $tool, mixed $resultado): bool
     {
-        if ($tool === 'cancelar_agendamentos_em_lote') {
+        if (in_array($tool, ['cancelar_agendamentos_em_lote', 'remarcar_agendamentos_em_lote'], true)) {
             return true;
         }
 
@@ -825,7 +830,7 @@ class AiAgentService
     private function semVersaoNasLinhas(array $resposta): array
     {
         if (is_array($resposta['resultado'] ?? null)) {
-            $resposta['resultado'] = array_map(fn ($l) => is_array($l) ? Arr::except($l, 'versao') : $l, $resposta['resultado']);
+            $resposta['resultado'] = array_map(fn ($l) => is_array($l) ? Arr::except($l, ['versao', 'novo_inicio']) : $l, $resposta['resultado']);
         }
 
         return $resposta;
@@ -1063,6 +1068,7 @@ class AiAgentService
             ...($definicao['colunas'] ? ['colunas' => $definicao['colunas']] : []),
             // 25/11: lista para MARCAR quais cancelar (checkbox). Nada é gravado aqui: quem grava é o endpoint, só com os ids marcados.
             ...($tool === 'cancelar_agendamentos_em_lote' ? ['selecao' => ['url' => '/agente/agenda/cancelar-lote', 'rotulo' => 'Cancelar selecionados', 'segurar' => true]] : []),
+            ...($tool === 'remarcar_agendamentos_em_lote' ? ['selecao' => ['url' => '/agente/agenda/remarcar-lote', 'rotulo' => 'Remarcar selecionados', 'segurar' => true]] : []),
             // RF02 "editável": a linha abre o formulário de atualizar (sem IA), se o papel permitir.
             ...($this->podeEditar($definicao['editavel_por']) ? ['editar' => $definicao['editavel_por']] : []),
         ];
@@ -1080,6 +1086,18 @@ class AiAgentService
         $linhas = is_array($resposta['resultado'] ?? null) ? array_values($resposta['resultado']) : [];
         $filtros = \App\Services\AgendaService::sanearFiltros($filtros);
         $apresentacao = \App\Services\Agente\FraseDaAgenda::montar($linhas, $filtros);
+        // 26/11: busca de UM dia sem resultado e a clínica não abre nele (domingo, por ora): a frase diz o porquê, em vez de só "não encontrei".
+        if ($linhas === [] && ($dia = $filtros['dia'] ?? (($filtros['data_inicio'] ?? null) !== null && ($filtros['data_inicio'] ?? null) === ($filtros['data_fim'] ?? null) ? $filtros['data_inicio'] : null)) !== null) {
+            try {
+                $data = \Carbon\CarbonImmutable::createFromFormat('!Y-m-d', (string) $dia, (string) config('app.timezone'));
+                $grade = \App\Services\GradeDaAgenda::daConfiguracao($this->contexto->tenantId());
+                if ($data !== false && $grade->expediente($data) === null) {
+                    $apresentacao['frase'] = 'Não há agendamentos em '.$data->format('d/m/Y').' ('.$data->locale('pt_BR')->dayName.'): a clínica não abre nesse dia. Ela funciona '.$grade->funcionamento().'.';
+                }
+            } catch (\Throwable) {
+                // a explicação é um extra: sem ela, vale a frase de sempre
+            }
+        }
         $colunas = is_array($resposta['colunas'] ?? null) ? $resposta['colunas'] : [];
         foreach (['gravacao' => 'gravado_em', 'alteracao' => 'alterado_em'] as $tipo => $coluna) {
             if (($filtros['tipo_data'] ?? null) === $tipo || ($filtros['ordenar'] ?? null) === $tipo) {
@@ -2719,6 +2737,117 @@ class AiAgentService
 
         return ['tipo' => 'resultado_escrita', 'tool' => $tool, 'lote_id' => $loteId, 'cancelados' => $ids,
             'mensagem' => $n === 1 ? 'Pronto, cancelei o agendamento que você marcou.' : 'Pronto, cancelei os '.$n.' agendamentos que você marcou.'];
+    }
+
+    /**
+     * Remarcar em lote (26/11): grava SÓ os ids marcados, cada um no horário que o servidor propôs e congelou na lista ($novos, nunca do
+     * navegador), com a versão de quando o usuário viu a linha. Tudo ou nada entre os marcados, numa transação: se um mudou desde o
+     * plano (a vaga foi ocupada, o agendamento foi mexido), nada é gravado e a linha é apontada. Cada item passa pelo mesmo executor da
+     * remarcação de um agendamento (RBAC, setor, tenant, CRMV, auditoria: uma linha por item, todas com o mesmo lote_id). Aplica na
+     * ordem do plano (horário original), a mesma da simulação. Depois confere o pedido: quem do plano ficou sem remarcar.
+     *
+     * @param  int[]  $ids  os marcados
+     * @param  array<int|string, string>  $versoes
+     * @param  array<int|string, string>  $novos  id → AAAA-MM-DD HH:MM
+     * @param  int[]  $doPlano  todos os ids que estavam na lista (para a conferência)
+     * @return array<string, mixed>
+     */
+    public function remarcarAgendamentosEmLote(array $ids, array $versoes, array $novos, array $doPlano): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        $tool = 'remarcar_agendamentos_em_lote';
+        $definicao = $this->catalogo()[$tool] ?? null;
+        $tenantId = $this->contexto->tenantId();
+
+        if ($definicao === null || ! $this->podeExecutar('remarcar_agendamento')) {
+            return $this->negar($tool, $definicao ?? ['acao' => 'consultar', 'entidade' => 'Agendamento'], ['ids' => $ids]);
+        }
+
+        // Na ordem do plano: o horário original e o id (a mesma ordem em que a simulação ocupou as vagas).
+        $ordem = \App\Models\Agendamento::query()->where('tenant_id', $tenantId)->whereIn('id', $ids)->orderBy('inicio')->orderBy('id')->pluck('id')->map(fn ($i) => (int) $i)->all();
+        $ordem = array_values(array_unique([...$ordem, ...$ids]));
+        $loteId = (string) Str::uuid();
+        $erros = [];
+
+        try {
+            DB::transaction(function () use ($ordem, $versoes, $novos, $tenantId, $loteId, &$erros) {
+                foreach ($ordem as $id) {
+                    if (! isset($novos[$id])) {
+                        $erros[$id] = 'Esta linha não tinha um horário proposto.';
+
+                        continue;
+                    }
+                    if (\App\Models\Agendamento::query()->where('tenant_id', $tenantId)->lockForUpdate()->find($id) === null) {
+                        $erros[$id] = 'Não encontrei este agendamento.';
+
+                        continue;
+                    }
+
+                    $resposta = $this->detalhesAuditoria->com(['lote_id' => $loteId], fn () => $this->executarConfirmada('remarcar_agendamento',
+                        ['id' => $id, 'inicio' => (string) $novos[$id], 'profissional_id' => null, 'versao' => (string) ($versoes[$id] ?? '')], []));
+
+                    if (($resposta['tipo'] ?? null) !== 'resultado_escrita') {
+                        if ((int) ($resposta['http_status'] ?? 0) >= 500) {
+                            throw new \RuntimeException('falha técnica no lote');
+                        }
+                        $erros[$id] = (string) ($resposta['mensagem'] ?? 'Não foi possível remarcar este agendamento.');
+                    }
+                }
+
+                if ($erros !== []) {
+                    throw new ToolRecusadaException('lote recusado');
+                }
+            });
+        } catch (ToolRecusadaException) {
+            $this->detalhesAuditoria->com(['lote_id' => $loteId], fn () => $this->auditar($tool, 'atualizar', 'Agendamento', null,
+                ['ids' => $ids, 'motivos' => $erros], 'recusado', 'Lote recusado: nada foi remarcado.', true));
+
+            return ['tipo' => 'erro', 'categoria' => 'validation_error', 'codigo' => 'AI_BATCH_REFUSED', 'http_status' => 422,
+                'mensagem' => 'Não remarquei nada: '.(count($erros) === 1 ? 'um dos agendamentos não pode ser remarcado' : count($erros).' dos agendamentos não podem ser remarcados')
+                    .'. O motivo está na linha. Desmarque '.(count($erros) === 1 ? 'esse' : 'esses').' (ou peça um novo plano) e tente de novo.',
+                'erros' => $erros];
+        } catch (Throwable $e) {
+            try {
+                $this->detalhesAuditoria->com(['lote_id' => $loteId], fn () => $this->auditar($tool, 'atualizar', 'Agendamento', null,
+                    ['ids' => $ids], 'erro', 'Falha técnica no lote: nada foi remarcado.', true));
+            } catch (Throwable) {
+                // a auditoria não derruba a resposta ao usuário
+            }
+
+            return $this->erroTecnicoTool($e);
+        }
+
+        $n = count($ids);
+
+        return ['tipo' => 'resultado_escrita', 'tool' => $tool, 'lote_id' => $loteId, 'remarcados' => $ids,
+            'mensagem' => ($n === 1 ? 'Pronto, remarquei o agendamento que você marcou.' : 'Pronto, remarquei os '.$n.' agendamentos que você marcou.')
+                .' '.$this->destinosDoLote($ids, $tenantId).' '.$this->conferenciaDoPedido($doPlano, $ids, $tenantId)];
+    }
+
+    /** Para onde cada remarcado foi (lido do banco, depois de gravar): "Remarcados: Pipoca para 28/11 13:00; Fred para 28/11 15:00." */
+    private function destinosDoLote(array $ids, int $tenantId): string
+    {
+        $linhas = \App\Models\Agendamento::query()->where('agendamentos.tenant_id', $tenantId)->whereIn('agendamentos.id', $ids)
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')->orderBy('agendamentos.inicio')->get(['agendamentos.inicio', 'pets.nome as pet']);
+
+        return $linhas->isEmpty() ? '' : 'Remarcados: '.$linhas->map(fn ($a) => $a->getAttribute('pet').' para '.$a->inicio->format('d/m H:i'))->implode('; ').'.';
+    }
+
+    /** Conferência feita pelo servidor (não pela IA) depois de remarcar: quem do plano continua em aberto no dia de origem. */
+    private function conferenciaDoPedido(array $doPlano, array $remarcados, int $tenantId): string
+    {
+        $faltam = array_values(array_diff(array_map('intval', $doPlano), array_map('intval', $remarcados)));
+        $ficaram = $faltam === [] ? collect() : \App\Models\Agendamento::query()->where('agendamentos.tenant_id', $tenantId)->whereIn('agendamentos.id', $faltam)
+            ->whereIn('agendamentos.status', ['agendado', 'confirmado'])
+            ->join('pets', 'pets.id', '=', 'agendamentos.pet_id')->orderBy('agendamentos.inicio')->get(['agendamentos.inicio', 'pets.nome as pet']);
+
+        if ($ficaram->isEmpty()) {
+            return 'Conferi o pedido: ninguém ficou para trás.';
+        }
+
+        return 'Conferi o pedido: ficaram '.$ficaram->count().' sem remarcar ('
+            .$ficaram->map(fn ($a) => $a->getAttribute('pet').' '.$a->inicio->format('d/m H:i'))->implode(', ')
+            .'). Quer que eu proponha o próximo horário livre para '.($ficaram->count() === 1 ? 'esse' : 'esses').'?';
     }
 
     /**
