@@ -1,5 +1,7 @@
 # SENTINEL — Plano de atualização da documentação (26/11/2026)
 
+> **Atualização de 27/11:** leia também `plano-atualizacao-documentacao-ADENDO-2026-11-27.md` (mudanças posteriores, correções a este plano e ordem de execução). Enviar os dois ao Claude web.
+
 **Para quem executa:** Claude web, com estes 3 arquivos enviados: `Documentacao-Sentinel1.3.docx`, `PENDENCIAS_DOCUMENTACAO_1.3.md` e `ROTEIRO_DEMONSTRACAO.md`. Você não vê o repositório nem as sessões anteriores: tudo o que precisa está aqui.
 **Regras:** não invente número de teste, data ou comportamento que não esteja neste plano. Onde disser "MANUAL", é figura ou diagrama que precisa ser refeito à mão. Notion: só acrescentar bloco datado, nunca editar nem apagar.
 **Sugestão de rótulo da versão:** "1.4 — 26/11/2026" (o Lucas decide; a 1.3 é de 24/11).

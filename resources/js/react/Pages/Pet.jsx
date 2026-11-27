@@ -16,12 +16,25 @@ const v = (x) => (x ? x : '—');
 
 const Selo = ({ tabela, status }) => <span className={`status-badge ${tabela[status]?.[1] ?? ''}`.trim()}>{tabela[status]?.[0] ?? status}</span>;
 
-function Bloco({ id, titulo, vazio, itens, rotulo, children }) {
-    return <section className="bloco" aria-labelledby={id}>
-        <h2 id={id}>{titulo}</h2>
+const LIMITE = 20; // linhas por seção antes do "Ver todos"
+const LIMITE_PRONTUARIOS = 10;
+
+// Seção que abre e fecha (27/11, pedido do Lucas: a ficha ficava infinita). <details> nativo: teclado, leitor de tela e "aberta" de graça.
+function Secao({ id, titulo, total, aberta = false, children }) {
+    return <details className="secao" open={aberta || undefined}>
+        <summary id={id}><span className="secao__titulo">{titulo}</span>{total !== undefined && <span className="secao__conta">{total}</span>}</summary>
+        <div className="secao__corpo">{children}</div>
+    </details>;
+}
+
+const VerTodos = ({ mostrando, total, aoVerTodos }) => total > mostrando
+    ? <p className="secao__mais"><Botao variante="fantasma" onClick={aoVerTodos}>Mostrando {mostrando} de {total}. Ver todos</Botao></p> : null;
+
+function Bloco({ id, titulo, vazio, itens, rotulo, aberta = false, rodape = null, children }) {
+    return <Secao id={id} titulo={titulo} total={itens.length} aberta={aberta}>
         {itens.length === 0 ? <p className="vazio">{vazio}</p>
-            : <div className="tabela-rolagem tabela-empilha" tabIndex={0} role="region" aria-label={rotulo}><table>{children}</table></div>}
-    </section>;
+            : <><div className="tabela-rolagem tabela-empilha" tabIndex={0} role="region" aria-label={rotulo}><table>{children}</table></div>{rodape}</>}
+    </Secao>;
 }
 
 // Ficha do pet (só leitura; o prontuário é do veterinário e não aparece aqui).
@@ -30,29 +43,37 @@ const CAMPOS_CLINICOS = [['anamnese', 'Anamnese'], ['exame_fisico', 'Exame físi
 
 // Prontuário (só leitura): veterinário e dono. Edição e assinatura ficam fora desta tela. O autor do adendo é o nome gravado na assinatura.
 function Prontuarios({ itens }) {
-    return <section className="bloco" aria-labelledby="titulo-prontuario">
-        <h2 id="titulo-prontuario">Prontuário</h2>
+    const [todos, setTodos] = useState(false);
+    const visiveis = todos ? itens : itens.slice(0, LIMITE_PRONTUARIOS);
+    // Cada prontuário é uma linha recolhida (tipo, data, veterinário, situação); o mais recente já vem aberto.
+    return <Secao id="titulo-prontuario" titulo="Prontuário" total={itens.length} aberta>
         {itens.length === 0 ? <p className="vazio">Nenhum prontuário registrado para este pet.</p>
-            : <ul className="prontuarios" role="list">{itens.map((p) => <li key={p.id} className="prontuario">
-                <header className="prontuario__cabeca">
-                    <strong>{TIPOS[p.tipo] ?? p.tipo}</strong>
-                    <span className="mono">{p.data}</span>
-                    <span>{p.veterinario ? `Vet. ${p.veterinario}` : ''}</span>
-                    <span className={`status-badge ${p.assinado ? 'status--sucesso' : 'status--expirado'}`}>{p.assinado ? 'Assinado' : 'Em rascunho'}</span>
-                    <a className="botao prontuario__abrir" href={`/prontuarios/${p.id}`}>{p.editavel ? 'Continuar' : 'Abrir'}</a>
-                </header>
-                {(p.entrada_em || p.alta_em) && <p className="prontuario__nota">{p.entrada_em && `Entrada: ${p.entrada_em}`}{p.entrada_em && p.alta_em && ' · '}{p.alta_em && `Alta: ${p.alta_em}`}</p>}
-                <dl className="ficha">{CAMPOS_CLINICOS.filter(([k]) => p[k]).map(([k, r]) => <div key={k} style={{ display: 'contents' }}><dt>{r}</dt><dd className="prontuario__texto">{p[k]}</dd></div>)}</dl>
-                {p.assinado && p.assinado_por && <p className="prontuario__nota">Assinado por {p.assinado_por} em {p.assinado_em}.</p>}
-                {p.adendos.length > 0 && <div className="prontuario__adendos"><h3>Adendos</h3>
-                    <ul role="list">{p.adendos.map((a, i) => <li key={i}><span className="mono">{a.em}</span> · {a.autor ?? ''}<p className="prontuario__texto">{a.texto}</p></li>)}</ul></div>}
-            </li>)}</ul>}
-    </section>;
+            : <><ul className="prontuarios" role="list">{visiveis.map((p, i) => <li key={p.id} className="prontuario">
+                <details open={i === 0 || undefined}>
+                    <summary className="prontuario__cabeca">
+                        <strong>{TIPOS[p.tipo] ?? p.tipo}</strong>
+                        <span className="mono">{p.data}</span>
+                        <span>{p.veterinario ? `Vet. ${p.veterinario}` : ''}</span>
+                        <span className={`status-badge ${p.assinado ? 'status--sucesso' : 'status--expirado'}`}>{p.assinado ? 'Assinado' : 'Em rascunho'}</span>
+                        <a className="botao prontuario__abrir" href={`/prontuarios/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.editavel ? 'Continuar' : 'Abrir'}</a>
+                    </summary>
+                    {(p.entrada_em || p.alta_em) && <p className="prontuario__nota">{p.entrada_em && `Entrada: ${p.entrada_em}`}{p.entrada_em && p.alta_em && ' · '}{p.alta_em && `Alta: ${p.alta_em}`}</p>}
+                    <dl className="ficha">{CAMPOS_CLINICOS.filter(([k]) => p[k]).map(([k, r]) => <div key={k} style={{ display: 'contents' }}><dt>{r}</dt><dd className="prontuario__texto">{p[k]}</dd></div>)}</dl>
+                    {p.assinado && p.assinado_por && <p className="prontuario__nota">Assinado por {p.assinado_por} em {p.assinado_em}.</p>}
+                    {p.adendos.length > 0 && <div className="prontuario__adendos"><h3>Adendos</h3>
+                        <ul role="list">{p.adendos.map((a, j) => <li key={j}><span className="mono">{a.em}</span> · {a.autor ?? ''}<p className="prontuario__texto">{a.texto}</p></li>)}</ul></div>}
+                </details>
+            </li>)}</ul>
+            {!todos && <VerTodos mostrando={LIMITE_PRONTUARIOS} total={itens.length} aoVerTodos={() => setTodos(true)} />}</>}
+    </Secao>;
 }
 
 export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, vendas, prontuarios = null, podeAtender = false, podeEditar }) {
     const { cartao, abrindo, ocupado, setOcupado, erro, trava, abrir } = usarCartao();
     const [aviso, setAviso] = useState('');
+    const [tudo, setTudo] = useState({}); // seções que o usuário abriu por inteiro ("Ver todos")
+    const lim = (k, a) => (tudo[k] ? a : a.slice(0, LIMITE));
+    const mais = (k, a) => (tudo[k] ? null : <VerTodos mostrando={LIMITE} total={a.length} aoVerTodos={() => setTudo((t) => ({ ...t, [k]: true }))} />);
     const aoMensagem = (texto) => { setAviso(texto); router.reload(); };
 
     return <Workspace titulo="Ficha do pet">
@@ -103,19 +124,19 @@ export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, ven
 
         {prontuarios !== null && <Prontuarios itens={prontuarios} />}
 
-        {agendamentos !== null && <Bloco id="titulo-agenda" titulo="Agendamentos" vazio="Nenhum agendamento." itens={agendamentos} rotulo="Agendamentos do pet">
+        {agendamentos !== null && <Bloco id="titulo-agenda" titulo="Agendamentos" vazio="Nenhum agendamento." itens={agendamentos} rotulo="Agendamentos do pet" aberta={prontuarios === null} rodape={mais("ag", agendamentos)}>
             <thead><tr><th scope="col">Horário</th><th scope="col">Serviço</th><th scope="col">Profissional</th><th scope="col">Setor</th><th scope="col">Situação</th></tr></thead>
-            <tbody>{agendamentos.map((a) => <tr key={a.id}>
+            <tbody>{lim("ag", agendamentos).map((a) => <tr key={a.id}>
                 <td data-rotulo="Horário">{a.horario}</td><td data-rotulo="Serviço">{a.servico}</td><td data-rotulo="Profissional">{a.profissional}</td>
                 <td data-rotulo="Setor">{a.setor === 'clinica' ? 'Clínica' : 'Banho e tosa'}</td>
                 <td data-rotulo="Situação"><Selo tabela={SELOS_AGENDA} status={a.status} /></td>
             </tr>)}</tbody>
         </Bloco>}
 
-        {cobrancas !== null && <Bloco id="titulo-cobrancas" titulo="Cobranças" vazio="Nenhuma cobrança." itens={cobrancas} rotulo="Cobranças do pet">
+        {cobrancas !== null && <Bloco id="titulo-cobrancas" titulo="Cobranças" vazio="Nenhuma cobrança." itens={cobrancas} rotulo="Cobranças do pet" rodape={mais("co", cobrancas)}>
             <thead><tr><th scope="col">Nº</th><th scope="col">Serviço</th><th scope="col">Atendimento</th><th scope="col" className="num">Total</th>
                 <th scope="col" className="num">Estornado</th><th scope="col" className="num">Líquido</th><th scope="col">Situação</th></tr></thead>
-            <tbody>{cobrancas.map((c) => <tr key={c.id}>
+            <tbody>{lim("co", cobrancas).map((c) => <tr key={c.id}>
                 <td data-rotulo="Nº">{c.id}</td><td data-rotulo="Serviço">{c.servico}</td><td data-rotulo="Atendimento">{c.atendimento}</td>
                 <td data-rotulo="Total" className="num">{c.total}</td><td data-rotulo="Estornado" className="num">{c.estornado}</td>
                 <td data-rotulo="Líquido" className="num">{v(c.liquido)}</td>
@@ -123,10 +144,10 @@ export default function Pet({ pet, tutor, verTutor, agendamentos, cobrancas, ven
             </tr>)}</tbody>
         </Bloco>}
 
-        {vendas !== null && <Bloco id="titulo-vendas" titulo="Vendas ligadas ao pet" vazio="Nenhuma venda." itens={vendas} rotulo="Vendas ligadas ao pet">
+        {vendas !== null && <Bloco id="titulo-vendas" titulo="Vendas ligadas ao pet" vazio="Nenhuma venda." itens={vendas} rotulo="Vendas ligadas ao pet" rodape={mais("ve", vendas)}>
             <thead><tr><th scope="col">Nº</th><th scope="col">Data</th><th scope="col">Setor</th><th scope="col" className="num">Total</th>
                 <th scope="col" className="num">Estornado</th><th scope="col" className="num">Líquido</th><th scope="col">Situação</th></tr></thead>
-            <tbody>{vendas.map((x) => <tr key={x.id}>
+            <tbody>{lim("ve", vendas).map((x) => <tr key={x.id}>
                 <td data-rotulo="Nº">{x.id}</td><td data-rotulo="Data">{v(x.data)}</td><td data-rotulo="Setor">{x.setor === 'clinica' ? 'Clínica' : 'Petshop'}</td>
                 <td data-rotulo="Total" className="num">{x.total}</td><td data-rotulo="Estornado" className="num">{x.estornado}</td>
                 <td data-rotulo="Líquido" className="num">{v(x.liquido)}</td>
