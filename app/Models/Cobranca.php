@@ -22,6 +22,8 @@ class Cobranca extends Model
             'agendamento_id' => 'integer',
             'tenant_id' => 'integer',
             'total_centavos' => 'integer',
+            'desconto_centavos' => 'integer',
+            'desconto_autorizado_por' => 'integer',
             'fechada_em' => 'datetime',
             'pago_em' => 'datetime',
             'estorno_solicitado_por' => 'integer',

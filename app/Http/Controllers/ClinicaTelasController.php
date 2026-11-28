@@ -163,7 +163,7 @@ class ClinicaTelasController extends Controller
             'intro' => 'Cobranças dos atendimentos, com o total, o que já foi estornado e o líquido. Receber, cancelar e estornar abrem o card de revisão.',
             'erro' => $resposta['erro'],
             'linhas' => $resposta['linhas'],
-            'colunas' => ['id' => 'Nº', 'pet' => 'Pet', 'servico' => 'Serviço', 'atendimento' => 'Atendimento', 'total' => 'Total', 'estornado' => 'Estornado',
+            'colunas' => ['id' => 'Nº', 'pet' => 'Pet', 'servico' => 'Serviço', 'atendimento' => 'Atendimento', 'bruto' => 'Valor cheio', 'desconto' => 'Desconto', 'total' => 'Total líquido', 'estornado' => 'Estornado',
                 'liquido' => 'Líquido', 'status' => 'Situação', 'forma_pagamento' => 'Pagamento'],
             'resumo' => $this->resumoFinanceiro($resposta['linhas']),
             'status' => $filtros['status'] ?? '',

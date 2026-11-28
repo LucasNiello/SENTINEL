@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\RegraDeNegocioException;
+use App\Http\Requests\EditarCobrancaRequest;
 use App\Models\Agendamento;
 use App\Models\CatalogoItem;
 use App\Models\Cobranca;
@@ -11,15 +12,19 @@ use App\Models\Prontuario;
 use App\Services\Concerns\ConfereTenant;
 use App\Services\Concerns\EstornoPorItens;
 use App\Services\Concerns\FiltroPorNome;
+use App\Support\Dinheiro;
+use App\Support\RateioCobranca;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Clínica vet: cobrança de um agendamento (uma não cancelada por agendamento). Ciclo: aberta -> fechada
  * -> paga; aberta ou fechada -> cancelada; paga -> cancelada só por estorno autorizado. Regras:
  * - nasce com o serviço do agendamento como 1ª linha;
  * - cada linha COPIA descrição e preço do catálogo (mudar o catálogo não muda cobrança antiga);
- * - o total é sempre a soma dos subtotais, calculada aqui, em centavos (inteiro) — nunca informado
+ * - o total é a soma dos subtotais ativos menos o desconto geral, calculado aqui, em centavos (inteiro) — nunca informado
  *   por ninguém, nunca pela IA;
  * - itens do prontuário entram só depois da assinatura, uma única vez cada; item por diária cobra os
  *   dias de calendário entre a entrada e a alta (mínimo 1);
@@ -36,9 +41,7 @@ class CobrancaService
 {
     use ConfereTenant, EstornoPorItens, FiltroPorNome;
 
-    public function __construct(private CatalogoService $catalogo)
-    {
-    }
+    public function __construct(private CatalogoService $catalogo) {}
 
     public function abrir(int $agendamentoId, int $tenantId): Cobranca
     {
@@ -92,6 +95,7 @@ class CobrancaService
     public function estadoFinanceiro(Cobranca $cobranca): array
     {
         return ['status' => $cobranca->status, 'total_centavos' => $cobranca->total_centavos,
+            ...$this->descontoDoEstado($cobranca),
             'itens' => $cobranca->itens()->orderBy('id')->get()->map(fn ($l) => $l->only([
                 'id', 'catalogo_item_id', 'prontuario_item_id', 'quantidade', 'preco_unitario_centavos',
                 'subtotal_centavos', 'baixou_estoque', 'excluido_financeiramente',
@@ -105,7 +109,7 @@ class CobrancaService
             throw new RegraDeNegocioException('Só cobranças abertas ou a receber podem ser editadas.');
         }
 
-        return ['versao' => hash('sha256', json_encode($this->estadoFinanceiro($cobranca))),
+        return ['financeiro' => $this->totais($cobranca), 'desconto_motivo' => $cobranca->desconto_motivo, 'versao' => hash('sha256', json_encode($this->estadoFinanceiro($cobranca))),
             'linhas' => $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id')->get()
                 ->map(fn ($l) => ['item_id' => $l->id, 'descricao' => $l->descricao, 'quantidade' => $l->quantidade,
                     'clinico' => $l->prontuario_item_id !== null, 'remover' => false, 'motivo' => ''])->all(),
@@ -115,9 +119,9 @@ class CobrancaService
 
     public function editarItens(int $id, array $dados, int $tenantId): Cobranca
     {
-        $dados = \Illuminate\Support\Facades\Validator::make(
+        $dados = Validator::make(
             [...$dados, 'id' => $id, 'tenant_id' => $tenantId],
-            (new \App\Http\Requests\EditarCobrancaRequest)->rules(),
+            (new EditarCobrancaRequest)->rules(),
         )->validate();
 
         return DB::transaction(function () use ($id, $dados, $tenantId) {
@@ -128,6 +132,7 @@ class CobrancaService
             $linhas = $cobranca->itens()->orderBy('catalogo_item_id')->orderBy('id')->lockForUpdate()->get();
             // Calcular a versão com as linhas da leitura travada (não com um snapshot antigo do InnoDB).
             $antes = ['status' => $cobranca->status, 'total_centavos' => $cobranca->total_centavos,
+                ...$this->descontoDoEstado($cobranca),
                 'itens' => $linhas->sortBy('id')->map(fn ($l) => $l->only(['id', 'catalogo_item_id', 'prontuario_item_id',
                     'quantidade', 'preco_unitario_centavos', 'subtotal_centavos', 'baixou_estoque', 'excluido_financeiramente']))->values()->all()];
             if (! hash_equals(hash('sha256', json_encode($antes)), (string) ($dados['versao'] ?? ''))) {
@@ -190,6 +195,7 @@ class CobrancaService
             if (! $cobranca->itens()->where('excluido_financeiramente', false)->exists()) {
                 throw new RegraDeNegocioException('A cobrança não pode ficar sem itens. Cancele a cobrança.');
             }
+            $this->aplicarDesconto($cobranca, $dados);
             $this->recalcular($cobranca);
             app(DetalhesAuditoria::class)->anotar('valores_anteriores', $antes);
 
@@ -441,7 +447,7 @@ class CobrancaService
      * Administrador (T1). Quem pede não autoriza o próprio pedido, salvo o dono. Motivo obrigatório.
      *
      * $modo: "tudo" (o que resta), "tudo_menos_prontuario" ou "itens" ($itens = [{item_id, quantidade}]). O valor é
-     * sempre o preço copiado na linha × quantidade. Parcial: continua paga. O estorno que esgota a cobrança a deixa
+     * o líquido rateado por item e quantidade, com arredondamento cumulativo em centavos. Parcial: continua paga. O estorno que esgota a cobrança a deixa
      * cancelada e preenche as colunas estorno_* (quem pediu e quem autorizou o último, o motivo dele, o total estornado).
      * Cobrança e linhas travadas; tudo ou nada.
      *
@@ -503,13 +509,15 @@ class CobrancaService
     {
         $cobranca = Cobranca::where('tenant_id', $tenantId)->where('status', 'paga')->findOrFail($cobrancaId);
 
-        return $this->linhasDoEstorno('cobranca_id', $cobranca->id, $tenantId, $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id')->get());
+        return $this->ratearEstorno($cobranca, $this->linhasDoEstorno('cobranca_id', $cobranca->id, $tenantId, $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id')->get()));
     }
 
     private function planoDaCobranca(Cobranca $cobranca, string $modo, array $itens, bool $travar): array
     {
         $consulta = $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id');
         $linhas = $this->linhasDoEstorno('cobranca_id', $cobranca->id, $cobranca->tenant_id, ($travar ? $consulta->lockForUpdate() : $consulta)->get(), $travar);
+
+        $linhas = $this->ratearEstorno($cobranca, $linhas);
 
         return $this->planoDoEstornoDe($linhas, $this->escolherDoEstorno($linhas, $modo, $itens, 'cobrança'), (int) $cobranca->total_centavos);
     }
@@ -558,9 +566,94 @@ class CobrancaService
         ]);
     }
 
+    private function descontoDoEstado(Cobranca $c): array
+    {
+        return ['desconto_centavos' => (int) $c->desconto_centavos,
+            'desconto_motivo' => $c->desconto_motivo, 'desconto_autorizado_por' => $c->desconto_autorizado_por];
+    }
+
+    public function totais(Cobranca $c): array
+    {
+        return ['subtotal_centavos' => (int) $c->itens()->where('excluido_financeiramente', false)->sum('subtotal_centavos'),
+            'desconto_centavos' => (int) $c->desconto_centavos, 'total_centavos' => (int) $c->total_centavos];
+    }
+
+    /** Mesma regra da confirmação, mas nada persiste (inclusive estoque e auditoria). */
+    public function previaEdicao(int $id, array $dados, int $tenantId): array
+    {
+        return app(DetalhesAuditoria::class)->com([], function () use ($id, $dados, $tenantId) {
+            DB::beginTransaction();
+            try {
+                return $this->totais($this->editarItens($id, $dados, $tenantId));
+            } catch (ValidationException $e) {
+                throw new RegraDeNegocioException(collect($e->errors())->flatten()->first());
+            } finally {
+                DB::rollBack();
+            }
+        });
+    }
+
+    private function aplicarDesconto(Cobranca $c, array $dados): void
+    {
+        if (! isset($dados['desconto_valor']) || $dados['desconto_valor'] === '') {
+            return;
+        }
+        $texto = trim($dados['desconto_valor']);
+        $subtotal = (int) $c->itens()->where('excluido_financeiramente', false)->sum('subtotal_centavos');
+        if (preg_match('/^\d{1,12}([,.]\d{1,2})?$/', $texto) !== 1) {
+            throw new RegraDeNegocioException('Informe um desconto não negativo com até duas casas decimais.');
+        }
+        $valor = Dinheiro::paraCentavos($texto);
+        if ($dados['desconto_tipo'] === 'percentual') {
+            if ($valor > 1000) {
+                throw new RegraDeNegocioException('Acima de 10%, solicite autorização do supervisor. Esta fase não permite autorizar esse desconto.');
+            }
+            // Frações de centavo arredondam para baixo, respeitando inclusive o teto exato de 10%.
+            $valor = RateioCobranca::proporcao($subtotal, $valor, 10000);
+        }
+        $motivo = trim((string) ($dados['desconto_motivo'] ?? ''));
+        if (Dinheiro::paraCentavos($texto) > 0 && $motivo === '') {
+            throw new RegraDeNegocioException('Informe o motivo do desconto.');
+        }
+        $this->validarDesconto($subtotal, $valor, $motivo);
+        $c->forceFill(['desconto_centavos' => $valor, 'desconto_motivo' => $valor > 0 ? $motivo : null,
+            'desconto_autorizado_por' => null]);
+    }
+
+    private function validarDesconto(int $subtotal, int $desconto, ?string $motivo): void
+    {
+        if ($desconto < 0 || $desconto > $subtotal) {
+            throw new RegraDeNegocioException('O desconto deve estar entre zero e o subtotal.');
+        }
+        if ($desconto > intdiv($subtotal, 10)) {
+            throw new RegraDeNegocioException('Acima de 10%, solicite autorização do supervisor. Reduza o desconto para confirmar.');
+        }
+        if ($desconto > 0 && (trim((string) $motivo) === '' || mb_strlen($motivo) > 200)) {
+            throw new RegraDeNegocioException('Informe o motivo do desconto, com até 200 caracteres.');
+        }
+    }
+
+    private function ratearEstorno(Cobranca $c, array $linhas): array
+    {
+        $subtotais = [];
+        foreach ($linhas as $l) {
+            $subtotais[$l['item_id']] = $l['lancada'] * $l['preco_unitario_centavos'];
+        }
+        $liquidos = RateioCobranca::liquidos($subtotais, (int) $c->desconto_centavos);
+        if (array_sum($liquidos) !== $c->total_centavos) {
+            throw new RegraDeNegocioException('O total pago diverge dos itens. Confira a cobrança antes de estornar.');
+        }
+
+        return array_map(fn ($l) => [...$l, 'liquido_linha_centavos' => $liquidos[$l['item_id']]], $linhas);
+    }
+
     private function recalcular(Cobranca $cobranca): Cobranca
     {
-        $cobranca->update(['total_centavos' => (int) $cobranca->itens()->where('excluido_financeiramente', false)->sum('subtotal_centavos')]);
+        $subtotal = (int) $cobranca->itens()->where('excluido_financeiramente', false)->sum('subtotal_centavos');
+        $desconto = (int) $cobranca->desconto_centavos;
+        $this->validarDesconto($subtotal, $desconto, $cobranca->desconto_motivo);
+        $cobranca->total_centavos = $subtotal - $desconto;
+        $cobranca->save();
 
         return $cobranca;
     }

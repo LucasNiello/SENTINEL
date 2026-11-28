@@ -15,6 +15,9 @@ class EditarCobrancaRequest extends FormRequest
     {
         return [
             'id' => 'required|integer|min:1', 'tenant_id' => 'required|integer',
+            'desconto_tipo' => 'nullable|required_with:desconto_valor|in:reais,percentual',
+            'desconto_valor' => 'nullable|required_with:desconto_tipo|string|max:30',
+            'desconto_motivo' => 'nullable|string|max:200',
             'versao' => 'required|string|size:64',
             'linhas' => 'present|array|max:200',
             'linhas.*' => 'array:item_id,quantidade,remover,motivo',

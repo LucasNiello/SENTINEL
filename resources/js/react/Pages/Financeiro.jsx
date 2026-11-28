@@ -10,7 +10,7 @@ import usarCartao from '../Components/usarCartao';
 // Cobranças e Vendas: a mesma tela com colunas e ações diferentes (o servidor manda as duas coisas).
 const SELOS = { aberta: ['Aberta', ''], 'a receber': ['A receber', 'status--expirado'], paga: ['Paga', 'status--sucesso'], cancelada: ['Cancelada', 'status--erro'] };
 const PAGAMENTOS = { dinheiro: 'Dinheiro', pix: 'Pix', cartao: 'Cartão' };
-const NUMERICAS = ['total', 'estornado', 'liquido'];
+const NUMERICAS = ['bruto', 'desconto', 'total', 'estornado', 'liquido'];
 const vazio = (v) => v === '' || v === null || v === undefined;
 
 export default function Financeiro({ titulo, rota, intro, erro, linhas, colunas, resumo, status, setor, opcoesStatus, acoes }) {

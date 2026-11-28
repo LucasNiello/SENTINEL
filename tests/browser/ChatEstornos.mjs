@@ -19,8 +19,8 @@ page.on('pageerror', (e) => errors.push(e.message));
 const proposta = '11111111-1111-4111-8111-111111111111';
 const token = '22222222-2222-4222-8222-222222222222';
 const itens = [
-    { item_id: 1, descricao: 'Consulta', origem: 'Prontuário', preco: 'R$ 150,00', lancada: 1, estornada: 0, restante: 1, quantidade: 1 },
-    { item_id: 2, descricao: 'Medicamento', origem: 'Avulso', preco: 'R$ 35,00', lancada: 2, estornada: 0, restante: 2, quantidade: 2 },
+    { item_id: 1, descricao: 'Consulta', origem: 'Prontuário', preco: 'R$ 150,00', liquido_restante: 'R$ 135,00', lancada: 1, estornada: 0, restante: 1, quantidade: 1 },
+    { item_id: 2, descricao: 'Medicamento', origem: 'Avulso', preco: 'R$ 35,00', liquido_restante: 'R$ 63,00', lancada: 2, estornada: 0, restante: 2, quantidade: 2 },
     { item_id: 3, descricao: 'Esgotado', origem: 'Avulso', preco: 'R$ 10,00', lancada: 1, estornada: 1, restante: 0, quantidade: 0 },
 ];
 const campos = (modo = 'tudo', motivo = 'Cobrado a mais') => [
@@ -82,10 +82,13 @@ try {
     await abrir();
     assert.equal(await quantidade('Esgotado').isDisabled(), true);
     assert.equal(await page.locator('tbody tr').count(), 3);
-    await page.getByLabel('Modo', { exact: false }).selectOption('tudo_menos_prontuario');
+    await page.getByText('Líquido restante: R$ 135,00', { exact: true }).waitFor();
+    await page.getByRole('combobox', { name: 'Modo' }).click();
+    await page.getByRole('option', { name: 'tudo_menos_prontuario', exact: true }).click();
     assert.equal(await quantidade('Consulta').inputValue(), '0');
     assert.equal(await quantidade('Medicamento').inputValue(), '2');
-    await page.getByLabel('Modo', { exact: false }).selectOption('tudo');
+    await page.getByRole('combobox', { name: 'Modo' }).click();
+    await page.getByRole('option', { name: 'tudo', exact: true }).click();
     assert.equal(await quantidade('Consulta').inputValue(), '1');
     await quantidade('Consulta').fill('0'); await quantidade('Medicamento').fill('1');
     assert.equal(await page.getByLabel('Modo', { exact: false }).inputValue(), 'itens');
@@ -111,7 +114,7 @@ try {
     assert.ok(!(await page.locator('#historico').innerText()).includes('fixture-pin'));
     await abrir('validacao'); await quantidade('Medicamento').fill('3'); await credenciais();
     await page.getByRole('button', { name: 'Revisar', exact: true }).click();
-    await page.getByText('Medicamento: restam 2.', { exact: true }).waitFor();
+    await page.getByText('Quantidade inválida.', { exact: true }).waitFor();
     assert.equal(await quantidade('Medicamento').inputValue(), '3');
     assert.equal(await page.getByRole('button', { name: 'Confirmar', exact: true }).isDisabled(), true);
     scenario = 'sucesso'; await quantidade('Consulta').fill('0'); await quantidade('Medicamento').fill('1'); await revisar();

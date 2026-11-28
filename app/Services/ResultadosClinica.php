@@ -3,11 +3,11 @@
 namespace App\Services;
 
 use App\Models\Cobranca;
-use App\Models\CobrancaItem;
 use App\Models\Estorno;
 use App\Models\Lancamento;
 use App\Models\Venda;
 use App\Models\VendaItem;
+use App\Support\RateioCobranca;
 use Carbon\CarbonImmutable;
 
 /**
@@ -119,9 +119,8 @@ class ResultadosClinica
     private function topItens(int $tenantId, CarbonImmutable $inicio, CarbonImmutable $fim): array
     {
         $porItem = [];
-        foreach ([[CobrancaItem::class, 'cobranca_itens', 'cobrancas', 'cobranca_id'], [VendaItem::class, 'venda_itens', 'vendas', 'venda_id']] as [$modelo, $tabela, $pai, $chave]) {
+        foreach ([[VendaItem::class, 'venda_itens', 'vendas', 'venda_id']] as [$modelo, $tabela, $pai, $chave]) {
             $linhas = $modelo::query()->join($pai, "{$pai}.id", '=', "{$tabela}.{$chave}")
-                ->when($modelo === CobrancaItem::class, fn ($q) => $q->where("{$tabela}.excluido_financeiramente", false))
                 ->where("{$tabela}.tenant_id", $tenantId)->where("{$pai}.tenant_id", $tenantId)
                 ->whereNotNull("{$pai}.pago_em")->whereBetween("{$pai}.pago_em", [$inicio, $fim])
                 ->groupBy("{$tabela}.descricao")
@@ -130,6 +129,16 @@ class ResultadosClinica
                 $porItem[$linha->descricao] ??= ['descricao' => (string) $linha->descricao, 'quantidade' => 0, 'total' => 0];
                 $porItem[$linha->descricao]['quantidade'] += (int) $linha->quantidade;
                 $porItem[$linha->descricao]['total'] += (int) $linha->total;
+            }
+        }
+        // O faturamento por item usa o mesmo rateio em centavos do estorno.
+        foreach (Cobranca::where('tenant_id', $tenantId)->whereNotNull('pago_em')->whereBetween('pago_em', [$inicio, $fim])
+            ->with(['itens' => fn ($q) => $q->where('excluido_financeiramente', false)->orderBy('id')])->lazyById(200) as $c) {
+            $liquidos = RateioCobranca::liquidos($c->itens->pluck('subtotal_centavos', 'id')->all(), (int) $c->desconto_centavos);
+            foreach ($c->itens as $linha) {
+                $porItem[$linha->descricao] ??= ['descricao' => (string) $linha->descricao, 'quantidade' => 0, 'total' => 0];
+                $porItem[$linha->descricao]['quantidade'] += (int) $linha->quantidade;
+                $porItem[$linha->descricao]['total'] += $liquidos[$linha->id];
             }
         }
         usort($porItem, fn (array $a, array $b) => [$b['total'], $a['descricao']] <=> [$a['total'], $b['descricao']]);

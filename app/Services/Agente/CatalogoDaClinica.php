@@ -681,6 +681,8 @@ trait CatalogoDaClinica
                         'pet' => $c->getAttribute('pet'),
                         'servico' => $c->getAttribute('servico'),
                         'atendimento' => \Carbon\CarbonImmutable::parse($c->getAttribute('atendimento_em'), (string) config('app.timezone'))->format('d/m/Y H:i'),
+                        'bruto' => $this->reais((int) $c->total_centavos + (int) $c->desconto_centavos),
+                        'desconto' => $this->reais((int) $c->desconto_centavos),
                         'total' => $this->reais((int) $c->total_centavos),
                         // T2: estornado (soma dos estornos por itens; estorno antigo, de antes da T2: a coluna estorno_valor) e líquido.
                         'estornado' => $this->reais($estornado = $this->estornadoDaCobranca($c)),
@@ -691,7 +693,7 @@ trait CatalogoDaClinica
                         ...($c->status === 'fechada' && $this->podeEditar('receber_cobranca') ? ['acao' => ['tool' => 'receber_cobranca', 'rotulo' => 'Receber']] : []),
                     ])->all(),
                 mensagemErro: 'Não consegui consultar as cobranças agora. Tente novamente.',
-                colunas: ['id', 'pet', 'servico', 'atendimento', 'total', 'estornado', 'liquido', 'status', 'forma_pagamento'],
+                colunas: ['id', 'pet', 'servico', 'atendimento', 'bruto', 'desconto', 'total', 'estornado', 'liquido', 'status', 'forma_pagamento'],
             ),
             $this->definirAcao(
                 nome: 'cobrar_atendimento',
@@ -721,7 +723,7 @@ trait CatalogoDaClinica
             ),
             $this->definirAcao(
                 nome: 'editar_cobranca',
-                descricao: 'Edita os itens financeiros de uma cobrança aberta ou a receber. Localize pelo id ou nome do pet. O humano escolhe quantidades, inclusões e exclusões no card. Não informe preços. Itens clínicos só podem ser excluídos financeiramente, sem mudar consumo ou prontuário.',
+                descricao: 'Edita os itens financeiros de uma cobrança aberta ou a receber. Localize pelo id ou nome do pet. O humano escolhe quantidades, inclusões, exclusões e desconto geral no card. Não informe preços nem valores de desconto. Itens clínicos só podem ser excluídos financeiramente, sem mudar consumo ou prontuário.',
                 acao: 'editar',
                 entidade: 'Cobranca',
                 papeis: $quemCobra,
@@ -736,8 +738,20 @@ trait CatalogoDaClinica
                 rotulo: 'a cobrança',
                 colunaRotulo: 'pet',
                 rotuloAcao: 'Editar',
-                campos: ['versao', 'linhas', 'novos'],
-                resumir: fn (array $v, int $tenantId) => ['resumo' => $this->resumoDaCobranca((int) $v['id'], $tenantId), 'edicao_cobranca' => $cobrancas->editor((int) $v['id'], $tenantId)],
+                campos: ['versao', 'linhas', 'novos', 'desconto_tipo', 'desconto_valor', 'desconto_motivo'],
+                resumir: function (array $v, int $tenantId) use ($cobrancas) {
+                    $editor = $cobrancas->editor((int) $v['id'], $tenantId);
+                    if (strlen((string) ($v['versao'] ?? '')) === 64) {
+                        try {
+                            $editor['financeiro'] = $cobrancas->previaEdicao((int) $v['id'], $v, $tenantId);
+                        } catch (\App\Exceptions\RegraDeNegocioException $e) {
+                            $editor['financeiro'] = null;
+                            $editor['erro_previa'] = $e->getMessage();
+                        }
+                    }
+
+                    return ['resumo' => $this->resumoDaCobranca((int) $v['id'], $tenantId), 'edicao_cobranca' => $editor];
+                },
             ),
             $this->definirAcao(
                 nome: 'receber_cobranca',
@@ -1347,6 +1361,9 @@ trait CatalogoDaClinica
             ['rotulo' => 'Pet', 'valor' => $cobranca->agendamento?->pet?->nome],
             ['rotulo' => 'Atendimento', 'valor' => $cobranca->agendamento?->servico?->nome_comercial.' em '.$cobranca->agendamento?->inicio?->format('d/m/Y H:i')],
             ...$this->linhasDoResumo($cobranca->itens->where('excluido_financeiramente', false)->sortBy('id')->map(fn ($l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->values()->all(), (int) $cobranca->total_centavos),
+            ['rotulo' => 'Valor cheio', 'valor' => $this->reais((int) $cobranca->total_centavos + (int) $cobranca->desconto_centavos)],
+            ['rotulo' => 'Desconto geral', 'valor' => $this->reais((int) $cobranca->desconto_centavos)],
+            ['rotulo' => 'Total líquido', 'valor' => $this->reais((int) $cobranca->total_centavos)],
             ['rotulo' => 'Situação', 'valor' => $cobranca->status === 'fechada' ? 'a receber' : $cobranca->status],
         ];
     }
@@ -1548,6 +1565,7 @@ trait CatalogoDaClinica
                 'estornada' => $l['estornada'],
                 'restante' => $l['restante'],
                 'preco' => $this->reais($l['preco_unitario_centavos']),
+                ...(isset($l['liquido_linha_centavos']) ? ['liquido_restante' => $this->reais($l['liquido_linha_centavos'] - $l['estornado_centavos'])] : []),
                 'quantidade' => (int) ($escolhidas[$l['item_id']] ?? 0),
             ], $todas),
         ];

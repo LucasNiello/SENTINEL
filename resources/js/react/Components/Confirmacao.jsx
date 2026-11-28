@@ -263,7 +263,7 @@ export default function Confirmacao({ proposta, adicionar, adicionarTabela, trav
         <form ref={form} className="card-form" onSubmit={(evento) => { evento.preventDefault(); executar('revisar'); }}>
             <CamposProposta campos={formulario.ficha ? campos.filter((c) => !['profissional_id', 'inicio'].includes(c.nome)) : campos} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
                 alterar={alterarCampo} />
-            {formulario.edicao_cobranca && edicaoCobranca && <ItensCobranca editor={proposta.formulario.edicao_cobranca} valor={edicaoCobranca} alterar={setEdicaoCobranca} bloqueado={bloqueado} />}
+            {formulario.edicao_cobranca && edicaoCobranca && <ItensCobranca proposta={proposta.proposta} editor={proposta.formulario.edicao_cobranca} valor={edicaoCobranca} alterar={setEdicaoCobranca} bloqueado={bloqueado} />}
             {formulario.itens_estorno && <ItensEstorno itens={formulario.itens_estorno} quantidades={quantidades} bloqueado={bloqueado}
                 alterar={(id, quantidade) => { if (!bloqueado) { setQuantidades((anteriores) => ({ ...anteriores, [id]: quantidade })); setValores((anteriores) => ({ ...anteriores, modo: 'itens' })); } }} />}
             {formulario.ficha && <CalendarioAgendamento ficha={formulario.ficha} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}

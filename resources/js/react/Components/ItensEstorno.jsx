@@ -16,7 +16,7 @@ export default function ItensEstorno({ itens, quantidades, alterar, bloqueado })
                     <thead><tr>{['Item', 'Preço', 'Lançado', 'Já estornado', 'Estornar agora'].map((titulo) => <th key={titulo} scope="col">{titulo}</th>)}</tr></thead>
                     <tbody>{itens.map((item) => <tr key={item.item_id}>
                         <td>{item.descricao}<span className="estorno-itens__origem">{item.origem === 'Prontuário' ? 'Prontuário: só o valor volta, o estoque não' : 'Avulso'}</span></td>
-                        <td className="num">{item.preco}</td><td className="num">{item.lancada}</td><td className="num">{item.estornada}</td>
+                        <td className="num">{item.preco}{item.liquido_restante != null && <span className="estorno-itens__resta">Líquido restante: {item.liquido_restante}</span>}</td><td className="num">{item.lancada}</td><td className="num">{item.estornada}</td>
                         <td><input type="text" inputMode="numeric" value={quantidades[item.item_id] ?? ''} disabled={item.restante < 1}
                             aria-label={`Estornar quantos de ${item.descricao} (restam ${item.restante})`} onChange={(e) => alterar(item.item_id, e.target.value)} />
                             <span className="estorno-itens__resta">restam {item.restante}</span></td>

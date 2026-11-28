@@ -1293,6 +1293,10 @@ class AiAgentService
             ]];
         }
 
+        // O desconto é preenchido pelo humano no card, nunca por argumentos gerados pela IA.
+        if ($tool === 'editar_cobranca') {
+            unset($argumentos['desconto_tipo'], $argumentos['desconto_valor'], $argumentos['desconto_motivo']);
+        }
         return ['argumentos' => $this->valoresDoFormulario($definicao, $encontrados->first(), $argumentos)];
     }
 

@@ -6,6 +6,7 @@ use App\Exceptions\RegraDeNegocioException;
 use App\Models\Estorno;
 use App\Models\EstornoItem;
 use App\Models\User;
+use App\Support\RateioCobranca;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -13,7 +14,7 @@ use Illuminate\Support\Collection;
  * T2 (14/11): estorno por itens, igual para a cobrança e para a venda (resposta E). Regras:
  * - por linha, a quantidade vai de 1 até o que ainda não foi estornado; vários estornos parciais até esgotar;
  * - valor = preço COPIADO no lançamento (preco_unitario_centavos da linha) × quantidade; nunca o preço atual do catálogo,
- *   nunca um valor informado por alguém (nem pela IA);
+ *   na cobrança, desconta o rateio geral e usa o líquido cumulativo por quantidade; nunca um valor informado pela IA;
  * - estoque volta só para a linha avulsa que baixou estoque; a linha do prontuário nunca devolve (resposta D);
  * - modos: "tudo" (tudo o que resta), "tudo_menos_prontuario" (tudo o que resta, sem as linhas do prontuário) e "itens"
  *   (a lista [{item_id, quantidade}]).
@@ -41,13 +42,15 @@ trait EstornoPorItens
             ->join('estornos', 'estornos.id', '=', 'estorno_itens.estorno_id')
             ->where('estornos.tenant_id', $tenantId)
             ->where('estornos.'.$colunaPai, $paiId)
-            ->select(['estorno_itens.item_id', 'estorno_itens.quantidade']);
+            ->select(['estorno_itens.item_id', 'estorno_itens.quantidade', 'estorno_itens.valor_centavos']);
         $estornadas = [];
+        $valores = [];
         foreach (($travar ? $consulta->lockForUpdate() : $consulta)->get() as $ja) {
+            $valores[(int) $ja->item_id] = ($valores[(int) $ja->item_id] ?? 0) + (int) $ja->valor_centavos;
             $estornadas[(int) $ja->item_id] = ($estornadas[(int) $ja->item_id] ?? 0) + (int) $ja->quantidade;
         }
 
-        return $linhas->map(function (Model $l) use ($estornadas) {
+        return $linhas->map(function (Model $l) use ($estornadas, $valores) {
             $estornada = $estornadas[$l->id] ?? 0;
 
             return [
@@ -57,6 +60,7 @@ trait EstornoPorItens
                 'prontuario' => $l->getAttribute('prontuario_item_id') !== null,
                 'lancada' => (int) $l->quantidade,
                 'estornada' => $estornada,
+                'estornado_centavos' => $valores[$l->id] ?? 0,
                 'restante' => max(0, (int) $l->quantidade - $estornada),
                 'preco_unitario_centavos' => (int) $l->preco_unitario_centavos,
                 'baixou_estoque' => (bool) $l->baixou_estoque,
@@ -145,14 +149,27 @@ trait EstornoPorItens
         $valor = 0;
         $resta = 0;
         foreach ($linhas as $i => $l) {
-            $estornadoAntes += $l['estornada'] * $l['preco_unitario_centavos'];
+            $ja = $l['estornada'] * $l['preco_unitario_centavos'];
+            if (isset($l['liquido_linha_centavos'])) {
+                $ja = RateioCobranca::proporcao($l['liquido_linha_centavos'], $l['estornada'], $l['lancada']);
+                if ($ja !== $l['estornado_centavos']) {
+                    throw new RegraDeNegocioException('Histórico de estornos incompatível com o rateio. Confira a cobrança antes de estornar.');
+                }
+            }
+            $estornadoAntes += $ja;
             $quantidade = $escolha[$l['item_id']] ?? 0;
             $linhas[$i]['quantidade'] = $quantidade;
-            $linhas[$i]['valor_centavos'] = $quantidade * $l['preco_unitario_centavos'];
+            $linhas[$i]['valor_centavos'] = isset($l['liquido_linha_centavos'])
+                ? RateioCobranca::proporcao($l['liquido_linha_centavos'], $l['estornada'] + $quantidade, $l['lancada']) - $ja
+                : $quantidade * $l['preco_unitario_centavos'];
             // Resposta D: o que veio do prontuário foi aplicado no animal; só o valor é estornado.
             $linhas[$i]['devolve_estoque'] = $quantidade >= 1 && $l['baixou_estoque'] && ! $l['prontuario'];
             $valor += $linhas[$i]['valor_centavos'];
             $resta += $l['restante'] - $quantidade;
+        }
+
+        if ($valor < 0 || $estornadoAntes + $valor > $totalCentavos) {
+            throw new RegraDeNegocioException('O estorno ultrapassaria o valor líquido pago.');
         }
 
         return [
