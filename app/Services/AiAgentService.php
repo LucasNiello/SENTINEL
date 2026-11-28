@@ -1658,11 +1658,15 @@ class AiAgentService
     /**
      * 25/11: o card dessas tools não tem a etapa Revisar na tela: o Confirmar manda {proposta, valores} direto para
      * /agente/confirmar (AgenteController::confirmarEmUmPasso), que revisa e grava na mesma requisição; conflito (vaga, versão,
-     * CRMV) volta como 422 com o formulário. Só a agenda; estorno, PIN, lote e exclusão seguem como estão.
+     * CRMV) volta como 422 com o formulário. F0 (27/11): receber, cobrar atendimento e registrar venda também usam
+     * esse contrato. Cancelamentos, estornos, PIN, lote e exclusão seguem com as proteções existentes.
      */
     public function confirmaEmUmPasso(string $tool): bool
     {
-        return in_array($tool, ['agendar_atendimento', 'remarcar_agendamento', 'alterar_servico_agendamento', 'alterar_status_agendamento'], true);
+        return in_array($tool, [
+            'agendar_atendimento', 'remarcar_agendamento', 'alterar_servico_agendamento', 'alterar_status_agendamento',
+            'receber_cobranca', 'cobrar_atendimento', 'registrar_venda',
+        ], true);
     }
 
     /** Tools cujo Revisar devolve o card refeito com os avisos do que foi revisado (agendar/remarcar: quantos já ocupam o horário). */
