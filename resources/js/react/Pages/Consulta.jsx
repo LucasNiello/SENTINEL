@@ -8,7 +8,7 @@ import CaixaCarregando from '../Components/ui/CaixaCarregando';
 import usarCartao, { csrf, pedir } from '../Components/usarCartao';
 
 // Cadastros e Lixeira (mesma tela). Filtros, RBAC e tenant são conferidos de novo no /agente/consultar; toda gravação passa pelo card.
-export default function Consulta({ titulo, intro, entidades, cadastroInicial = null, podeArquivarPet = false, podeReativarPet = false }) {
+export default function Consulta({ titulo, intro, entidades, cadastroInicial = null, podeArquivarPet = false, podeReativarPet = false, podeDarEntradaEstoque = false }) {
     const chaves = Object.keys(entidades);
     const [chave, setChave] = useState(cadastroInicial && entidades[cadastroInicial] ? cadastroInicial : chaves[0]);
     const entidade = entidades[chave];
@@ -47,6 +47,9 @@ export default function Consulta({ titulo, intro, entidades, cadastroInicial = n
     const linkDaLinha = (linha) => chave === 'pets' ? { href: `/pets/${linha.id}`, rotulo: 'Ver ficha' } : chave === 'tutores' ? { href: `/tutores/${linha.id}`, rotulo: 'Ver ficha' } : null;
     const acoesExtras = (linha) => {
         const extras = [];
+        if (chave === 'catalogo' && podeDarEntradaEstoque && linha.tipo === 'produto' && linha.controla_estoque === true) {
+            extras.push({ tool: 'dar_entrada_estoque', rotulo: 'Entrada de estoque' });
+        }
         if (chave === 'pets') {
             if (linha.inativado_em) { if (podeReativarPet) extras.push({ tool: 'reativar_pet', rotulo: 'Reativar' }); }
             else if (podeArquivarPet) extras.push({ tool: 'arquivar_pet', rotulo: 'Arquivar' });

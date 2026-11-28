@@ -94,6 +94,7 @@ class TelasController extends Controller
         $dados['entidades'] = array_map(fn (array $e, string $chave) => [...$e, 'excluir' => isset($excluir[$chave]) && $this->agente->podeExecutar($excluir[$chave]) ? $excluir[$chave] : null], $entidades, array_keys($entidades));
         $dados['entidades'] = array_combine(array_keys($entidades), $dados['entidades']);
         $dados['podeArquivarPet'] = $this->agente->podeExecutar('arquivar_pet');
+        $dados['podeDarEntradaEstoque'] = $this->agente->podeExecutar('dar_entrada_estoque');
         $dados['podeReativarPet'] = $this->agente->podeExecutar('reativar_pet');
 
         return Front::tela('telas.consulta', 'Consulta', $dados);

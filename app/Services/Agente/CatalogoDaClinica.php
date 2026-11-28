@@ -7,6 +7,7 @@ use App\Http\Requests\AlterarServicoAgendamentoRequest;
 use App\Http\Requests\AlterarStatusAgendamentoRequest;
 use App\Http\Requests\CatalogoItemAtualizacaoRequest;
 use App\Http\Requests\CatalogoItemRequest;
+use App\Http\Requests\EntradaEstoqueRequest;
 use App\Http\Requests\EstornarCobrancaRequest;
 use App\Http\Requests\EstornarVendaRequest;
 use App\Http\Requests\PetRequest;
@@ -273,6 +274,40 @@ trait CatalogoDaClinica
                 tituloAtualizar: 'Alterar item do catálogo',
                 sucessoAtualizar: 'Item do catálogo atualizado',
                 requestAtualizar: CatalogoItemAtualizacaoRequest::class,
+            ),
+            $this->definirAcao(
+                nome: 'dar_entrada_estoque',
+                descricao: 'Dá entrada de unidades de um produto com controle de estoque, somando ao saldo atual. Localize pelo ID ou nome comercial. Quantidade inteira de 1 a 100000; motivo opcional de até 200 caracteres. Nunca substitui o saldo.',
+                acao: 'entrada_estoque',
+                entidade: 'CatalogoItem',
+                papeis: self::PAPEIS_DO_DONO,
+                propriedades: [
+                    'quantidade' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100000],
+                    'motivo' => ['type' => 'string', 'maxLength' => 200],
+                ],
+                obrigatorios: ['quantidade'],
+                formRequest: EntradaEstoqueRequest::class,
+                executar: fn (array $d, int $tenantId) => $catalogo->entradaDeEstoque($d['id'], $d['quantidade'], $tenantId),
+                mensagemErro: 'Não consegui registrar a entrada de estoque. Nada foi gravado.',
+                titulo: 'Entrada de estoque',
+                sucesso: 'Entrada de estoque registrada',
+                conferir: function (array $a): ?array {
+                    $item = CatalogoItem::where('tenant_id', $a['tenant_id'])->find($a['id'] ?? 0);
+
+                    return $item !== null && $item->tipo === 'produto' && $item->controla_estoque
+                        ? null : ['campo' => 'id', 'motivo' => 'A entrada exige um produto deste tenant com controle de estoque.'];
+                },
+                localizar: $catalogo->localizar(...),
+                rotulo: 'o produto',
+                buscaPor: 'nome comercial',
+                colunaRotulo: 'nome_comercial',
+                rotuloAcao: 'Dar entrada',
+                campos: ['quantidade', 'motivo'],
+                resumir: function (array $v, int $tenantId): array {
+                    $item = CatalogoItem::where('tenant_id', $tenantId)->findOrFail($v['id']);
+
+                    return [['rotulo' => 'Produto', 'valor' => $item->nome_comercial], ['rotulo' => 'Saldo atual', 'valor' => $item->estoque]];
+                },
             ),
             ...$this->toolsDeAtendimento(),
             ...$this->definirLixeira($this->lixeirasDaClinica()),

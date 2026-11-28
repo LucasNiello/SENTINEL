@@ -992,6 +992,9 @@ class AiAgentService
                 $escolhido = $this->profissionalEscolhidoPeloServidor($tool, $retorno, $argumentos);
                 $parametros = $escolhido === null ? $argumentos
                     : [...$argumentos, 'profissional_id' => $escolhido, 'profissional_escolhido_pelo_servidor' => true];
+                if ($tool === 'dar_entrada_estoque') {
+                    $parametros['estoque'] = $retorno->estoque; // saldo novo, obtido sob a mesma trava da movimentação
+                }
 
                 $this->auditar(
                     $tool,
@@ -1666,6 +1669,7 @@ class AiAgentService
         return in_array($tool, [
             'agendar_atendimento', 'remarcar_agendamento', 'alterar_servico_agendamento', 'alterar_status_agendamento',
             'receber_cobranca', 'cobrar_atendimento', 'registrar_venda',
+            'dar_entrada_estoque',
         ], true);
     }
 

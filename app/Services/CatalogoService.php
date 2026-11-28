@@ -9,6 +9,7 @@ use App\Services\Concerns\ExclusaoSegura;
 use App\Services\Concerns\FiltroPorNome;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Clínica vet: catálogo (serviços e produtos dos dois setores) e estoque. Preço em centavos (int).
@@ -118,21 +119,30 @@ class CatalogoService
     /** Reposição (compra de mercadoria). */
     public function entradaDeEstoque(int $id, int $quantidade, int $tenantId): CatalogoItem
     {
-        $quantidade = $this->quantidadeValida($quantidade);
-        $item = CatalogoItem::where('tenant_id', $tenantId)->findOrFail($id);
+        return DB::transaction(function () use ($id, $quantidade, $tenantId) {
+            $quantidade = $this->quantidadeValida($quantidade);
+            $item = CatalogoItem::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
 
-        if (! $item->controla_estoque) {
-            throw new RegraDeNegocioException("{$item->nome_comercial} não controla estoque.");
-        }
+            if (! $item->controla_estoque) {
+                throw new RegraDeNegocioException("O produto {$item->nome_comercial} não controla estoque.");
+            }
+            if ($item->tipo !== 'produto') {
+                throw new RegraDeNegocioException('A entrada exige um produto com controle de estoque.');
+            }
 
-        // Atômico e com teto: o estoque nunca passa de QUANTIDADE_MAXIMA (o atualizar reconfere esse valor).
-        $entrou = CatalogoItem::whereKey($item->id)->where('estoque', '<=', self::QUANTIDADE_MAXIMA - $quantidade)->increment('estoque', $quantidade);
+            $antes = $item->estoque;
+            // A trava protege a leitura para auditoria; o incremento continua atômico e limitado ao teto.
+            $entrou = CatalogoItem::where('tenant_id', $tenantId)->whereKey($item->id)
+                ->where('estoque', '<=', self::QUANTIDADE_MAXIMA - $quantidade)->increment('estoque', $quantidade);
 
-        if ($entrou === 0) {
-            throw new RegraDeNegocioException("A entrada levaria o estoque de {$item->nome_comercial} acima de ".self::QUANTIDADE_MAXIMA.'.');
-        }
+            if ($entrou === 0) {
+                throw new RegraDeNegocioException("A entrada levaria o estoque de {$item->nome_comercial} acima de ".self::QUANTIDADE_MAXIMA.'.');
+            }
 
-        return $item->refresh();
+            app(DetalhesAuditoria::class)->anotar('valores_anteriores', ['estoque' => $antes]);
+
+            return $item->refresh();
+        });
     }
 
     /**
