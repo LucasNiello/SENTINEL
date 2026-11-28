@@ -995,6 +995,9 @@ class AiAgentService
                 if ($tool === 'dar_entrada_estoque') {
                     $parametros['estoque'] = $retorno->estoque; // saldo novo, obtido sob a mesma trava da movimentação
                 }
+                if ($tool === 'editar_cobranca') {
+                    $parametros['valores_novos'] = app(CobrancaService::class)->estadoFinanceiro($retorno);
+                }
 
                 $this->auditar(
                     $tool,
@@ -1670,6 +1673,7 @@ class AiAgentService
             'agendar_atendimento', 'remarcar_agendamento', 'alterar_servico_agendamento', 'alterar_status_agendamento',
             'receber_cobranca', 'cobrar_atendimento', 'registrar_venda',
             'dar_entrada_estoque',
+            'editar_cobranca',
         ], true);
     }
 
@@ -1725,6 +1729,10 @@ class AiAgentService
                 if (isset($resumido['itens_estorno'])) {
                     $formulario['itens_estorno'] = array_values($resumido['itens_estorno']);
                     $formulario['campos'] = array_values(array_filter($formulario['campos'], fn (array $c) => $c['nome'] !== 'linhas'));
+                }
+                if (isset($resumido['edicao_cobranca'])) {
+                    $formulario['edicao_cobranca'] = $resumido['edicao_cobranca'];
+                    $formulario['campos'] = [];
                 }
             } catch (ToolRecusadaException $e) {
                 $formulario['resumo'] = [];

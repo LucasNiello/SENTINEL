@@ -935,7 +935,7 @@ class AgenteController extends Controller
         'criar_tutor' => 'consultar_tutores', 'atualizar_tutor' => 'consultar_tutores', 'cadastrar_cliente_com_pets' => 'consultar_tutores',
         'criar_pet' => 'consultar_pets', 'atualizar_pet' => 'consultar_pets', 'arquivar_pet' => 'consultar_pets', 'reativar_pet' => 'consultar_pets',
         'criar_item_catalogo' => 'consultar_catalogo', 'atualizar_item_catalogo' => 'consultar_catalogo',
-        'cobrar_atendimento' => 'consultar_cobrancas', 'receber_cobranca' => 'consultar_cobrancas', 'cancelar_cobranca' => 'consultar_cobrancas', 'estornar_cobranca' => 'consultar_cobrancas',
+        'cobrar_atendimento' => 'consultar_cobrancas', 'receber_cobranca' => 'consultar_cobrancas', 'cancelar_cobranca' => 'consultar_cobrancas', 'estornar_cobranca' => 'consultar_cobrancas', 'editar_cobranca' => 'consultar_cobrancas',
         'registrar_venda' => 'consultar_vendas', 'estornar_venda' => 'consultar_vendas',
     ];
 

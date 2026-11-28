@@ -19,6 +19,7 @@ class CobrancaItem extends Model
             'quantidade' => 'integer',
             'subtotal_centavos' => 'integer',
             'baixou_estoque' => 'boolean',
+            'excluido_financeiramente' => 'boolean',
         ];
     }
 

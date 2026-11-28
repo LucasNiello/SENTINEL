@@ -720,6 +720,26 @@ trait CatalogoDaClinica
                 },
             ),
             $this->definirAcao(
+                nome: 'editar_cobranca',
+                descricao: 'Edita os itens financeiros de uma cobrança aberta ou a receber. Localize pelo id ou nome do pet. O humano escolhe quantidades, inclusões e exclusões no card. Não informe preços. Itens clínicos só podem ser excluídos financeiramente, sem mudar consumo ou prontuário.',
+                acao: 'editar',
+                entidade: 'Cobranca',
+                papeis: $quemCobra,
+                propriedades: [],
+                obrigatorios: [],
+                formRequest: \App\Http\Requests\EditarCobrancaRequest::class,
+                executar: fn (array $d, int $tenantId) => $cobrancas->editarItens($d['id'], $d, $tenantId),
+                mensagemErro: 'Não consegui editar a cobrança. Nada foi gravado.',
+                titulo: 'Editar cobrança',
+                sucesso: 'Cobrança editada',
+                localizar: fn (?int $id, ?string $busca, int $tenantId) => $cobrancas->localizar($id, $busca, $tenantId, ['aberta', 'fechada']),
+                rotulo: 'a cobrança',
+                colunaRotulo: 'pet',
+                rotuloAcao: 'Editar',
+                campos: ['versao', 'linhas', 'novos'],
+                resumir: fn (array $v, int $tenantId) => ['resumo' => $this->resumoDaCobranca((int) $v['id'], $tenantId), 'edicao_cobranca' => $cobrancas->editor((int) $v['id'], $tenantId)],
+            ),
+            $this->definirAcao(
                 nome: 'receber_cobranca',
                 descricao: 'Registra o pagamento de uma cobrança a receber (fechada): dinheiro, pix ou cartao. Achada pelo id da cobrança ou pelo nome do pet.',
                 acao: 'receber',
@@ -1326,7 +1346,7 @@ trait CatalogoDaClinica
         return [
             ['rotulo' => 'Pet', 'valor' => $cobranca->agendamento?->pet?->nome],
             ['rotulo' => 'Atendimento', 'valor' => $cobranca->agendamento?->servico?->nome_comercial.' em '.$cobranca->agendamento?->inicio?->format('d/m/Y H:i')],
-            ...$this->linhasDoResumo($cobranca->itens->sortBy('id')->map(fn ($l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->values()->all(), (int) $cobranca->total_centavos),
+            ...$this->linhasDoResumo($cobranca->itens->where('excluido_financeiramente', false)->sortBy('id')->map(fn ($l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->values()->all(), (int) $cobranca->total_centavos),
             ['rotulo' => 'Situação', 'valor' => $cobranca->status === 'fechada' ? 'a receber' : $cobranca->status],
         ];
     }

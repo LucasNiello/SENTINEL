@@ -88,6 +88,115 @@ class CobrancaService
         });
     }
 
+    /** Estado financeiro; inclui linhas excluídas para manter o histórico de consumo e detectar cards antigos. */
+    public function estadoFinanceiro(Cobranca $cobranca): array
+    {
+        return ['status' => $cobranca->status, 'total_centavos' => $cobranca->total_centavos,
+            'itens' => $cobranca->itens()->orderBy('id')->get()->map(fn ($l) => $l->only([
+                'id', 'catalogo_item_id', 'prontuario_item_id', 'quantidade', 'preco_unitario_centavos',
+                'subtotal_centavos', 'baixou_estoque', 'excluido_financeiramente',
+            ]))->all()];
+    }
+
+    public function editor(int $id, int $tenantId): array
+    {
+        $cobranca = Cobranca::where('tenant_id', $tenantId)->findOrFail($id);
+        if (! in_array($cobranca->status, ['aberta', 'fechada'], true)) {
+            throw new RegraDeNegocioException('Só cobranças abertas ou a receber podem ser editadas.');
+        }
+
+        return ['versao' => hash('sha256', json_encode($this->estadoFinanceiro($cobranca))),
+            'linhas' => $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id')->get()
+                ->map(fn ($l) => ['item_id' => $l->id, 'descricao' => $l->descricao, 'quantidade' => $l->quantidade,
+                    'clinico' => $l->prontuario_item_id !== null, 'remover' => false, 'motivo' => ''])->all(),
+            'catalogo' => CatalogoItem::where('tenant_id', $tenantId)->where('setor', $cobranca->setor)
+                ->where('exige_receita', false)->orderBy('nome_comercial')->get(['id', 'nome_comercial'])->toArray()];
+    }
+
+    public function editarItens(int $id, array $dados, int $tenantId): Cobranca
+    {
+        $dados = \Illuminate\Support\Facades\Validator::make(
+            [...$dados, 'id' => $id, 'tenant_id' => $tenantId],
+            (new \App\Http\Requests\EditarCobrancaRequest)->rules(),
+        )->validate();
+
+        return DB::transaction(function () use ($id, $dados, $tenantId) {
+            $cobranca = Cobranca::where('tenant_id', $tenantId)->lockForUpdate()->findOrFail($id);
+            if (! in_array($cobranca->status, ['aberta', 'fechada'], true)) {
+                throw new RegraDeNegocioException('Só cobranças abertas ou a receber podem ser editadas.');
+            }
+            $linhas = $cobranca->itens()->orderBy('catalogo_item_id')->orderBy('id')->lockForUpdate()->get();
+            // Calcular a versão com as linhas da leitura travada (não com um snapshot antigo do InnoDB).
+            $antes = ['status' => $cobranca->status, 'total_centavos' => $cobranca->total_centavos,
+                'itens' => $linhas->sortBy('id')->map(fn ($l) => $l->only(['id', 'catalogo_item_id', 'prontuario_item_id',
+                    'quantidade', 'preco_unitario_centavos', 'subtotal_centavos', 'baixou_estoque', 'excluido_financeiramente']))->values()->all()];
+            if (! hash_equals(hash('sha256', json_encode($antes)), (string) ($dados['versao'] ?? ''))) {
+                throw new RegraDeNegocioException('A cobrança mudou. Abra novamente o editor antes de confirmar.');
+            }
+            $alteracoes = collect($dados['linhas'] ?? [])->keyBy('item_id');
+            if ($alteracoes->count() !== count($dados['linhas'] ?? [])) {
+                throw new RegraDeNegocioException('Há itens repetidos na edição.');
+            }
+            foreach ($alteracoes as $itemId => $alteracao) {
+                $linha = $linhas->firstWhere('id', $itemId);
+                if ($linha === null || $linha->excluido_financeiramente) {
+                    throw new RegraDeNegocioException('Item não pertence à cobrança ativa.');
+                }
+            }
+            // Mesma ordem do estoque na venda, inclusive quando a edição mistura remoções e inclusões.
+            $catalogoIds = $linhas->pluck('catalogo_item_id')->merge(collect($dados['novos'])->pluck('catalogo_item_id'))->unique()->sort()->values();
+            CatalogoItem::withTrashed()->where('tenant_id', $tenantId)->whereIn('id', $catalogoIds)->orderBy('id')->lockForUpdate()->get();
+            foreach ($linhas as $linha) {
+                $d = $alteracoes->get($linha->id);
+                if ($d === null) {
+                    continue;
+                }
+                $quantidade = $this->quantidadeValida((int) $d['quantidade']);
+                if ($linha->prontuario_item_id !== null && $quantidade !== $linha->quantidade) {
+                    throw new RegraDeNegocioException('A quantidade clínica consumida não pode ser alterada.');
+                }
+                if ($d['remover']) {
+                    $motivo = trim((string) ($d['motivo'] ?? ''));
+                    if ($motivo === '' || mb_strlen($motivo) > 200) {
+                        throw new RegraDeNegocioException('Remover um item exige motivo de até 200 caracteres.');
+                    }
+                    if ($linha->prontuario_item_id === null && $linha->baixou_estoque) {
+                        $this->catalogo->devolverEstoque($linha->catalogo_item_id, $linha->quantidade, $tenantId);
+                    }
+                    // Nunca apagar: o vínculo e a prova de consumo clínico continuam disponíveis para recobrança.
+                    $linha->forceFill(['excluido_financeiramente' => true])->save();
+                } elseif ($linha->prontuario_item_id === null) {
+                    $delta = $quantidade - $linha->quantidade;
+                    if ($linha->baixou_estoque && $delta !== 0) {
+                        if ($delta < 0) {
+                            $this->catalogo->devolverEstoque($linha->catalogo_item_id, -$delta, $tenantId);
+                        } else {
+                            CatalogoItem::withTrashed()->where('tenant_id', $tenantId)->whereKey($linha->catalogo_item_id)->decrement('estoque', $delta);
+                        }
+                    }
+                    $linha->update(['quantidade' => $quantidade, 'subtotal_centavos' => $quantidade * $linha->preco_unitario_centavos]);
+                }
+            }
+            foreach (collect($dados['novos'] ?? [])->sortBy('catalogo_item_id') as $novo) {
+                $item = CatalogoItem::where('tenant_id', $tenantId)->lockForUpdate()->find($novo['catalogo_item_id']);
+                if ($item === null) {
+                    throw new RegraDeNegocioException('Não encontrei o item do catálogo neste tenant.');
+                }
+                if ($item->setor !== $cobranca->setor || $item->exige_receita) {
+                    throw new RegraDeNegocioException('Item incompatível com o setor ou dependente de receita.');
+                }
+                $this->lancar($cobranca, $item, $this->quantidadeValida((int) $novo['quantidade']));
+            }
+            if (! $cobranca->itens()->where('excluido_financeiramente', false)->exists()) {
+                throw new RegraDeNegocioException('A cobrança não pode ficar sem itens. Cancele a cobrança.');
+            }
+            $this->recalcular($cobranca);
+            app(DetalhesAuditoria::class)->anotar('valores_anteriores', $antes);
+
+            return $cobranca;
+        });
+    }
+
     public function removerItem(int $cobrancaItemId, int $tenantId): Cobranca
     {
         return DB::transaction(function () use ($cobrancaItemId, $tenantId) {
@@ -97,6 +206,9 @@ class CobrancaService
             $cobranca = $this->aberta($linha->cobranca_id, $tenantId);
             // O que veio do prontuário foi aplicado no animal: tirar a linha devolveria ao estoque algo que já saiu
             // e o item deixaria de ser cobrado. Para refazer a conta, cancele a cobrança.
+            if ($linha->excluido_financeiramente) {
+                throw new RegraDeNegocioException('Este item já foi excluído financeiramente.');
+            }
             if ($linha->prontuario_item_id !== null) {
                 throw new RegraDeNegocioException("{$linha->descricao} veio do prontuário (já foi aplicado no atendimento) e não sai da cobrança: para refazê-la, cancele a cobrança.");
             }
@@ -169,7 +281,7 @@ class CobrancaService
             $cobranca = $this->cobrarAtendimento($agendamentoId, $tenantId);
 
             return [
-                'linhas' => $cobranca->itens()->orderBy('id')->get()
+                'linhas' => $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id')->get()
                     ->map(fn (CobrancaItem $l) => ['descricao' => $l->descricao, 'quantidade' => $l->quantidade, 'subtotal_centavos' => $l->subtotal_centavos])->all(),
                 'total_centavos' => $cobranca->total_centavos,
                 // Lido antes do rollBack: o saldo que a cobrança deixaria.
@@ -279,7 +391,7 @@ class CobrancaService
         return DB::transaction(function () use ($id, $tenantId) {
             $cobranca = $this->aberta($id, $tenantId);
 
-            if (! $cobranca->itens()->exists()) {
+            if (! $cobranca->itens()->where('excluido_financeiramente', false)->exists()) {
                 throw new RegraDeNegocioException('A cobrança não tem itens.');
             }
 
@@ -391,12 +503,12 @@ class CobrancaService
     {
         $cobranca = Cobranca::where('tenant_id', $tenantId)->where('status', 'paga')->findOrFail($cobrancaId);
 
-        return $this->linhasDoEstorno('cobranca_id', $cobranca->id, $tenantId, $cobranca->itens()->orderBy('id')->get());
+        return $this->linhasDoEstorno('cobranca_id', $cobranca->id, $tenantId, $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id')->get());
     }
 
     private function planoDaCobranca(Cobranca $cobranca, string $modo, array $itens, bool $travar): array
     {
-        $consulta = $cobranca->itens()->orderBy('id');
+        $consulta = $cobranca->itens()->where('excluido_financeiramente', false)->orderBy('id');
         $linhas = $this->linhasDoEstorno('cobranca_id', $cobranca->id, $cobranca->tenant_id, ($travar ? $consulta->lockForUpdate() : $consulta)->get(), $travar);
 
         return $this->planoDoEstornoDe($linhas, $this->escolherDoEstorno($linhas, $modo, $itens, 'cobrança'), (int) $cobranca->total_centavos);
@@ -409,7 +521,7 @@ class CobrancaService
      */
     private function devolverEstoqueDe(Cobranca $cobranca): void
     {
-        foreach ($cobranca->itens()->where('baixou_estoque', true)->whereNull('prontuario_item_id')->orderBy('catalogo_item_id')->lockForUpdate()->get() as $linha) {
+        foreach ($cobranca->itens()->where('excluido_financeiramente', false)->where('baixou_estoque', true)->whereNull('prontuario_item_id')->orderBy('catalogo_item_id')->lockForUpdate()->get() as $linha) {
             $this->catalogo->devolverEstoque($linha->catalogo_item_id, $linha->quantidade, $cobranca->tenant_id);
         }
     }
@@ -448,7 +560,7 @@ class CobrancaService
 
     private function recalcular(Cobranca $cobranca): Cobranca
     {
-        $cobranca->update(['total_centavos' => (int) $cobranca->itens()->sum('subtotal_centavos')]);
+        $cobranca->update(['total_centavos' => (int) $cobranca->itens()->where('excluido_financeiramente', false)->sum('subtotal_centavos')]);
 
         return $cobranca;
     }

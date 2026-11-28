@@ -172,10 +172,14 @@ class ClinicaTelasController extends Controller
             // A ação de cada linha sai do status; o /agente/formulario confere papel e tenant de novo.
             'acoes' => array_filter([
                 'a receber' => array_filter([
+                    $this->agente->podeExecutar('editar_cobranca') ? ['tool' => 'editar_cobranca', 'rotulo' => 'Editar'] : null,
                     $this->agente->podeExecutar('receber_cobranca') ? ['tool' => 'receber_cobranca', 'rotulo' => 'Receber'] : null,
                     $this->agente->podeExecutar('cancelar_cobranca') ? ['tool' => 'cancelar_cobranca', 'rotulo' => 'Cancelar'] : null,
                 ]),
-                'aberta' => array_filter([$this->agente->podeExecutar('cancelar_cobranca') ? ['tool' => 'cancelar_cobranca', 'rotulo' => 'Cancelar'] : null]),
+                'aberta' => array_filter([
+                    $this->agente->podeExecutar('editar_cobranca') ? ['tool' => 'editar_cobranca', 'rotulo' => 'Editar'] : null,
+                    $this->agente->podeExecutar('cancelar_cobranca') ? ['tool' => 'cancelar_cobranca', 'rotulo' => 'Cancelar'] : null,
+                ]),
                 'paga' => array_filter([$this->agente->podeExecutar('estornar_cobranca') ? ['tool' => 'estornar_cobranca', 'rotulo' => 'Estornar'] : null]),
             ]),
         ]);

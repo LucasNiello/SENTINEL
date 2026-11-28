@@ -5,6 +5,7 @@ import Reautenticacao from './Reautenticacao';
 import ItensLote from './ItensLote';
 import ListaDePets, { coletarPets, petsIniciais } from './ui/ListaDePets';
 import ItensEstorno, { coletarLinhas, quantidadesIniciais } from './ItensEstorno';
+import ItensCobranca, { edicaoInicial } from './ItensCobranca';
 import Aviso from './ui/Aviso';
 import Botao from './ui/Botao';
 import ResumoErros from './ui/ResumoErros';
@@ -21,6 +22,7 @@ export default function Confirmacao({ proposta, adicionar, adicionarTabela, trav
     const [token, setToken] = useState(null);
     const [valores, setValores] = useState(() => valoresIniciais(proposta.formulario?.campos ?? []));
     const [quantidades, setQuantidades] = useState(() => quantidadesIniciais(proposta.formulario?.itens_estorno));
+    const [edicaoCobranca, setEdicaoCobranca] = useState(() => edicaoInicial(proposta.formulario?.edicao_cobranca));
     const [pets, setPets] = useState(() => petsIniciais(proposta.formulario?.lista));
     const [edicaoPendente, setEdicaoPendente] = useState(false);
     const tokenEdicao = useRef(null);
@@ -75,6 +77,7 @@ export default function Confirmacao({ proposta, adicionar, adicionarTabela, trav
         const corpo = acao === 'revisar' ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) }
             : acao === 'confirmar' ? (passoUnico ? { proposta: proposta.proposta, valores: coletarValores(dados.formulario?.campos ?? [], atuais) } : { token }) : acao === 'editar' ? { token: token || tokenEdicao.current } : { proposta: proposta.proposta };
         if (['revisar', 'confirmar'].includes(acao) && corpo.valores && dados.formulario?.lista) corpo.valores.pets = coletarPets(pets);
+        if (['revisar', 'confirmar'].includes(acao) && corpo.valores && edicaoCobranca) Object.assign(corpo.valores, edicaoCobranca);
         if (acao === 'revisar' && dados.formulario?.itens_estorno) {
             corpo.valores.linhas = coletarLinhas(dados.formulario.itens_estorno, quantidades);
         }
@@ -260,6 +263,7 @@ export default function Confirmacao({ proposta, adicionar, adicionarTabela, trav
         <form ref={form} className="card-form" onSubmit={(evento) => { evento.preventDefault(); executar('revisar'); }}>
             <CamposProposta campos={formulario.ficha ? campos.filter((c) => !['profissional_id', 'inicio'].includes(c.nome)) : campos} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}
                 alterar={alterarCampo} />
+            {formulario.edicao_cobranca && edicaoCobranca && <ItensCobranca editor={proposta.formulario.edicao_cobranca} valor={edicaoCobranca} alterar={setEdicaoCobranca} bloqueado={bloqueado} />}
             {formulario.itens_estorno && <ItensEstorno itens={formulario.itens_estorno} quantidades={quantidades} bloqueado={bloqueado}
                 alterar={(id, quantidade) => { if (!bloqueado) { setQuantidades((anteriores) => ({ ...anteriores, [id]: quantidade })); setValores((anteriores) => ({ ...anteriores, modo: 'itens' })); } }} />}
             {formulario.ficha && <CalendarioAgendamento ficha={formulario.ficha} valores={valores} bloqueado={ocupado || !!token || edicaoPendente || encerrado}

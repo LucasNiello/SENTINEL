@@ -121,6 +121,7 @@ class ResultadosClinica
         $porItem = [];
         foreach ([[CobrancaItem::class, 'cobranca_itens', 'cobrancas', 'cobranca_id'], [VendaItem::class, 'venda_itens', 'vendas', 'venda_id']] as [$modelo, $tabela, $pai, $chave]) {
             $linhas = $modelo::query()->join($pai, "{$pai}.id", '=', "{$tabela}.{$chave}")
+                ->when($modelo === CobrancaItem::class, fn ($q) => $q->where("{$tabela}.excluido_financeiramente", false))
                 ->where("{$tabela}.tenant_id", $tenantId)->where("{$pai}.tenant_id", $tenantId)
                 ->whereNotNull("{$pai}.pago_em")->whereBetween("{$pai}.pago_em", [$inicio, $fim])
                 ->groupBy("{$tabela}.descricao")
